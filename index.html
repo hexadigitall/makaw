@@ -1,0 +1,2935 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Makaw - Code Studio</title>
+  <link rel="icon" type="image/png" sizes="256x256" href="assets/makaw_logo_256.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/makaw_logo_32.png">
+  <link rel="icon" type="image/svg+xml" href="assets/makaw_logo.svg">
+  <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.js"></script>
+  <style>
+    :root {
+      --bg: #0B0F19;
+      --bg-2: #161B27;
+      --bg-3: #1E2538;
+      --bg-hover: #2A334A;
+      --text: #F9FAFB;
+      --text-2: #D1D5DB;
+      --text-3: #B0B8C5;
+      --border: #2A334A;
+      --accent: #22D3EE;
+      --accent-hover: #06B6D4;
+      --danger: #EF4444;
+      --success: #22C55E;
+      --toast-bg: #1E2538;
+      --radius: 6px;
+      --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+    .light {
+      --bg: #F3F4F6;
+      --bg-2: #FFFFFF;
+      --bg-3: #E5E7EB;
+      --bg-hover: #D1D5DB;
+      --text: #111827;
+      --text-2: #4B5563;
+      --text-3: #9CA3AF;
+      --border: #D1D5DB;
+      --accent: #0891B2;
+      --accent-hover: #0E7490;
+      --toast-bg: #FFFFFF;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--font-ui);
+      font-weight: 400;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
+    .toolbar {
+      background: var(--bg-2);
+      padding: 5px 10px;
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      align-items: center;
+      -webkit-app-region: drag;
+    }
+    .toolbar button, .toolbar select {
+      background: transparent;
+      border: none;
+      color: var(--text-2);
+      padding: 5px 10px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+      -webkit-app-region: no-drag;
+    }
+    .toolbar button:hover, .toolbar select:hover { background: var(--bg-3); color: var(--text); }
+    .toolbar-group { display: flex; align-items: center; gap: 4px; }
+    .toolbar-group.url-group { flex: 1; }
+    .toolbar-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; margin: 0 2px; }
+    .toolbar button:active { transform: scale(0.96); }
+    .toolbar input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-family: var(--font-ui);
+      outline: none;
+      transition: border-color 0.15s;
+      -webkit-app-region: no-drag;
+      min-height: 32px;
+    }
+    .toolbar input:focus { border-color: var(--accent); }
+    .nav-group { display: flex; gap: 1px; }
+    .nav-group button { padding: 5px 10px; font-size: 18px; line-height: 1; border-radius: 4px; background: transparent; color: var(--text-2); }
+    .nav-group button:hover { background: var(--bg-3); color: var(--text); }
+    #view-mode {
+      background: var(--accent) !important;
+      color: #fff !important;
+      font-weight: 600;
+      font-size: 12px !important;
+      padding: 5px 14px !important;
+    }
+    #view-mode:hover { background: var(--accent-hover) !important; }
+    #theme-toggle { font-size: 16px; line-height: 1; padding: 5px 10px; }
+    .toolbar-group.right { margin-left: auto; }
+    /* Menu bar */
+    .menubar {
+      display: flex;
+      align-items: center;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0 6px;
+      height: 30px;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+    .menu-group { display: flex; gap: 0; -webkit-app-region: no-drag; }
+    .menu-item {
+      position: relative;
+      padding: 3px 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      color: var(--text-2);
+      border-radius: 4px;
+      transition: background 0.1s, color 0.1s;
+      user-select: none;
+    }
+    .menu-item:hover { background: var(--bg-3); color: var(--text); }
+    .menu-item.open { background: var(--bg-3); color: var(--text); }
+    .menu-dropdown {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      z-index: 200;
+      min-width: 200px;
+      padding: 4px;
+    }
+    .menu-option {
+      padding: 6px 10px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 13px;
+      color: var(--text);
+      transition: background 0.1s;
+    }
+    .menu-option:hover { background: var(--bg-3); }
+    .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+    .menu-spacer { flex: 1; -webkit-app-region: drag; }
+    .brand-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      -webkit-app-region: no-drag;
+      padding: 0 6px;
+    }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .main-content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .sidebar {
+      width: 240px;
+      min-width: 200px;
+      background: var(--bg-2);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .tabs {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0;
+      flex-shrink: 0;
+      overflow-y: auto;
+    }
+    .tab {
+      padding: 6px 12px;
+      cursor: pointer;
+      border-left: 2px solid transparent;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: +0.04em;
+      color: var(--text-2);
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .tab:hover { color: var(--text); background: var(--bg-3); }
+    .tab.active { border-left-color: var(--accent); background: var(--bg-2); color: var(--text); }
+    .tab-content { flex: 1; overflow-y: auto; padding: 12px; min-height: 0; }
+    .editor-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .editor-tabs {
+      background: var(--bg);
+      display: flex;
+      padding: 4px 8px;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .editor-tab {
+      background: transparent;
+      padding: 4px 10px;
+      border-radius: 4px 4px 0 0;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--text-2);
+      transition: background 0.15s, color 0.15s;
+    }
+    .editor-tab.active { background: var(--bg-2); color: var(--text); }
+    .editor-area { flex: 1; display: flex; min-height: 0; }
+    #monaco-container { min-width: 0; }
+    .preview-pane { border-left: 1px solid var(--border); min-width: 0; display: flex; flex-direction: column; }
+    .splitter {
+      width: 4px;
+      background: transparent;
+      cursor: col-resize;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 10;
+      transition: background 0.2s;
+    }
+    .splitter:hover, .splitter.active { background: var(--accent); }
+    .splitter[data-side="sidebar"] { cursor: col-resize; }
+    .splitter[data-side="terminal"] { width: auto; height: 4px; cursor: row-resize; }
+    .preview-pane webview { flex: 1; height: auto; }
+    webview { width: 100%; height: 100%; }
+    .main.browser .sidebar { display: none; }
+    .main.browser .editor-pane { display: none; }
+    .main.browser .editor-tabs { display: none; }
+    body.browser-mode #language-select { display: none; }
+    .main.browser .browser-pane { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+    .browser-pane { display: none; }
+    #incognito-webview { display: none; }
+    .browser-pane.incognito #browser-webview { display: none; }
+    .browser-pane.incognito #incognito-webview { display: flex; }
+    .sidebar-collapsed .sidebar { display: none; }
+    .sidebar-collapsed .splitter[data-side="sidebar"] { display: none; }
+    .sidebar-collapsed .editor-pane { width: 100%; border-left: none; }
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      -webkit-app-region: drag;
+      background: var(--bg);
+    }
+    .sidebar-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: +0.04em; color: var(--text-2); }
+    .brand { color: var(--accent); font-weight: 700; letter-spacing: 0.05em; }
+    .brand-sub { color: var(--text-3); font-weight: 400; }
+    .sidebar-header button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-2);
+      font-size: 16px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      -webkit-app-region: no-drag;
+    }
+    .sidebar-header button:hover { background: var(--bg-3); color: var(--text); }
+    .preview-collapsed .preview-pane { display: none; }
+    .preview-collapsed .splitter[data-side="preview"] { display: none; }
+    .preview-collapsed #monaco-container { width: 100%; }
+    .editor-collapsed #monaco-container { display: none; }
+    .editor-collapsed .preview-pane { width: 100%; border-left: none; }
+    .editor-collapsed .splitter[data-side="preview"] { display: none; }
+    .panel-toggles {
+      display: flex;
+      gap: 2px;
+      margin-left: auto;
+    }
+    .panel-toggles button {
+      background: transparent;
+      border: none;
+      color: var(--text-2);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .panel-toggles button:hover { background: var(--bg-3); color: var(--text); }
+    .browser-tabs {
+      display: flex;
+      background: var(--bg);
+      overflow-x: auto;
+      gap: 0;
+      flex-shrink: 0;
+      height: 34px;
+      border-bottom: 1px solid var(--border);
+    }
+    .browser-tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 14px;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      cursor: pointer;
+      font-size: 13px;
+      white-space: nowrap;
+      min-width: 0;
+      color: var(--text-2);
+      flex-shrink: 1;
+      transition: background 0.15s, color 0.15s;
+    }
+    .browser-tab.active { background: var(--bg-2); color: var(--text); }
+    .browser-tab.incognito { color: #a78bfa; }
+    .browser-tab.incognito.active { color: #c4b5fd; background: var(--bg-2); }
+    .browser-tab .tab-incognito { font-size: 12px; margin-right: 2px; }
+    .browser-tab .tab-title { overflow: hidden; text-overflow: ellipsis; }
+    .browser-tab .tab-close {
+      font-size: 16px;
+      line-height: 1;
+      padding: 1px 6px;
+      border-radius: 3px;
+      cursor: pointer;
+      color: var(--text-2);
+      flex-shrink: 0;
+      transition: color 0.15s, background 0.15s;
+    }
+    .browser-tab .tab-close:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
+    .browser-tab:hover { background: var(--bg-2); }
+    #add-tab {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      color: var(--text-2);
+      font-size: 18px;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+    }
+    #add-tab:hover { color: var(--text); background: var(--bg-3); }
+    #add-incognito-tab {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      color: #a78bfa;
+      font-size: 14px;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+    }
+    #add-incognito-tab:hover { color: #c4b5fd; background: var(--bg-3); }
+    #download-float {
+      position: fixed;
+      bottom: 70px;
+      right: 24px;
+      z-index: 9998;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s, background 0.15s;
+    }
+    #download-float:hover { background: var(--accent-hover); transform: scale(1.1); }
+    #download-float .badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background: var(--danger);
+      color: #fff;
+      font-size: 10px;
+      min-width: 16px;
+      height: 16px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 4px;
+    }
+    /* ─── Content Blocker ──────────────────────────────────────────────── */
+    .blocker-section { margin-bottom: 16px; }
+    .blocker-section h3 { font-size: 12px; font-weight: 600; color: var(--text-2); margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+    .blocker-toggle { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .blocker-toggle label { font-size: 13px; cursor: pointer; flex: 1; }
+    .blocker-toggle .desc { font-size: 11px; color: var(--text-3); }
+    .blocker-switch { position: relative; width: 40px; height: 20px; flex-shrink: 0; margin-left: 12px; }
+    .blocker-switch input { opacity: 0; width: 0; height: 0; }
+    .blocker-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #475569; border-radius: 10px; transition: 0.3s; }
+    .blocker-slider::before { content: ''; position: absolute; height: 16px; width: 16px; left: 2px; bottom: 2px; background: #fff; border-radius: 50%; transition: 0.3s; }
+    .blocker-switch input:checked + .blocker-slider { background: var(--accent); }
+    .blocker-switch input:checked + .blocker-slider::before { transform: translateX(20px); }
+    .blocker-stats { font-size: 12px; color: var(--text-3); padding: 4px 0; }
+    .blocker-allowed-list { font-size: 12px; }
+    .blocker-allowed-list .site-tag { display: inline-block; background: var(--bg-3); padding: 2px 8px; border-radius: 10px; margin: 2px; font-size: 11px; }
+    .blocker-allowed-list .site-tag button { background: none; border: none; color: #ef4444; cursor: pointer; margin-left: 4px; font-size: 12px; padding: 0; }
+    .blocker-rule-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: var(--bg-2); border-radius: var(--radius); margin-bottom: 4px; font-size: 12px; border: 1px solid var(--border); }
+    .blocker-rule-item .rule-pattern { font-family: var(--font-mono); font-size: 11px; color: var(--accent); flex: 1; word-break: break-all; }
+    .blocker-rule-item .rule-action { font-size: 10px; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; margin: 0 8px; }
+    .blocker-rule-item .rule-action.allow { background: #065f46; color: #6ee7b7; }
+    .blocker-rule-item .rule-action.block { background: #7f1d1d; color: #fca5a5; }
+    .blocker-rule-item button { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 14px; padding: 0 4px; }
+    /* ─── Enhanced Downloads ────────────────────────────────────────────── */
+    .download-item { background: var(--bg-2); padding: 10px 12px; margin-bottom: 6px; border-radius: var(--radius); font-size: 13px; border: 1px solid var(--border); transition: border-color 0.15s; }
+    .download-item:hover { border-color: var(--accent); }
+    .download-item .d-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+    .download-item .d-filename { font-weight: 600; font-size: 12px; word-break: break-all; flex: 1; }
+    .download-item .d-status { font-size: 10px; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; margin-left: 8px; }
+    .download-item .d-status.queued { background: #1e3a5f; color: #93c5fd; }
+    .download-item .d-status.downloading { background: #1e3a5f; color: #93c5fd; }
+    .download-item .d-status.completed { background: #065f46; color: #6ee7b7; }
+    .download-item .d-status.failed { background: #7f1d1d; color: #fca5a5; }
+    .download-item .d-status.paused { background: #713f12; color: #fcd34d; }
+    .download-item .d-status.cancelled { background: #1f2937; color: #9ca3af; }
+    .download-bar { width: 100%; height: 4px; background: var(--bg); border-radius: 2px; margin: 6px 0; overflow: hidden; }
+    .download-bar .d-progress { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; }
+    .download-item .d-info { display: flex; gap: 12px; font-size: 11px; color: var(--text-3); margin-top: 2px; }
+    .download-item .d-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+    .download-item .d-actions button { padding: 2px 6px; font-size: 11px; border-radius: 3px; border: 1px solid var(--border); background: transparent; color: var(--text-2); cursor: pointer; transition: background 0.15s, color 0.15s; }
+    .download-item .d-actions button:hover { background: var(--bg-3); color: var(--text); }
+    .download-item .d-actions button.danger { color: #fca5a5; border-color: #7f1d1d; }
+    .download-item .d-actions button.danger:hover { background: #7f1d1d; color: #fff; }
+    .download-item .d-actions button.primary { color: #93c5fd; border-color: #1e3a5f; }
+    .download-item .d-actions button.primary:hover { background: #1e3a5f; color: #fff; }
+    .download-toolbar { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+    .download-toolbar button { padding: 4px 10px; font-size: 11px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text-2); cursor: pointer; transition: background 0.15s; }
+    .download-toolbar button:hover { background: var(--bg-3); color: var(--text); }
+    /* ─── Video Player ──────────────────────────────────────────────────── */
+    #video-player-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 99999; display: none; flex-direction: column; }
+    #video-player-overlay.show { display: flex; }
+    #video-player-overlay video { flex: 1; width: 100%; object-fit: contain; }
+    .vp-controls { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: #111; flex-shrink: 0; }
+    .vp-controls button { background: none; border: none; color: #fff; cursor: pointer; font-size: 16px; padding: 4px 8px; border-radius: 4px; }
+    .vp-controls button:hover { background: #333; }
+    .vp-controls .vp-title { flex: 1; font-size: 13px; color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vp-controls input[type="range"] { flex: 1; max-width: 300px; accent-color: var(--accent); }
+    .vp-controls .vp-time { font-size: 12px; color: #999; font-family: var(--font-mono); }
+    /* ─── Update Dialog ─────────────────────────────────────────────────── */
+    #update-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; z-index: 100000; min-width: 320px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: none; flex-direction: column; gap: 12px; }
+    #update-dialog.show { display: flex; }
+    #update-dialog h2 { margin: 0; font-size: 16px; }
+    #update-dialog p { margin: 0; font-size: 13px; color: var(--text-2); }
+    #update-dialog .update-progress { width: 100%; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+    #update-dialog .update-progress .bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+    #update-dialog .update-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    #update-dialog .update-actions button { padding: 6px 16px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; font-size: 13px; }
+    #update-dialog .update-actions .primary { background: var(--accent); color: #fff; border: none; }
+    #update-dialog .update-actions .primary:hover { background: var(--accent-hover); }
+    #update-dialog .update-actions .secondary { background: transparent; color: var(--text-2); }
+    #update-dialog .update-actions .secondary:hover { background: var(--bg-3); }
+    /* ─── Popup Notification ────────────────────────────────────────────── */
+    .popup-notification { position: fixed; bottom: 70px; right: 80px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 12px; z-index: 9999; display: none; align-items: center; gap: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.3); max-width: 300px; }
+    .popup-notification.show { display: flex; }
+    .popup-notification .popup-url { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .popup-notification button { padding: 2px 8px; font-size: 11px; border-radius: 3px; border: 1px solid var(--border); background: transparent; color: var(--text-2); cursor: pointer; flex-shrink: 0; }
+    .popup-notification button:hover { background: var(--bg-3); }
+    .item {
+      background: var(--bg-2);
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      border: 1px solid var(--border);
+      transition: border-color 0.15s;
+    }
+    .item:hover { border-color: var(--accent); }
+    .item-title { font-weight: 600; margin-bottom: 4px; display: flex; justify-content: space-between; }
+    .item-url { color: var(--accent); word-break: break-all; font-size: 11px; margin: 4px 0; }
+    .item-actions { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+    .item-actions button {
+      padding: 2px 6px;
+      font-size: 11px;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .item-actions button:hover { background: var(--bg-3); color: var(--text); }
+    .snippet-code {
+      background: var(--bg);
+      padding: 8px 10px;
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      margin: 4px 0;
+      white-space: pre-wrap;
+      border-left: 3px solid var(--accent);
+    }
+    .project-item { cursor: pointer; transition: background 0.15s; border-radius: var(--radius); }
+    .project-item:hover { background: var(--bg-3); }
+    .input-dark {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: var(--radius);
+      margin-bottom: 6px;
+      font-family: var(--font-ui);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input-dark:focus { border-color: var(--accent); }
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--toast-bg);
+      color: var(--text);
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      z-index: 9999;
+      border: 1px solid var(--border);
+      opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none;
+      transform: translateY(12px);
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error { border-left: 3px solid var(--danger); }
+    .empty-state { text-align: center; color: var(--text-3); padding: 40px 20px; font-size: 13px; }
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #git-output {
+      background: var(--bg);
+      padding: 8px;
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+    }
+    .file-tree-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      font-size: 13px;
+      cursor: pointer;
+      border-radius: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      user-select: none;
+      transition: background 0.1s;
+    }
+    .file-tree-item:hover { background: var(--bg-3); }
+    .file-tree-item.active { background: var(--accent); color: #fff; }
+    .file-tree-item .icon { flex-shrink: 0; width: 16px; text-align: center; }
+    .file-tree-item .chevron { width: 14px; flex-shrink: 0; text-align: center; cursor: pointer; transition: transform 0.15s; }
+    .file-tree-item .chevron.open { transform: rotate(90deg); }
+    .file-tree-children { margin-left: 20px; }
+    .open-file-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      border-right: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-2);
+      transition: background 0.15s, color 0.15s;
+    }
+    .open-file-tab:hover { background: var(--bg-3); }
+    .open-file-tab.active { background: var(--bg-2); color: var(--text); border-bottom: 2px solid var(--accent); }
+    .open-file-tab .close {
+      font-size: 14px;
+      padding: 0 4px;
+      border-radius: 3px;
+      opacity: 0.5;
+      cursor: pointer;
+    }
+    .open-file-tab .close:hover { opacity: 1; background: var(--bg-3); }
+    /* Bottom terminal panel */
+    .bottom-bar {
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      display: none;
+      flex-direction: column;
+      flex-shrink: 0;
+      height: 250px;
+      min-height: 0;
+    }
+    .terminal-visible .bottom-bar { display: flex; }
+    .bottom-bar-header {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: +0.04em;
+      color: var(--text-2);
+    }
+    .bottom-bar-body {
+      flex: 1;
+      background: #0f172a;
+      min-height: 0;
+    }
+    .bottom-bar-body .xterm { height: 100%; }
+    .bottom-bar-body .xterm-viewport { height: 100%; }
+  </style>
+</head>
+<body class="browser-mode">
+  <div class="menubar">
+    <div class="menu-group">
+      <div class="menu-item" data-menu="file">File ▾
+        <div class="menu-dropdown" id="menu-file">
+          <div class="menu-option" id="menu-new-file">+ New File</div>
+          <div class="menu-option" id="menu-new-folder">+ New Folder</div>
+          <div class="menu-sep"></div>
+          <div class="menu-option" id="menu-open-file">📂 Open File</div>
+          <div class="menu-option" id="menu-open-folder">📂 Open Folder</div>
+          <div class="menu-sep"></div>
+          <div class="menu-option" id="menu-save">💾 Save</div>
+          <div class="menu-option" id="menu-export">📦 Export</div>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="edit">Edit ▾
+        <div class="menu-dropdown" id="menu-edit">
+          <div class="menu-option" id="menu-format">✨ Format Code</div>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="view">View ▾
+        <div class="menu-dropdown" id="menu-view">
+          <div class="menu-option" id="menu-toggle-sidebar">⊞ Toggle Sidebar</div>
+          <div class="menu-option" id="menu-toggle-editor">⊟ Toggle Editor</div>
+          <div class="menu-option" id="menu-toggle-preview">⊠ Toggle Preview</div>
+          <div class="menu-sep"></div>
+          <div class="menu-option" id="menu-view-mode">◈ Browser / Code Mode</div>
+          <div class="menu-option" id="menu-theme">☾ Switch Theme</div>
+          <div class="menu-sep"></div>
+          <div class="menu-option" id="menu-devtools">⚙ Developer Tools</div>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="go">Go ▾
+        <div class="menu-dropdown" id="menu-go">
+          <div class="menu-option" id="menu-go-back">◀ Back</div>
+          <div class="menu-option" id="menu-go-forward">▶ Forward</div>
+          <div class="menu-option" id="menu-go-reload">⟳ Reload</div>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="help">Help ▾
+        <div class="menu-dropdown" id="menu-help">
+          <div class="menu-option" id="menu-about">ℹ About Makaw</div>
+        </div>
+      </div>
+    </div>
+    <div class="menu-spacer"></div>
+    <span class="brand-label">Makaw</span>
+  </div>
+  <div class="toolbar">
+    <span class="toolbar-group url-group">
+      <span class="nav-group">
+        <button id="nav-back" title="Back">◀</button>
+        <button id="nav-forward" title="Forward">▶</button>
+        <button id="nav-reload" title="Reload">⟳</button>
+      </span>
+      <input type="text" id="url" placeholder="Search or enter URL">
+    </span>
+    <span class="toolbar-group right">
+      <select id="language-select">
+        <option value="html">HTML</option>
+        <option value="javascript">JavaScript</option>
+        <option value="css">CSS</option>
+        <option value="typescript">TypeScript</option>
+        <option value="json">JSON</option>
+        <option value="python">Python</option>
+      </select>
+      <button id="devtools-btn" title="DevTools">⚙</button>
+      <button id="theme-toggle" title="Switch Theme">☾</button>
+      <button id="view-mode" title="Toggle Browser/Code Mode">Code</button>
+    </span>
+  </div>
+  
+  <div class="main browser">
+    <div class="main-content">
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title"><span class="brand">Makaw</span> <span class="brand-sub">Studio</span></span>
+        <button id="close-sidebar" title="Close Sidebar (Ctrl+B)">✕</button>
+      </div>
+      <div class="tabs">
+        <div class="tab" data-tab="files">Files</div>
+        <div class="tab active" data-tab="studio">Code Studio</div>
+        <div class="tab" data-tab="snippets">Snippets</div>
+        <div class="tab" data-tab="projects">Projects</div>
+        <div class="tab" data-tab="terminal">Terminal</div>
+        <div class="tab" data-tab="sniffer">Sniffer</div>
+        <div class="tab" data-tab="git">Git</div>
+        <div class="tab" data-tab="downloads">Downloads</div>
+        <div class="tab" data-tab="blocker">Blocker</div>
+        <div class="tab" data-tab="vplayer">VPlayer</div>
+      </div>
+      <div class="tab-content" id="git-tab" style="display:none;">
+  <input id="git-project-path" class="input-dark" placeholder="Project folder path">
+
+  <div style="display:flex;gap:6px;margin-bottom:8px;">
+    <button id="git-init" style="flex:1;">Init</button>
+    <button id="git-status" style="flex:1;">Status</button>
+    <button id="git-log-btn" style="flex:1;">Log</button>
+    <button id="git-stash" style="flex:1;">Stash</button>
+  </div>
+
+  <div style="background:#0f172a;padding:8px;border-radius:4px;margin-bottom:8px;">
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Branch</div>
+    <div style="display:flex;gap:6px;">
+      <select id="git-branch-select" style="flex:1;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:4px;border-radius:4px;font-size:12px;"></select>
+      <button id="git-checkout" style="padding:4px 8px;">Switch</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <input id="git-new-branch" class="input-dark" placeholder="new-branch" style="margin:0;flex:1;">
+      <button id="git-create-branch" style="padding:4px 8px;">Create</button>
+      <button id="git-merge-btn" style="padding:4px 8px;">Merge</button>
+    </div>
+  </div>
+
+  <input id="git-commit-msg" class="input-dark" placeholder="Commit message">
+  <div style="display:flex;gap:6px;margin-bottom:8px;">
+    <button id="git-commit" style="flex:1;">Add & Commit</button>
+    <button id="git-diff-btn" style="flex:1;">Diff</button>
+    <button id="git-stash-pop" style="flex:1;">Stash Pop</button>
+  </div>
+
+  <input id="git-remote-url" class="input-dark" placeholder="Remote URL">
+  <div style="display:flex;gap:6px;margin-bottom:8px;">
+    <button id="git-add-remote" style="flex:1;">Add Remote</button>
+    <button id="git-push" style="flex:1;">Push</button>
+    <button id="git-pull" style="flex:1;">Pull</button>
+    <button id="git-fetch" style="flex:1;">Fetch</button>
+  </div>
+
+  <div style="display:flex;gap:6px;margin-bottom:8px;">
+    <input id="git-tag-name" class="input-dark" placeholder="v1.0.0" style="margin:0;flex:1;">
+    <button id="git-tag-btn" style="padding:4px 8px;">Tag</button>
+    <button id="git-reset-hard" style="padding:4px 8px;background:#dc2626;">Reset Hard</button>
+  </div>
+
+  <div id="git-conflicts" style="display:none;background:#7f1d1d;padding:8px;border-radius:4px;margin-bottom:8px;">
+    <div style="font-size:12px;font-weight:600;margin-bottom:6px;">Merge Conflicts</div>
+    <div id="git-conflict-list"></div>
+  </div>
+
+  <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Output / Diff / Conflicts</div>
+  <div id="git-output" style="background:#0f172a;padding:8px;border-radius:4px;font-family:monospace;font-size:11px;white-space:pre-wrap;max-height:400px;overflow-y:auto;border:1px solid #334155;"></div>
+</div>
+      <div class="tab-content" id="files-tab" style="display:none;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;gap:4px;margin-bottom:6px;flex-shrink:0;">
+          <button id="open-file-from-sidebar" style="flex:1;padding:4px;font-size:11px;">Open File</button>
+          <button id="open-folder-from-sidebar" style="flex:1;padding:4px;font-size:11px;">Open Folder</button>
+          <button id="refresh-folder" style="padding:4px 6px;font-size:11px;">↻</button>
+        </div>
+        <div id="wsl-shortcuts" style="display:flex;gap:4px;margin-bottom:6px;flex-shrink:0;">
+          <button id="open-wsl-home" style="flex:1;padding:4px;font-size:11px;">🏠 WSL Home</button>
+          <button id="open-windows-root" style="flex:1;padding:4px;font-size:11px;">🪟 Windows C:\</button>
+        </div>
+        <div id="folder-path" style="font-size:10px;color:var(--text-3);margin-bottom:4px;word-break:break-all;flex-shrink:0;"></div>
+        <div id="file-tree" style="overflow-y:auto;flex:1;min-height:0;"></div>
+      </div>
+      <div class="tab-content" id="studio-tab">
+        <input id="project-name-input" class="input-dark" placeholder="Project name">
+        <button id="run-preview" style="width:100%;margin-bottom:8px;">Run Preview →</button>
+        <div style="font-size:11px;color:#94a3b8;line-height:1.6;">
+          <strong>Makaw Code Studio</strong><br>
+          Monaco Editor with IntelliSense<br><br>
+          <strong>Shortcuts:</strong><br>
+          Ctrl/Cmd + S: Save<br>
+          Ctrl/Cmd + R: Run<br>
+          Alt + Shift + F: Format<br>
+          Ctrl/Cmd + /: Comment
+        </div>
+      </div>
+      
+      <div class="tab-content" id="snippets-tab" style="display:none;">
+        <input id="snippet-search" class="input-dark" placeholder="Search snippets...">
+        <div id="snippets-list"></div>
+      </div>
+      
+      <div class="tab-content" id="projects-tab" style="display:none;">
+        <div id="projects-list"></div>
+      </div>
+      
+      <div class="tab-content" id="sniffer-tab" style="display:none;">
+        <div id="media-log"></div>
+      </div>
+      
+      <div class="tab-content" id="downloads-tab" style="display:none;">
+        <div class="download-toolbar">
+          <button onclick="window.makaw.clearDownloads()">Clear Completed</button>
+          <button onclick="window.makaw.retryAllFailed()">Retry Failed</button>
+          <button onclick="loadDownloads()">Refresh</button>
+        </div>
+        <div id="downloads-list"></div>
+      </div>
+      <div class="tab-content" id="blocker-tab" style="display:none;">
+        <div id="blocker-content"></div>
+      </div>
+      <div class="tab-content" id="vplayer-tab" style="display:none;">
+        <div id="vplayer-content" style="display:flex;flex-direction:column;height:100%;">
+          <div id="vplayer-list" style="flex:1;overflow-y:auto;"></div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="splitter" data-side="sidebar" title="Drag to resize sidebar"></div>
+    
+    <div class="editor-pane">
+      <div class="editor-tabs">
+        <div id="open-file-tabs" style="display:flex;overflow-x:auto;flex:1;"></div>
+        <div class="panel-toggles">
+          <button id="toggle-editor" title="Toggle Editor Panel">☰</button>
+          <button id="toggle-preview" title="Toggle Preview Pane">◀ ▶</button>
+          <button id="toggle-terminal" title="Toggle Terminal (Ctrl+`)">⌨</button>
+        </div>
+        <select id="theme-select" style="margin-left:2px;background:var(--bg-3);border:none;color:var(--text);padding:4px;border-radius:4px;font-size:11px;">
+          <option value="vs-dark">Dark</option>
+          <option value="vs">Light</option>
+          <option value="hc-black">High Contrast</option>
+        </select>
+      </div>
+      <div class="editor-area">
+        <div id="monaco-container" style="flex:1;min-width:50px;"></div>
+        <div class="splitter" data-side="preview" title="Drag to resize preview"></div>
+        <div class="preview-pane" style="flex:1;min-width:50px;">
+          <webview id="preview" src="about:blank" useragent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" allowpopups></webview>
+        </div>
+      </div>
+      <div class="splitter" data-side="terminal" title="Drag to resize terminal"></div>
+      <div class="bottom-bar" id="terminal-panel">
+        <div class="bottom-bar-header">
+          <span>TERMINAL</span>
+          <span style="flex:1;"></span>
+          <button id="close-terminal" style="background:none;border:none;color:var(--text-2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1;" title="Close Terminal (Ctrl+`)">✕</button>
+        </div>
+        <div class="bottom-bar-body" id="xterm-container"></div>
+      </div>
+    </div>
+    <div class="browser-pane">
+      <div class="browser-tabs" id="browser-tabs"></div>
+      <webview id="browser-webview" src="about:blank" useragent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" allowpopups></webview>
+      <webview id="incognito-webview" src="about:blank" useragent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" allowpopups partition="incognito"></webview>
+    </div>
+    <button id="download-float" title="Download media">⬇</button>
+    <button id="update-btn" title="Check for updates" style="position:fixed;bottom:120px;right:24px;z-index:9998;width:44px;height:44px;border-radius:50%;background:var(--bg-3);color:var(--text-2);border:1px solid var(--border);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.4);transition:transform 0.15s,background 0.15s;">↻</button>
+    </div>
+  </div>
+
+  <!-- Video Player Overlay -->
+  <div id="video-player-overlay">
+    <video id="vp-video" controls autoplay></video>
+    <div class="vp-controls">
+      <span class="vp-title" id="vp-title"></span>
+      <span class="vp-time" id="vp-time">0:00 / 0:00</span>
+      <button id="vp-download" title="Download">⬇</button>
+      <button id="vp-close" title="Close">✕</button>
+    </div>
+  </div>
+
+  <!-- Update Dialog -->
+  <div id="update-dialog">
+    <h2 id="update-title">Check for Updates</h2>
+    <p id="update-message">Checking...</p>
+    <div class="update-progress" id="update-progress-wrap" style="display:none;">
+      <div class="bar" id="update-progress-bar" style="width:0%"></div>
+    </div>
+    <div class="update-actions">
+      <button class="secondary" id="update-close-btn">Close</button>
+      <button class="primary" id="update-install-btn" style="display:none;">Install & Restart</button>
+    </div>
+  </div>
+
+  <!-- Popup Notification -->
+  <div class="popup-notification" id="popup-notification">
+    <span>Popup blocked:</span>
+    <span class="popup-url" id="popup-url"></span>
+    <button id="popup-allow-btn">Allow</button>
+  </div>
+
+  <script>
+    let editor;
+    let currentProjectId = null;
+    
+    const BOILERPLATES = {
+      html: '<!DOCTYPE html>\\n<html>\\n<head>\\n  <title>Makaw</title>\\n</head>\\n<body>\\n  <h1>Hello Makaw</h1>\\n</body>\\n</html>',
+      javascript: '// Welcome to Makaw\\nconsole.log("Hello from Makaw");',
+      css: '/* Makaw Styles */\\nbody {\\n  background: #0f172a;\\n  color: #e2e8f0;\\n}\\n',
+      typescript: '// Makaw TypeScript\\nconst greeting: string = "Hello Makaw";\\nconsole.log(greeting);',
+      json: '{\\n  "name": "Makaw",\\n  "version": "1.0.0"\\n}',
+      python: '# Makaw Python\\nprint("Hello from Makaw")'
+    };
+
+    let monacoLoadFailed = false;
+    const monacoLoadTimeout = setTimeout(() => {
+      monacoLoadFailed = true;
+      showToast('Monaco editor failed to load — check internet connection', 'error');
+    }, 20000);
+
+    require.config({ 
+      paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }
+    });
+    
+    require(['vs/editor/editor.main'], () => {
+      clearTimeout(monacoLoadTimeout);
+      const lang = languageSelect.value;
+      const initialDark = themeState === 'dark' || (themeState === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      editor = monaco.editor.create(document.getElementById('monaco-container'), {
+        value: BOILERPLATES[lang] || BOILERPLATES.html,
+        language: lang,
+        theme: initialDark ? 'vs-dark' : 'vs',
+        automaticLayout: true,
+        minimap: { enabled: true },
+        fontSize: 14,
+        fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+        fontLigatures: true,
+        lineHeight: 22,
+        wordWrap: 'on',
+        formatOnPaste: true,
+        formatOnType: true,
+        suggestOnTriggerCharacters: true,
+        quickSuggestions: true
+      });
+    }, (err) => {
+      clearTimeout(monacoLoadTimeout);
+      monacoLoadFailed = true;
+      showToast('Monaco editor failed to load: ' + (err.message || 'unknown error'), 'error');
+    });
+    
+    document.getElementById('theme-select').onchange = (e) => {
+      if (monaco) monaco.editor.setTheme(e.target.value);
+      setTheme(e.target.value === 'vs-dark' ? 'dark' : 'light');
+    };
+    const languageSelect = document.getElementById('language-select');
+    const projectNameInput = document.getElementById('project-name-input');
+    const preview = document.getElementById('preview');
+    const browserWebview = document.getElementById('browser-webview');
+    const incognitoWebview = document.getElementById('incognito-webview');
+    function activeWebview() {
+      if (mainEl.classList.contains('browser')) {
+        const tab = tabs.find(t => t.id === activeTabId);
+        return tab && tab.incognito ? incognitoWebview : browserWebview;
+      }
+      return preview;
+    }
+    
+    function showToast(msg, type) {
+      let t = document.querySelector('.toast');
+      if (!t) {
+        t = document.createElement('div');
+        t.className = 'toast';
+        document.body.appendChild(t);
+      }
+      t.textContent = msg;
+      t.className = 'toast show' + (type === 'error' ? ' error' : type === 'success' ? ' success' : '');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function updateFileTab() {
+      const name = projectNameInput.value || 'untitled';
+      const ext = { html: 'html', javascript: 'js', css: 'css', typescript: 'ts', json: 'json', python: 'py' }[languageSelect.value];
+      document.getElementById('current-file-tab').textContent = `${name}.${ext}`;
+    }
+    
+    projectNameInput.oninput = updateFileTab;
+    
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.onclick = () => {
+        if (tab.dataset.tab === 'terminal') {
+          toggleTerminal();
+          return;
+        }
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+        tab.classList.add('active');
+        const content = document.getElementById(tab.dataset.tab + '-tab');
+        content.style.display = content.id === 'files-tab' ? 'flex' : 'block';
+        if (tab.dataset.tab === 'snippets') loadSnippets();
+        if (tab.dataset.tab === 'projects') loadProjects();
+        if (tab.dataset.tab === 'downloads') loadDownloads();
+        if (tab.dataset.tab === 'blocker') loadBlockerConfig();
+        if (tab.dataset.tab === 'vplayer') renderVideos();
+      };
+    });
+    
+    // Run preview
+    document.getElementById('run-preview').onclick = async () => {
+      if (!editor) { showToast('Editor not ready yet', 'error'); return; }
+      const code = editor.getValue();
+      let html = code;
+      if (languageSelect.value === 'javascript') {
+        html = `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><script type="module">${code}<\/script></body></html>`;
+      } else if (languageSelect.value === 'css') {
+        html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>${code}</style></head><body><h1>CSS Preview</h1></body></html>`;
+      }
+      const result = await window.makaw.injectHTML(html);
+      if (result.success) preview.src = result.data_uri;
+      else showToast('Preview failed', 'error');
+    };
+    
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        saveCurrentFile();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+        e.preventDefault();
+        document.getElementById('run-preview').click();
+      }
+    });
+    // Global copy: re-write to both CLIPBOARD and PRIMARY, plus WSL bridge
+    document.addEventListener('copy', (e) => {
+      const sel = window.getSelection().toString();
+      if (sel) {
+        if (window.makaw && window.makaw.wslClipboardCopy) {
+          window.makaw.wslClipboardCopy(sel);
+        }
+        if (window.makaw && window.makaw.clipboardCopy) {
+          window.makaw.clipboardCopy(sel);
+        }
+      }
+    }, true);
+    
+    // Snippets
+    async function loadSnippets() {
+      const snippets = await window.makaw.getSnippets(languageSelect.value);
+      const list = document.getElementById('snippets-list');
+      if (!snippets.length) { list.innerHTML = '<div class="empty-state">No snippets found</div>'; return; }
+      list.innerHTML = snippets.map(s => `
+        <div class="item">
+          <div class="item-title">${s.name} <span style="font-size:10px;color:#94a3b8;">${s.category}</span></div>
+          <div style="font-size:11px;color:#94a3b8;margin:4px 0;">${s.description}</div>
+          <div class="snippet-code">${s.code.substring(0,120)}...</div>
+          <div class="item-actions">
+            <button onclick="insertSnippet(${s.id})">Insert</button>
+          </div>
+        </div>
+      `).join('');
+      window.allSnippets = snippets;
+    }
+    
+    window.insertSnippet = (id) => {
+      const snippet = window.allSnippets.find(s => s.id === id);
+      if (snippet && editor) {
+        const selection = editor.getSelection();
+        editor.executeEdits('', [{ range: selection, text: snippet.code }]);
+        editor.focus();
+      }
+    };
+    
+    // Projects
+    async function loadProjects() {
+      const projects = await window.makaw.listProjects();
+      const list = document.getElementById('projects-list');
+      if (!projects.length) { list.innerHTML = '<div class="empty-state">No saved projects yet</div>'; return; }
+      list.innerHTML = projects.map(p => `
+        <div class="item project-item" onclick="loadProject(${p.id})">
+          <div class="item-title">${p.name} <span style="font-size:10px;color:#94a3b8;">${p.language}</span></div>
+          <div style="font-size:11px;color:#94a3b8;">Updated: ${new Date(p.updated_at).toLocaleDateString()}</div>
+        </div>
+      `).join('');
+    }
+    
+    window.loadProject = async (id) => {
+      const project = await window.makaw.loadProject(id);
+      if (project && editor) {
+        editor.setValue(project.content);
+        monaco.editor.setModelLanguage(editor.getModel(), project.language);
+        languageSelect.value = project.language;
+        projectNameInput.value = project.name;
+        currentProjectId = id;
+        document.querySelector('.tab[data-tab="studio"]').click();
+        updateFileTab();
+      }
+    };
+    
+        //Terminal
+    let term;
+    let fitAddon;
+
+    async function initTerminal() {
+      if (term) return;
+      try {
+        const FitAddonClass = FitAddon.FitAddon || FitAddon;
+        term = new Terminal({
+          cursorBlink: true,
+          theme: { background: '#0f172a', foreground: '#e2e8f0' },
+          fontSize: 12,
+          fontFamily: '"JetBrains Mono", "Fira Code", Menlo, Monaco, monospace'
+        });
+        fitAddon = new FitAddonClass();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('xterm-container'));
+        setTimeout(() => { try { fitAddon.fit(); } catch (_) {} }, 50);
+
+        // Ctrl+click to open URLs in terminal
+        term.element.addEventListener('click', (e) => {
+          if (!e.ctrlKey && !e.metaKey) return;
+          const rowsEl = term.element.querySelector('.xterm-rows');
+          if (!rowsEl) return;
+          const rect = rowsEl.getBoundingClientRect();
+          const cellW = rect.width / term.cols;
+          const cellH = rect.height / term.rows;
+          const col = Math.floor((e.clientX - rect.left) / cellW);
+          const row = Math.floor((e.clientY - rect.top) / cellH) + (term.buffer.active.baseY || 0);
+          const line = term.buffer.active.getLine(row);
+          if (!line) return;
+          const text = line.translateToString();
+          const re = /(https?:\/\/[^\s"'<>]+)|((?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(?:[\/?#][^\s"'<>]*)?)/gi;
+          let m;
+          while ((m = re.exec(text)) !== null) {
+            if (col >= m.index && col <= m.index + m[0].length) {
+              let url = m[0];
+              if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'http://' + url;
+              activeWebview().src = url;
+              showToast('Opened: ' + url, 'success');
+              break;
+            }
+          }
+        });
+        
+        term.onData(data => window.makaw.terminalWrite(data));
+        window.makaw.onTerminalData(data => term.write(data));
+        
+        // Clipboard for terminal (broken by Electron sandbox)
+        term.attachCustomKeyEventHandler((e) => {
+          const mod = e.ctrlKey || e.metaKey;
+          if (e.type === 'keydown' && mod && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+            const sel = term.getSelection();
+            if (sel) window.makaw.clipboardCopy(sel);
+            return false;
+          }
+          if (e.type === 'keydown' && mod && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+            const t = window.makaw.clipboardPaste();
+            if (t) term.paste(t);
+            return false;
+          }
+          return true;
+        });
+        
+        window.addEventListener('resize', () => {
+          try { fitAddon.fit(); window.makaw.terminalResize(term.cols, term.rows); } catch (_) {}
+        });
+        
+        await window.makaw.terminalCreate();
+      } catch (e) {
+        showToast('Terminal failed: ' + (e.message || 'unknown error'), 'error');
+        term = null;
+        fitAddon = null;
+      }
+    }
+
+
+    
+    // Sniffer
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    let pendingMedia = [];
+    const downloadFloat = document.getElementById('download-float');
+
+    function updateDownloadFloat() {
+      if (pendingMedia.length > 0) {
+        const badge = downloadFloat.querySelector('.badge') || (() => { const b = document.createElement('span'); b.className = 'badge'; downloadFloat.appendChild(b); return b; })();
+        badge.textContent = pendingMedia.length;
+        downloadFloat.style.display = 'flex';
+      } else {
+        downloadFloat.style.display = 'none';
+      }
+    }
+
+    downloadFloat.onclick = () => {
+      const item = pendingMedia.shift();
+      if (item) {
+        window.makaw.startDownload(item.url, item.type);
+        showToast('Downloading: ' + item.url.split('/').pop(), 'success');
+      }
+      updateDownloadFloat();
+    };
+
+    window.makaw.onMediaDetected((data) => {
+      const log = document.getElementById('media-log');
+      const item = document.createElement('div');
+      item.className = 'item';
+      item.innerHTML = `
+        <div class="item-title">${escapeHtml(data.type)}</div>
+        <div class="item-url">${escapeHtml(data.url)}</div>
+        <div class="item-actions">
+          <button class="download-btn">Download</button>
+        </div>`;
+      item.querySelector('.download-btn').onclick = () => window.makaw.startDownload(data.url, 'file');
+      log.prepend(item);
+      pendingMedia.push({ url: data.url, type: 'file' });
+      updateDownloadFloat();
+    });
+    
+    window.makaw.onManifestDetected((data) => {
+      const log = document.getElementById('media-log');
+      const item = document.createElement('div');
+      item.className = 'item';
+      item.innerHTML = `
+        <div class="item-title">${escapeHtml(data.type.toUpperCase())} Stream</div>
+        <div class="item-url">${escapeHtml(data.url)}</div>
+        <div class="item-actions">
+          <button class="download-btn">Auto-Grab with FFmpeg</button>
+        </div>`;
+      item.querySelector('.download-btn').onclick = () => window.makaw.startDownload(data.url, data.type);
+      log.prepend(item);
+      pendingMedia.push({ url: data.url, type: data.type });
+      updateDownloadFloat();
+    });
+    
+    // ─── Content Blocker ────────────────────────────────────────────────────
+    async function loadBlockerConfig() {
+      const config = await window.makaw.contentBlockerGetConfig();
+      const userRules = await window.makaw.contentBlockerGetUserRules();
+      const container = document.getElementById('blocker-content');
+      container.innerHTML = `
+        <div class="blocker-section">
+          <h3>Filters</h3>
+          <div class="blocker-toggle">
+            <div><label>Block Ads</label><div class="desc">Common ad networks & domains</div></div>
+            <label class="blocker-switch"><input type="checkbox" id="cb-ads" ${config.blockAds?'checked':''}><span class="blocker-slider"></span></label>
+          </div>
+          <div class="blocker-toggle">
+            <div><label>Block Trackers</label><div class="desc">Analytics & tracking domains</div></div>
+            <label class="blocker-switch"><input type="checkbox" id="cb-trackers" ${config.blockTrackers?'checked':''}><span class="blocker-slider"></span></label>
+          </div>
+          <div class="blocker-toggle">
+            <div><label>Block Malware</label><div class="desc">Known malicious domains</div></div>
+            <label class="blocker-switch"><input type="checkbox" id="cb-malware" ${config.blockMalware?'checked':''}><span class="blocker-slider"></span></label>
+          </div>
+          <div class="blocker-toggle">
+            <div><label>Block Annoyances</label><div class="desc">Cookie banners, popups, etc.</div></div>
+            <label class="blocker-switch"><input type="checkbox" id="cb-annoyances" ${config.blockAnnoyances?'checked':''}><span class="blocker-slider"></span></label>
+          </div>
+          <div class="blocker-toggle">
+            <div><label>Block Popups</label><div class="desc">Block popup windows</div></div>
+            <label class="blocker-switch"><input type="checkbox" id="cb-popups" ${config.blockPopups?'checked':''}><span class="blocker-slider"></span></label>
+          </div>
+          <div class="blocker-toggle" style="border-bottom:none;">
+            <div><label>Enable Content Blocker</label><div class="desc">Master toggle</div></div>
+            <label class="blocker-switch"><input type="checkbox" id="cb-enabled" ${config.enabled?'checked':''}><span class="blocker-slider"></span></label>
+          </div>
+          <div class="blocker-stats">Blocked requests: <strong id="cb-count">${config.blockedCount || 0}</strong></div>
+        </div>
+        <div class="blocker-section">
+          <h3>Allowed Sites</h3>
+          <div style="display:flex;gap:4px;margin-bottom:6px;">
+            <input id="cb-allow-input" class="input-dark" placeholder="example.com" style="flex:1;margin:0;">
+            <button id="cb-allow-btn" style="padding:4px 8px;">Allow</button>
+          </div>
+          <div class="blocker-allowed-list" id="cb-allowed-list">${(config.allowedSites||[]).map(s => '<span class="site-tag">'+escapeHtml(s)+'<button onclick="removeAllowedSite(\''+escapeHtml(s)+'\')">×</button></span>').join('')||'<span style="color:var(--text-3);font-size:12px;">No sites allowed</span>'}</div>
+        </div>
+        <div class="blocker-section">
+          <h3>User Rules <span style="font-weight:400;text-transform:none;font-size:11px;color:var(--text-3);">(pattern → block/allow)</span></h3>
+          <div style="display:flex;gap:4px;margin-bottom:6px;">
+            <input id="cb-rule-pattern" class="input-dark" placeholder="*://*.doubleclick.net/*" style="flex:1;margin:0;">
+            <select id="cb-rule-action" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px;">
+              <option value="block">Block</option>
+              <option value="allow">Allow</option>
+            </select>
+            <button id="cb-add-rule-btn" style="padding:4px 8px;">Add</button>
+          </div>
+          <div id="cb-user-rules">${userRules.map((r,i) => '<div class="blocker-rule-item"><span class="rule-pattern">'+escapeHtml(r.pattern)+'</span><span class="rule-action '+r.action+'">'+r.action+'</span><button onclick="removeUserRule('+i+')">×</button></div>').join('')||'<div style="color:var(--text-3);font-size:12px;">No custom rules</div>'}</div>
+        </div>
+      `;
+      document.getElementById('cb-ads').onchange = (e) => setBlockerConfig({ blockAds: e.target.checked });
+      document.getElementById('cb-trackers').onchange = (e) => setBlockerConfig({ blockTrackers: e.target.checked });
+      document.getElementById('cb-malware').onchange = (e) => setBlockerConfig({ blockMalware: e.target.checked });
+      document.getElementById('cb-annoyances').onchange = (e) => setBlockerConfig({ blockAnnoyances: e.target.checked });
+      document.getElementById('cb-popups').onchange = (e) => setBlockerConfig({ blockPopups: e.target.checked });
+      document.getElementById('cb-enabled').onchange = (e) => setBlockerConfig({ enabled: e.target.checked });
+      document.getElementById('cb-allow-btn').onclick = async () => {
+        const domain = document.getElementById('cb-allow-input').value.trim();
+        if (domain) { await window.makaw.contentBlockerAllowSite(domain); loadBlockerConfig(); }
+      };
+      document.getElementById('cb-add-rule-btn').onclick = async () => {
+        const pattern = document.getElementById('cb-rule-pattern').value.trim();
+        const action = document.getElementById('cb-rule-action').value;
+        if (pattern) { await window.makaw.contentBlockerAddRule(pattern, action); loadBlockerConfig(); }
+      };
+    }
+    async function setBlockerConfig(partial) {
+      const config = await window.makaw.contentBlockerGetConfig();
+      Object.assign(config, partial);
+      await window.makaw.contentBlockerSetConfig(config);
+    }
+    async function removeAllowedSite(domain) {
+      await window.makaw.contentBlockerDisallowSite(domain);
+      loadBlockerConfig();
+    }
+    async function removeUserRule(index) {
+      await window.makaw.contentBlockerRemoveRule(index);
+      loadBlockerConfig();
+    }
+    window.removeAllowedSite = removeAllowedSite;
+    window.removeUserRule = removeUserRule;
+
+    // Inject content blocker scripts into webview on navigation
+    function injectContentBlocker(wv) {
+      wv.addEventListener('did-finish-load', async () => {
+        try {
+          const config = await window.makaw.contentBlockerGetConfig();
+          if (!config.enabled) return;
+          const scripts = [];
+          if (config.blockAnnoyances || config.blockAds) {
+            scripts.push(await window.makaw.contentBlockerGetHideScript());
+          }
+          if (config.blockPopups) {
+            scripts.push(await window.makaw.contentBlockerGetPopupBlockerScript());
+          }
+          for (const code of scripts) {
+            if (code) wv.executeJavaScript(code).catch(() => {});
+          }
+        } catch (_) {}
+      });
+    }
+    injectContentBlocker(browserWebview);
+    injectContentBlocker(incognitoWebview);
+
+    // Popup blocked notification
+    function onPopupBlocked(url) {
+      const el = document.getElementById('popup-notification');
+      document.getElementById('popup-url').textContent = url;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 4000);
+    }
+    document.getElementById('popup-allow-btn').onclick = () => {
+      document.getElementById('popup-notification').classList.remove('show');
+    };
+
+    // ─── Enhanced Downloads ─────────────────────────────────────────────────
+    let downloadItems = {};
+
+    async function loadDownloads() {
+      const downloads = await window.makaw.getDownloads();
+      const list = document.getElementById('downloads-list');
+      if (!downloads.length) {
+        list.innerHTML = '<div class="empty-state">No downloads yet</div>';
+        return;
+      }
+      list.innerHTML = downloads.map(d => `
+        <div class="download-item" data-id="${d.id}">
+          <div class="d-header">
+            <span class="d-filename">${escapeHtml(d.filepath ? d.filepath.split(/[\\/]/).pop() : d.url.split('/').pop())}</span>
+            <span class="d-status ${d.status}">${d.status}</span>
+          </div>
+          <div class="download-bar"><div class="d-progress" style="width:${d.progress||0}%"></div></div>
+          <div class="d-info">
+            <span>${formatBytes(d.received||0)}${d.total ? ' / '+formatBytes(d.total) : ''}</span>
+            <span>${d.speed ? formatBytes(d.speed)+'/s' : ''}</span>
+          </div>
+          <div class="d-actions" data-id="${d.id}" data-status="${d.status}">
+            ${d.status === 'downloading' ? '<button class="danger" onclick="window.makaw.pauseDownload('+d.id+')">Pause</button>' : ''}
+            ${d.status === 'paused' ? '<button class="primary" onclick="window.makaw.resumeDownload('+d.id+')">Resume</button>' : ''}
+            ${d.status === 'failed' ? '<button class="primary" onclick="window.makaw.retryDownload('+d.id+')">Retry</button>' : ''}
+            ${d.status === 'downloading' || d.status === 'queued' || d.status === 'paused' ? '<button class="danger" onclick="window.makaw.cancelDownload('+d.id+')">Cancel</button>' : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+      return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+    }
+
+    window.makaw.onDownloadUpdate(() => loadDownloads());
+
+    // Track live download progress
+    window.makaw.onDownloadProgress((data) => {
+      const id = data.dbId || data.id;
+      const el = document.querySelector(`.download-item[data-id="${id}"]`);
+      if (!el) { loadDownloads(); return; }
+      if (data.status) {
+        el.querySelector('.d-status').textContent = data.status;
+        el.querySelector('.d-status').className = 'd-status ' + data.status;
+        const actions = el.querySelector('.d-actions');
+        if (data.status === 'downloading') {
+          actions.innerHTML = '<button class="danger" onclick="window.makaw.pauseDownload('+id+')">Pause</button><button class="danger" onclick="window.makaw.cancelDownload('+id+')">Cancel</button>';
+        } else if (data.status === 'paused') {
+          actions.innerHTML = '<button class="primary" onclick="window.makaw.resumeDownload('+id+')">Resume</button><button class="danger" onclick="window.makaw.cancelDownload('+id+')">Cancel</button>';
+        } else if (data.status === 'failed') {
+          actions.innerHTML = '<button class="primary" onclick="window.makaw.retryDownload('+id+')">Retry</button>';
+        } else if (data.status === 'completed') {
+          actions.innerHTML = '';
+          el.querySelector('.d-progress').style.width = '100%';
+        } else if (data.status === 'cancelled') {
+          actions.innerHTML = '';
+        } else if (data.status === 'queued') {
+          actions.innerHTML = '<button class="danger" onclick="window.makaw.cancelDownload('+id+')">Cancel</button>';
+        }
+      }
+      if (data.progress !== undefined) {
+        const pct = Math.min(data.progress * 100, 100);
+        el.querySelector('.d-progress').style.width = pct + '%';
+      }
+      if (data.received !== undefined) {
+        const info = el.querySelector('.d-info');
+        const received = formatBytes(data.received);
+        const total = data.total ? ' / ' + formatBytes(data.total) : '';
+        const speed = data.speed ? ' &middot; ' + formatBytes(data.speed) + '/s' : '';
+        info.innerHTML = '<span>' + received + total + '</span><span>' + (data.speed ? formatBytes(data.speed)+'/s' : '') + '</span>';
+      }
+    });
+
+    // ─── Video Player ───────────────────────────────────────────────────────
+    let detectedVideos = [];
+
+    window.makaw.onMediaDetected((data) => {
+      if (!data.url || !/video|audio|octet-stream/i.test(data.type)) return;
+      detectedVideos.unshift({ url: data.url, type: data.type, time: Date.now() });
+      renderVideos();
+    });
+
+    function renderVideos() {
+      const list = document.getElementById('vplayer-list');
+      if (!detectedVideos.length) {
+        list.innerHTML = '<div class="empty-state">No videos detected yet</div>';
+        return;
+      }
+      list.innerHTML = detectedVideos.map((v, i) => `
+        <div class="item">
+          <div class="item-title">Video ${i+1}</div>
+          <div class="item-url">${escapeHtml(v.url)}</div>
+          <div class="item-actions">
+            <button onclick="playVideo(${i})">▶ Play</button>
+            <button onclick="downloadVideo(${i})">⬇ Download</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function playVideo(index) {
+      const v = detectedVideos[index];
+      if (!v) return;
+      const overlay = document.getElementById('video-player-overlay');
+      const video = document.getElementById('vp-video');
+      const title = document.getElementById('vp-title');
+      video.src = v.url;
+      title.textContent = v.url.split('/').pop() || 'Video ' + (index + 1);
+      overlay.classList.add('show');
+      video.play().catch(() => {});
+      // Time update
+      video.ontimeupdate = () => {
+        const fmt = (s) => { const m = Math.floor(s/60); return m+':'+String(Math.floor(s%60)).padStart(2,'0'); };
+        document.getElementById('vp-time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration||0);
+      };
+    }
+    window.playVideo = playVideo;
+
+    document.getElementById('vp-close').onclick = () => {
+      const video = document.getElementById('vp-video');
+      video.pause();
+      video.src = '';
+      document.getElementById('video-player-overlay').classList.remove('show');
+    };
+    document.getElementById('vp-download').onclick = () => {
+      const video = document.getElementById('vp-video');
+      if (video.src) window.makaw.startDownload(video.src, 'video');
+    };
+
+    function downloadVideo(index) {
+      const v = detectedVideos[index];
+      if (v) window.makaw.startDownload(v.url, 'video');
+    }
+    window.downloadVideo = downloadVideo;
+
+    // ─── Auto-Updater ───────────────────────────────────────────────────────
+    document.getElementById('update-btn').onclick = () => {
+      document.getElementById('update-dialog').classList.add('show');
+      document.getElementById('update-message').textContent = 'Checking for updates...';
+      document.getElementById('update-progress-wrap').style.display = 'none';
+      document.getElementById('update-install-btn').style.display = 'none';
+      window.makaw.checkForUpdates();
+    };
+    document.getElementById('update-close-btn').onclick = () => {
+      document.getElementById('update-dialog').classList.remove('show');
+    };
+    document.getElementById('update-install-btn').onclick = () => {
+      window.makaw.installUpdate();
+    };
+
+    window.makaw.onUpdateStatus((data) => {
+      const dialog = document.getElementById('update-dialog');
+      const msg = document.getElementById('update-message');
+      const title = document.getElementById('update-title');
+      const progressWrap = document.getElementById('update-progress-wrap');
+      const bar = document.getElementById('update-progress-bar');
+      const installBtn = document.getElementById('update-install-btn');
+      if (!dialog.classList.contains('show')) dialog.classList.add('show');
+
+      switch (data.status) {
+        case 'checking':
+          msg.textContent = 'Checking for updates...';
+          break;
+        case 'available':
+          title.textContent = 'Update Available';
+          msg.textContent = 'Version ' + (data.version || '') + ' is available. Downloading...';
+          break;
+        case 'up-to-date':
+          title.textContent = 'Up to Date';
+          msg.textContent = 'You have the latest version.';
+          setTimeout(() => dialog.classList.remove('show'), 3000);
+          break;
+        case 'downloading':
+          title.textContent = 'Downloading Update';
+          progressWrap.style.display = 'block';
+          bar.style.width = (data.percent || 0) + '%';
+          msg.textContent = (data.percent ? data.percent.toFixed(1) + '%' : 'Downloading...') + (data.bytesPerSecond ? ' at ' + formatBytes(data.bytesPerSecond) + '/s' : '');
+          break;
+        case 'downloaded':
+          title.textContent = 'Update Ready';
+          msg.textContent = 'Version ' + (data.version || '') + ' has been downloaded.';
+          installBtn.style.display = 'inline-block';
+          progressWrap.style.display = 'none';
+          break;
+        case 'error':
+          title.textContent = 'Update Error';
+          msg.textContent = data.message || 'An error occurred.';
+          break;
+      }
+    });
+    
+    // Navigate on Enter
+    document.getElementById('url').onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const raw = e.target.value.trim();
+        if (!raw) return;
+        let url;
+        if (raw.includes(' ') || (!raw.includes('.') && !raw.includes('localhost') && !raw.includes('://'))) {
+          url = 'https://www.google.com/search?q=' + encodeURIComponent(raw);
+        } else {
+          url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : 'https://' + raw;
+        }
+        const wv = activeWebview();
+        try {
+          wv.src = url;
+          if (mainEl.classList.contains('browser')) {
+            const tab = tabs.find(t => t.id === activeTabId);
+            if (tab) { tab.url = url; tab.title = url; }
+            renderTabs();
+          }
+        } catch (e) {
+          showToast('Navigation failed: ' + e.message, 'error');
+        }
+      }
+    };
+    // Browser navigation buttons
+    document.getElementById('nav-back').onclick = () => { const wv = activeWebview(); if (wv.canGoBack()) wv.goBack(); };
+    document.getElementById('nav-forward').onclick = () => { const wv = activeWebview(); if (wv.canGoForward()) wv.goForward(); };
+    document.getElementById('nav-reload').onclick = () => activeWebview().reload();
+    // Update nav button state on navigation (both webviews)
+    function updateNavButtons(wv) {
+      document.getElementById('nav-back').style.opacity = wv.canGoBack() ? '1' : '0.4';
+      document.getElementById('nav-forward').style.opacity = wv.canGoForward() ? '1' : '0.4';
+    }
+    preview.addEventListener('did-navigate', () => updateNavButtons(preview));
+    preview.addEventListener('did-navigate-in-page', () => updateNavButtons(preview));
+    browserWebview.addEventListener('did-navigate', () => updateNavButtons(browserWebview));
+    browserWebview.addEventListener('did-navigate-in-page', () => updateNavButtons(browserWebview));
+    incognitoWebview.addEventListener('did-navigate', () => updateNavButtons(incognitoWebview));
+    incognitoWebview.addEventListener('did-navigate-in-page', () => updateNavButtons(incognitoWebview));
+    
+    // Theme: system preference + manual toggle
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+    let themeState = localStorage.getItem('makaw-theme') || 'dark';
+    function applyTheme(mode) {
+      document.body.classList.toggle('light', mode === 'light');
+      document.getElementById('theme-toggle').textContent = mode === 'light' ? '☀' : mode === 'dark' ? '☾' : '◐';
+      const t = document.getElementById('theme-select');
+      if (t) t.value = mode === 'light' ? 'vs' : 'vs-dark';
+      if (typeof monaco !== 'undefined' && monaco.editor) {
+        monaco.editor.setTheme(mode === 'light' ? 'makaw-light' : 'makaw-dark');
+      }
+      if (window.makaw && window.makaw.setThemeSource) {
+        window.makaw.setThemeSource(themeState === 'system' ? 'system' : mode);
+      }
+    }
+    function setTheme(mode) {
+      themeState = mode;
+      localStorage.setItem('makaw-theme', mode);
+      if (mode === 'system') applyTheme(prefersDark.matches ? 'dark' : 'light');
+      else applyTheme(mode);
+    }
+    prefersDark.addEventListener('change', () => {
+      if (themeState === 'system') applyTheme(prefersDark.matches ? 'dark' : 'light');
+    });
+    setTheme(themeState);
+    document.getElementById('theme-toggle').onclick = () => {
+      setTheme(themeState === 'dark' ? 'light' : themeState === 'light' ? 'system' : 'dark');
+    };
+
+    // View mode toggle (browser vs code)
+    const mainEl = document.querySelector('.main');
+    const viewModeBtn = document.getElementById('view-mode');
+    viewModeBtn.onclick = () => {
+      const isBrowser = mainEl.classList.toggle('browser');
+      document.body.classList.toggle('browser-mode', isBrowser);
+      viewModeBtn.textContent = isBrowser ? 'Code' : 'Browser';
+      const wv = activeWebview();
+      document.getElementById('url').value = wv.src === 'about:blank' ? '' : wv.src;
+      updateNavButtons(wv);
+      setTimeout(() => {
+        if (typeof fitAddon !== 'undefined' && fitAddon.fit) fitAddon.fit();
+      }, 100);
+    };
+    
+    // DevTools for webview
+    document.getElementById('devtools-btn').onclick = () => {
+      try { const wv = activeWebview(); wv.openDevTools(); } catch (_) { showToast('DevTools unavailable', 'error'); }
+    };
+
+    // Panel collapse / expand
+    function toggleSidebar() {
+      const main = document.querySelector('.main');
+      const collapsed = main.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('makaw-sidebar-collapsed', collapsed ? '1' : '');
+      setTimeout(() => { if (editor) editor.layout(); }, 50);
+    }
+
+    function togglePreview() {
+      const main = document.querySelector('.main');
+      const collapsed = main.classList.toggle('preview-collapsed');
+      localStorage.setItem('makaw-preview-collapsed', collapsed ? '1' : '');
+      setTimeout(() => { if (editor) editor.layout(); }, 50);
+    }
+
+    function toggleEditor() {
+      const main = document.querySelector('.main');
+      const collapsed = main.classList.toggle('editor-collapsed');
+      localStorage.setItem('makaw-editor-collapsed', collapsed ? '1' : '');
+      setTimeout(() => { if (editor) editor.layout(); }, 50);
+    }
+
+    // Restore collapsed states
+    (function restorePanelStates() {
+      const main = document.querySelector('.main');
+      if (localStorage.getItem('makaw-sidebar-collapsed')) main.classList.add('sidebar-collapsed');
+      if (localStorage.getItem('makaw-preview-collapsed')) main.classList.add('preview-collapsed');
+      if (localStorage.getItem('makaw-editor-collapsed')) main.classList.add('editor-collapsed');
+      if (localStorage.getItem('makaw-terminal-visible')) {
+        main.classList.add('terminal-visible');
+        setTimeout(() => { initTerminal(); try { if (fitAddon) fitAddon.fit(); } catch (_) {} }, 100);
+      }
+    })();
+
+    function toggleTerminal() {
+      const main = document.querySelector('.main');
+      const visible = main.classList.toggle('terminal-visible');
+      localStorage.setItem('makaw-terminal-visible', visible ? '1' : '');
+      if (visible) {
+        initTerminal();
+        setTimeout(() => { try { fitAddon.fit(); } catch (_) {} }, 50);
+      }
+      setTimeout(() => { if (editor) editor.layout(); }, 50);
+    }
+
+    // Toggle buttons
+    document.getElementById('close-terminal').onclick = () => {
+      document.querySelector('.main').classList.remove('terminal-visible');
+      localStorage.setItem('makaw-terminal-visible', '');
+      setTimeout(() => { if (editor) editor.layout(); }, 50);
+    };
+    document.getElementById('close-sidebar').onclick = toggleSidebar;
+    document.getElementById('toggle-preview').onclick = togglePreview;
+    document.getElementById('toggle-editor').onclick = toggleEditor;
+    document.getElementById('toggle-terminal').onclick = toggleTerminal;
+
+    // Resizable panels via splitters
+    document.querySelectorAll('.splitter').forEach(function(splitter) {
+      splitter.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        splitter.classList.add('active');
+        const side = splitter.dataset.side;
+        const parent = splitter.parentElement;
+        const prev = splitter.previousElementSibling;
+        const next = splitter.nextElementSibling;
+        if (!prev || !next) return;
+        const isHorizontal = side === 'terminal';
+        const start = isHorizontal ? e.clientY : e.clientX;
+        const startPrev = isHorizontal ? prev.getBoundingClientRect().height : prev.getBoundingClientRect().width;
+        const startNext = isHorizontal ? next.getBoundingClientRect().height : next.getBoundingClientRect().width;
+        const total = startPrev + startNext;
+        function onMove(ev) {
+          const d = (isHorizontal ? ev.clientY : ev.clientX) - start;
+          let p = startPrev + d;
+          let n = total - p;
+          if (side === 'sidebar') {
+            if (p < 200) { p = 200; n = total - 200; }
+          } else if (side === 'terminal') {
+            if (n < 80) { n = 80; p = total - 80; }
+            if (p < 100) { p = 100; n = total - 100; }
+          } else {
+            if (p < 50) { p = 50; n = total - 50; }
+            if (n < 50) { n = 50; p = total - 50; }
+          }
+          prev.style.flex = 'none';
+          next.style.flex = 'none';
+          if (isHorizontal) {
+            prev.style.height = p + 'px';
+            next.style.height = n + 'px';
+          } else {
+            prev.style.width = p + 'px';
+            next.style.width = n + 'px';
+          }
+        }
+        function doFit() {
+          if (side === 'terminal' && typeof fitAddon !== 'undefined' && fitAddon) {
+            try { fitAddon.fit(); } catch (_) {}
+          }
+        }
+        function onUp() {
+          splitter.classList.remove('active');
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          doFit();
+        }
+        onMove = ((orig) => function(ev) { orig(ev); doFit(); })(onMove);
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+    document.addEventListener('keydown', (e) => {
+      // Sidebar collapse
+      if (e.key === 'b' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        toggleSidebar();
+      }
+      // Preview collapse
+      if (e.key === 'p' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        togglePreview();
+      }
+      // Editor collapse
+      if (e.key === 'e' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        toggleEditor();
+      }
+      // Terminal toggle
+      if (e.key === '`' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        toggleTerminal();
+      }
+      if (e.key === 'F12' || ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'I' || e.key === 'i'))) {
+        e.preventDefault();
+        try { const wv = activeWebview(); wv.openDevTools(); } catch (_) { showToast('DevTools unavailable', 'error'); }
+      }
+    });
+    
+    // Browser tabs
+    let tabs = [];
+    let activeTabId = null;
+    let tabIdCounter = 0;
+    const tabBar = document.getElementById('browser-tabs');
+    const browserPane = document.querySelector('.browser-pane');
+    const addTabBtn = document.createElement('button');
+    addTabBtn.id = 'add-tab';
+    addTabBtn.textContent = '+';
+    addTabBtn.title = 'New tab';
+    tabBar.appendChild(addTabBtn);
+    const addIncogBtn = document.createElement('button');
+    addIncogBtn.id = 'add-incognito-tab';
+    addIncogBtn.textContent = '🕶';
+    addIncogBtn.title = 'New incognito tab';
+    tabBar.appendChild(addIncogBtn);
+
+    function currentWebview() {
+      const tab = tabs.find(t => t.id === activeTabId);
+      return tab && tab.incognito ? incognitoWebview : browserWebview;
+    }
+
+    function createTab(url, incognito) {
+      const id = ++tabIdCounter;
+      tabs.push({ id, url, title: url || (incognito ? 'Incognito' : 'New Tab'), incognito: !!incognito });
+      renderTabs();
+      switchTab(id);
+      return id;
+    }
+
+    function switchTab(id) {
+      const prev = tabs.find(t => t.id === activeTabId);
+      const prevWv = prev && prev.incognito ? incognitoWebview : browserWebview;
+      if (prev && prevWv.src !== 'about:blank') prev.url = prevWv.src;
+      activeTabId = id;
+      const tab = tabs.find(t => t.id === id);
+      if (tab) {
+        browserPane.classList.toggle('incognito', !!tab.incognito);
+        const wv = tab.incognito ? incognitoWebview : browserWebview;
+        wv.src = tab.url;
+        document.getElementById('url').value = tab.url === 'about:blank' ? '' : tab.url;
+      }
+      renderTabs();
+    }
+
+    function closeTab(id) {
+      if (tabs.length <= 1) return;
+      const idx = tabs.findIndex(t => t.id === id);
+      tabs = tabs.filter(t => t.id !== id);
+      if (activeTabId === id) {
+        const next = tabs[Math.min(idx, tabs.length - 1)];
+        activeTabId = next.id;
+        browserPane.classList.toggle('incognito', !!next.incognito);
+        const wv = next.incognito ? incognitoWebview : browserWebview;
+        wv.src = next.url;
+      }
+      renderTabs();
+    }
+
+    function renderTabs() {
+      const existing = tabBar.querySelectorAll('.browser-tab');
+      existing.forEach(el => el.remove());
+      tabs.forEach(t => {
+        const div = document.createElement('div');
+        div.className = 'browser-tab' + (t.id === activeTabId ? ' active' : '') + (t.incognito ? ' incognito' : '');
+        div.dataset.tabId = t.id;
+        if (t.incognito) {
+          const badge = document.createElement('span');
+          badge.className = 'tab-incognito';
+          badge.textContent = '🕶';
+          div.appendChild(badge);
+        }
+        const title = document.createElement('span');
+        title.className = 'tab-title';
+        title.textContent = t.title;
+        div.appendChild(title);
+        const close = document.createElement('span');
+        close.className = 'tab-close';
+        close.textContent = '×';
+        close.onclick = (e) => { e.stopPropagation(); closeTab(t.id); };
+        div.appendChild(close);
+        div.onclick = () => switchTab(t.id);
+        tabBar.insertBefore(div, addTabBtn);
+      });
+    }
+
+    addTabBtn.onclick = () => createTab('about:blank');
+    addIncogBtn.onclick = () => createTab('about:blank', true);
+
+    // Inject paste/drop interceptors into the webview
+    preview.addEventListener('did-finish-load', () => {
+      preview.executeJavaScript(`
+        if (!window.__makaw_injected) {
+          window.__makaw_injected = true;
+          window.__makaw_data = null;
+          // Intercept Ctrl+V (keydown is more reliable than paste event for non-editable areas)
+          document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+              var tag = (e.target && e.target.tagName) || '';
+              if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+              e.preventDefault(); e.stopPropagation();
+              try {
+                navigator.clipboard.readText().then(function(text) {
+                  if (text && text.length > 30) {
+                    window.__makaw_data = { type:'code', data:text, name:'Pasted code' };
+                    console.log('MAKAW:ready');
+                  }
+                }).catch(function(){});
+              } catch(_) {}
+            }
+          }, true);
+          document.addEventListener('dragover', function(e) { e.preventDefault(); }, true);
+          document.addEventListener('drop', function(e) {
+            e.preventDefault(); e.stopPropagation();
+            var f = e.dataTransfer.files[0]; if (!f) return;
+            var r = new FileReader();
+            r.onload = function(ev) { window.__makaw_data = { type: f.type.startsWith('image/')?'img':'file', data:ev.target.result, name:f.name }; console.log('MAKAW:ready'); };
+            if (f.type.startsWith('text/') || /\.(html|js|ts|jsx|tsx|css|json|py|md|xml|txt|c|cpp|h|java|rb|go|rs|sh|yaml|yml|sql|vue|php|swift|kt|dart|lua)$/i.test(f.name)) r.readAsText(f);
+            else r.readAsDataURL(f);
+          }, true);
+        }
+      `).catch(function(err) { console.warn('MAKAW inject failed:', err.message); });
+    });
+    // Listen for data from webview-injected interceptors
+    preview.addEventListener('console-message', (e) => {
+      if (e.message.indexOf('MAKAW:ready') < 0) return;
+      preview.executeJavaScript('window.__makaw_data').then(function(d) {
+        if (!d) return;
+        preview.executeJavaScript('window.__makaw_data = null');
+        if (d.type === 'img') loadInBrowser(d.data, d.name);
+        else handleExternalText(d.data);
+      }).catch(function() {});
+    });
+    // Show toast on navigation errors
+    preview.addEventListener('did-fail-load', (e) => {
+      if (e.errorCode !== -3 && e.errorCode !== -21) {
+        showToast('Page load failed: ' + e.errorDescription, 'error');
+      }
+    });
+    // Grant clipboard read permission for the webviews
+    preview.addEventListener('permissionrequest', (e) => {
+      if (e.permission === 'clipboard-read') e.request.allow();
+    });
+    browserWebview.addEventListener('permissionrequest', (e) => {
+      if (e.permission === 'clipboard-read') e.request.allow();
+    });
+    incognitoWebview.addEventListener('permissionrequest', (e) => {
+      if (e.permission === 'clipboard-read') e.request.allow();
+    });
+    // Intercept Ctrl+V in webview via input-event (fires when webview has focus)
+    function handleWebviewPaste() {
+      const tryPaste = (text) => { if (text) handleExternalText(text); };
+      if (window.makaw && window.makaw.wslClipboardPaste) {
+        window.makaw.wslClipboardPaste().then((text) => {
+          if (text) tryPaste(text);
+          else if (window.makaw.getClipboardText) window.makaw.getClipboardText().then(tryPaste).catch(function() {});
+        }).catch(function() {});
+      } else if (window.makaw && window.makaw.getClipboardText) {
+        window.makaw.getClipboardText().then(tryPaste).catch(function() {});
+      }
+    }
+    preview.addEventListener('input-event', (e) => {
+      const input = e.input;
+      if (input.type === 'keyDown' && (input.control || input.meta) && input.key.toLowerCase() === 'v' && !input.alt && !input.shift) {
+        handleWebviewPaste();
+      }
+    });
+    browserWebview.addEventListener('input-event', (e) => {
+      const input = e.input;
+      if (input.type === 'keyDown' && (input.control || input.meta) && input.key.toLowerCase() === 'v' && !input.alt && !input.shift) {
+        handleWebviewPaste();
+      }
+    });
+    incognitoWebview.addEventListener('input-event', (e) => {
+      const input = e.input;
+      if (input.type === 'keyDown' && (input.control || input.meta) && input.key.toLowerCase() === 'v' && !input.alt && !input.shift) {
+        handleWebviewPaste();
+      }
+    });
+    browserWebview.addEventListener('did-fail-load', (e) => {
+      if (e.errorCode !== -3 && e.errorCode !== -21) {
+        showToast('Page load failed: ' + e.errorDescription, 'error');
+      }
+    });
+    incognitoWebview.addEventListener('did-fail-load', (e) => {
+      if (e.errorCode !== -3 && e.errorCode !== -21) {
+        showToast('Page load failed: ' + e.errorDescription, 'error');
+      }
+    });
+
+    // Update current tab on navigation (browser webviews)
+    function onBrowserNav(e) {
+      const tab = tabs.find(t => t.id === activeTabId);
+      if (tab) { tab.url = e.url; tab.title = e.url; }
+      document.getElementById('url').value = e.url === 'about:blank' ? '' : e.url;
+    }
+    function onBrowserNavPage(e) {
+      const tab = tabs.find(t => t.id === activeTabId);
+      if (tab) { tab.url = e.url; }
+      document.getElementById('url').value = e.url === 'about:blank' ? '' : e.url;
+    }
+    function onBrowserTitle(e) {
+      const tab = tabs.find(t => t.id === activeTabId);
+      if (tab && e.title) tab.title = e.title;
+      renderTabs();
+    }
+    browserWebview.addEventListener('did-navigate', onBrowserNav);
+    browserWebview.addEventListener('did-navigate-in-page', onBrowserNavPage);
+    browserWebview.addEventListener('page-title-updated', onBrowserTitle);
+    incognitoWebview.addEventListener('did-navigate', onBrowserNav);
+    incognitoWebview.addEventListener('did-navigate-in-page', onBrowserNavPage);
+    incognitoWebview.addEventListener('page-title-updated', onBrowserTitle);
+    // Preview webview: update URL bar in code mode when it navigates
+    preview.addEventListener('did-navigate', (e) => {
+      document.getElementById('url').value = e.url === 'about:blank' ? '' : e.url;
+    });
+
+    // Start with one tab
+    createTab('about:blank');
+
+    // Helpers for paste/drop
+    const CODE_EXTS = { html:1, js:1, ts:1, jsx:1, tsx:1, css:1, json:1, py:1, md:1, xml:1, txt:1, c:1, cpp:1, h:1, java:1, rb:1, go:1, rs:1, sh:1, yaml:1, yml:1, toml:1, ini:1, cfg:1, sql:1, graphql:1, vue:1, svelte:1, php:1, pl:1, r:1, swift:1, kt:1, dart:1, lua:1, scala:1 };
+    const IMG_EXTS = { png:1, jpg:1, jpeg:1, gif:1, webp:1, svg:1, ico:1, bmp:1, avif:1 };
+    const MEDIA_EXTS = { pdf:1, epub:1, mp4:1, webm:1, ogv:1, mp3:1, wav:1, ogg:1, m4a:1, flac:1, mov:1, avi:1, mkv:1 };
+    const LANG_MAP = { html:'html', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript', css:'css', json:'json', py:'python', md:'markdown', xml:'html', txt:'plaintext', c:'c', cpp:'cpp', h:'c', java:'java', rb:'ruby', go:'go', rs:'rust', sh:'shell', yaml:'yaml', yml:'yaml', sql:'sql', vue:'html', php:'php', swift:'swift', kt:'kotlin', dart:'dart', lua:'lua', scala:'scala' };
+    function loadInBrowser(dataUri, title) {
+      if (!mainEl.classList.contains('browser')) viewModeBtn.click();
+      browserWebview.src = dataUri;
+      const tab = tabs.find(t => t.id === activeTabId);
+      if (tab) { tab.url = dataUri; tab.title = title || 'Media'; renderTabs(); }
+    }
+
+    // Shared handler: takes text from clipboard/drop and decides where it goes
+    function handleExternalText(text) {
+      if (!text) return;
+      const trimmed = text.trim();
+      if (/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp|svg|pdf|epub|mp4|webm|mp3)(\?|#|$)/i.test(trimmed)) {
+        loadInBrowser(trimmed, trimmed.split('/').pop());
+        return;
+      }
+      if (!editor) return;
+      const looksLikeCode = text.length > 30 || text.includes('\n') || text.includes('{') || text.includes('(') || text.includes('<');
+      if (!looksLikeCode) return;
+      if (mainEl.classList.contains('browser')) viewModeBtn.click();
+      editor.setValue(text);
+      showToast('Code pasted into editor (' + text.length + ' chars)', 'success');
+    }
+
+    // Global paste handler (fires when focus is NOT inside the webview)
+    document.addEventListener('paste', (e) => {
+      if (e.target.closest && (e.target.closest('#monaco-container') || e.target.closest('[contenteditable]') || e.target.closest('input, textarea'))) return;
+      const files = e.clipboardData.files;
+      if (files.length > 0) {
+        const file = files[0];
+        if (file.type.startsWith('image/')) {
+          e.preventDefault();
+          const r = new FileReader();
+          r.onload = (ev) => { loadInBrowser(ev.target.result, file.name); };
+          r.readAsDataURL(file);
+          return;
+        }
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (CODE_EXTS[ext]) {
+          e.preventDefault();
+          const r = new FileReader();
+          r.onload = (ev) => {
+            if (!editor) return;
+            if (mainEl.classList.contains('browser')) viewModeBtn.click();
+            editor.setValue(ev.target.result);
+            if (LANG_MAP[ext] && languageSelect) languageSelect.value = LANG_MAP[ext];
+            if (editor && monaco) monaco.editor.setModelLanguage(editor.getModel(), languageSelect.value);
+            showToast('Pasted: ' + file.name, 'success');
+          };
+          r.readAsText(file);
+          return;
+        }
+      }
+      const text = e.clipboardData.getData('text');
+      if (text && (text.length > 30 || text.includes('\n') || text.includes('{') || text.includes('(') || text.includes('<'))) {
+        e.preventDefault();
+        handleExternalText(text);
+      }
+    });
+    // If paste event failed (e.clipboardData empty), try IPC bridge as fallback
+    document.addEventListener('paste', (e) => {
+      // Only fire as fallback when clipboardData has no text/files
+      if (e.clipboardData.files.length > 0 || e.clipboardData.getData('text')) return;
+      if (e.target.closest && e.target.closest('webview')) return;
+      if (e.target.closest && (e.target.closest('#monaco-container') || e.target.closest('[contenteditable], input, textarea'))) return;
+      e.preventDefault();
+      const tryPaste = (text) => { if (text) handleExternalText(text); };
+      if (window.makaw && window.makaw.wslClipboardPaste) {
+        window.makaw.wslClipboardPaste().then((text) => {
+          if (text) tryPaste(text);
+          else if (window.makaw.getClipboardText) window.makaw.getClipboardText().then(tryPaste).catch(function() {});
+        }).catch(function() {});
+      } else if (window.makaw && window.makaw.getClipboardText) {
+        window.makaw.getClipboardText().then(tryPaste).catch(function() {});
+      }
+    });
+
+    // Keydown Ctrl+V intercept: fallback when paste event is consumed by webview/menu
+    document.addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== 'v') return;
+      if (e.target.closest && e.target.closest('webview')) return;  // webview injection handles it
+      if (e.target.closest && (e.target.closest('#monaco-container') || e.target.closest('[contenteditable], input, textarea'))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const doPaste = (text) => { if (text) handleExternalText(text); };
+      // Try WSL bridge first, then IPC, then direct Electron API
+      if (window.makaw && window.makaw.wslClipboardPaste) {
+        window.makaw.wslClipboardPaste().then((text) => {
+          if (text) doPaste(text);
+          else if (window.makaw.getClipboardText) window.makaw.getClipboardText().then(doPaste).catch(function() {});
+        }).catch(function() {
+          if (window.makaw && window.makaw.getClipboardText) window.makaw.getClipboardText().then(doPaste).catch(function() {});
+        });
+      } else if (window.makaw && window.makaw.getClipboardText) {
+        window.makaw.getClipboardText().then(doPaste).catch(function() {});
+      } else if (window.makaw && window.makaw.clipboardPaste) {
+        doPaste(window.makaw.clipboardPaste());
+      } else {
+        navigator.clipboard.readText().then(doPaste).catch(function() {});
+      }
+    }, true);
+
+    // Webview element: allow drops (fix red-cross cursor)
+    preview.addEventListener('dragover', (e) => e.preventDefault());
+    preview.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (CODE_EXTS[ext]) {
+        if (!editor) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          if (mainEl.classList.contains('browser')) viewModeBtn.click();
+          editor.setValue(ev.target.result);
+          if (LANG_MAP[ext] && languageSelect) languageSelect.value = LANG_MAP[ext];
+          if (editor && monaco) monaco.editor.setModelLanguage(editor.getModel(), languageSelect.value);
+          showToast('Dropped: ' + file.name, 'success');
+        };
+        reader.readAsText(file);
+      } else if (IMG_EXTS[ext] || MEDIA_EXTS[ext] || file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (ev) => loadInBrowser(ev.target.result, file.name);
+        reader.readAsDataURL(file);
+        showToast('Opened: ' + file.name, 'success');
+      } else {
+        showToast('Unsupported file type: ' + file.name, 'error');
+      }
+    });
+
+    // Global drop handler (fires when drop is NOT on the webview)
+    document.addEventListener('dragover', (e) => e.preventDefault());
+    document.addEventListener('drop', (e) => {
+      if (e.target.closest && e.target.closest('webview')) return; // handled by webview listener
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (CODE_EXTS[ext]) {
+        if (!editor) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          if (mainEl.classList.contains('browser')) viewModeBtn.click();
+          editor.setValue(ev.target.result);
+          if (LANG_MAP[ext] && languageSelect) languageSelect.value = LANG_MAP[ext];
+          if (editor && monaco) monaco.editor.setModelLanguage(editor.getModel(), languageSelect.value);
+          showToast('Dropped: ' + file.name, 'success');
+        };
+        reader.readAsText(file);
+      } else if (IMG_EXTS[ext] || MEDIA_EXTS[ext] || file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (ev) => loadInBrowser(ev.target.result, file.name);
+        reader.readAsDataURL(file);
+        showToast('Opened: ' + file.name, 'success');
+      } else {
+        showToast('Unsupported file type: ' + file.name, 'error');
+      }
+    });
+
+    // Init
+    languageSelect.onchange = () => {
+      if (editor) monaco.editor.setModelLanguage(editor.getModel(), languageSelect.value);
+      loadSnippets();
+      updateFileTab();
+    };
+    
+    // Smart Paste via Edit → Smart Paste menu
+    if (window.makaw && window.makaw.onMenuSmartPaste) {
+      window.makaw.onMenuSmartPaste(() => {
+        const text = window.makaw.clipboardPaste();
+        handleExternalText(text);
+      });
+    }
+    // Global Ctrl+V intercepted at main process level (fires before DOM events)
+    if (window.makaw && window.makaw.onGlobalPaste) {
+      window.makaw.onGlobalPaste((text) => {
+        if (document.activeElement && (
+          document.activeElement.tagName === 'WEBVIEW' ||
+          (document.activeElement.closest && document.activeElement.closest('#monaco-container')) ||
+          (document.activeElement.closest && document.activeElement.closest('[contenteditable], input, textarea'))
+        )) return;
+        handleExternalText(text);
+      });
+    }
+    // WSL paste trigger: when Linux clipboard is empty, try Windows clipboard
+    if (window.makaw && window.makaw.onWslPasteTrigger) {
+      window.makaw.onWslPasteTrigger(() => {
+        if (window.makaw && window.makaw.wslClipboardPaste) {
+          window.makaw.wslClipboardPaste().then((text) => {
+            if (text) handleExternalText(text);
+          }).catch(function() {});
+        }
+      });
+    }
+    loadSnippets();
+    loadProjects();
+    window.addEventListener('load', () => setTimeout(() => window.dispatchEvent(new Event('resize')), 50));
+    // Git Diff & Branching UI
+const gitPathInput = document.getElementById('git-project-path');
+const gitOutput = document.getElementById('git-output');
+const branchSelect = document.getElementById('git-branch-select');
+
+async function refreshBranches() {
+  const path = gitPathInput.value;
+  if (!path) return;
+  const result = await window.makaw.gitBranches(path);
+  if (result.success) {
+    const { current, all } = result.branches;
+    branchSelect.innerHTML = all.map(b =>
+      `<option value="${b}" ${b === current? 'selected' : ''}>${b} ${b === current? '●' : ''}</option>`
+    ).join('');
+  }
+}
+
+document.getElementById('git-init').onclick = async () => {
+  const result = await window.makaw.gitInit(gitPathInput.value);
+  gitOutput.textContent = result.success? 'Repo initialized' : 'Error: ' + result.error;
+  if (result.success) refreshBranches();
+};
+
+document.getElementById('git-commit').onclick = async () => {
+  const msg = document.getElementById('git-commit-msg').value || 'Update from Makaw';
+  const result = await window.makaw.gitAddCommit(gitPathInput.value, msg);
+  gitOutput.textContent = result.success? `Committed: ${result.result.commit}` : 'Error: ' + result.error;
+  refreshBranches();
+};
+
+document.getElementById('git-diff-btn').onclick = async () => {
+  const result = await window.makaw.gitDiff(gitPathInput.value);
+  if (result.success) {
+    gitOutput.textContent = result.diff || 'No changes';
+    // Syntax highlight diff
+    gitOutput.innerHTML = result.diff.split('\\n').map(line => {
+      if (line.startsWith('+') &&!line.startsWith('+++')) return `<span style="color:#10b981;">${line}</span>`;
+      if (line.startsWith('-') &&!line.startsWith('---')) return `<span style="color:#ef4444;">${line}</span>`;
+      if (line.startsWith('@@')) return `<span style="color:#60a5fa;">${line}</span>`;
+      return line;
+    }).join('\\n');
+  } else {
+    gitOutput.textContent = 'Error: ' + result.error;
+  }
+};
+
+document.getElementById('git-checkout').onclick = async () => {
+  const branch = branchSelect.value;
+  const result = await window.makaw.gitCheckout(gitPathInput.value, branch);
+  gitOutput.textContent = result.success? `Switched to ${branch}` : 'Error: ' + result.error;
+  if (result.success) refreshBranches();
+};
+
+document.getElementById('git-create-branch').onclick = async () => {
+  const branchName = document.getElementById('git-new-branch').value;
+  if (!branchName) return;
+  const result = await window.makaw.gitCreateBranch(gitPathInput.value, branchName);
+  gitOutput.textContent = result.success? `Created & switched to ${branchName}` : 'Error: ' + result.error;
+  if (result.success) {
+    document.getElementById('git-new-branch').value = '';
+    refreshBranches();
+  }
+};
+
+document.getElementById('git-log-btn').onclick = async () => {
+  const result = await window.makaw.gitLog(gitPathInput.value, 10);
+  if (result.success) {
+    gitOutput.textContent = result.log.all.map(c =>
+      `${c.hash.substring(0,7)} - ${c.message} (${c.author_name}, ${new Date(c.date).toLocaleDateString()})`
+    ).join('\\n');
+  } else {
+    gitOutput.textContent = 'Error: ' + result.error;
+  }
+};
+
+document.getElementById('git-push').onclick = async () => {
+  const result = await window.makaw.gitPush(gitPathInput.value);
+  gitOutput.textContent = result.success? 'Pushed to remote' : 'Error: ' + result.error;
+};
+
+document.getElementById('git-pull').onclick = async () => {
+  const result = await window.makaw.gitPull(gitPathInput.value);
+  gitOutput.textContent = result.success? 'Pulled from remote' : 'Error: ' + result.error;
+};
+
+document.getElementById('git-status').onclick = async () => {
+  const result = await window.makaw.gitStatus(gitPathInput.value);
+  if (result.success) {
+    const s = result.status;
+    gitOutput.textContent = `Branch: ${s.current}\\nModified: ${s.modified.join(', ') || 'none'}\\nStaged: ${s.staged.join(', ') || 'none'}\\nNot Added: ${s.not_added.join(', ') || 'none'}\\nAhead: ${s.ahead} Behind: ${s.behind}`;
+  } else {
+    gitOutput.textContent = 'Error: ' + result.error;
+  }
+};
+
+document.getElementById('git-add-remote').onclick = async () => {
+  const url = document.getElementById('git-remote-url').value;
+  const result = await window.makaw.gitAddRemote(gitPathInput.value, 'origin', url);
+  gitOutput.textContent = result.success? 'Remote added' : 'Error: ' + result.error;
+};
+
+// Auto-refresh branches when path changes
+gitPathInput.onchange = refreshBranches;
+// Advanced Git: Merge & Conflicts
+let currentConflicts = [];
+
+document.getElementById('git-merge-btn').onclick = async () => {
+  const branch = branchSelect.value;
+  const result = await window.makaw.gitMerge(gitPathInput.value, branch);
+  if (result.success) {
+    gitOutput.textContent = 'Merge successful';
+    refreshBranches();
+  } else if (result.conflicts) {
+    gitOutput.textContent = 'Merge conflicts detected!';
+    showConflicts(result.conflicted);
+  } else {
+    gitOutput.textContent = 'Error: ' + result.error;
+  }
+};
+
+async function showConflicts(files) {
+  const conflictDiv = document.getElementById('git-conflicts');
+  const listDiv = document.getElementById('git-conflict-list');
+  conflictDiv.style.display = 'block';
+  listDiv.innerHTML = files.map(f => `
+    <div style="margin-bottom:6px;">
+      <div style="margin-bottom:4px;">${f}</div>
+      <button onclick="resolveConflict('${f}')" style="padding:2px 6px;font-size:10px;">Resolve</button>
+    </div>
+  `).join('');
+}
+
+window.resolveConflict = async (file) => {
+  const result = await window.makaw.gitShowConflict(gitPathInput.value, file);
+  if (!result.success) return;
+
+  // Create side-by-side modal
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:9999;display:flex;flex-direction:column;padding:20px;';
+
+  const header = document.createElement('div');
+  header.style.cssText = 'color:#e2e8f0;margin-bottom:10px;display:flex;justify-content:space-between;';
+  header.innerHTML = `<div>Resolving: ${file}</div><button onclick="this.parentElement.parentElement.remove()" style="background:#dc2626;color:white;border:none;padding:4px 12px;border-radius:4px;">Close</button>`;
+
+  const editors = document.createElement('div');
+  editors.style.cssText = 'flex:1;display:flex;gap:10px;';
+
+  const leftPane = document.createElement('div');
+  leftPane.style.cssText = 'flex:1;display:flex;flex-direction:column;';
+  leftPane.innerHTML = '<div style="color:#94a3b8;font-size:12px;margin-bottom:4px;">Current Branch (Ours)</div><div id="conflict-ours" style="flex:1;"></div><button id="accept-ours" style="margin-top:6px;background:#10b981;color:white;border:none;padding:6px;border-radius:4px;">Accept Ours</button>';
+
+  const rightPane = document.createElement('div');
+  rightPane.style.cssText = 'flex:1;display:flex;flex-direction:column;';
+  rightPane.innerHTML = '<div style="color:#94a3b8;font-size:12px;margin-bottom:4px;">Incoming Branch (Theirs)</div><div id="conflict-theirs" style="flex:1;"></div><button id="accept-theirs" style="margin-top:6px;background:#3b82f6;color:white;border:none;padding:6px;border-radius:4px;">Accept Theirs</button>';
+
+  editors.appendChild(leftPane);
+  editors.appendChild(rightPane);
+  modal.appendChild(header);
+  modal.appendChild(editors);
+  document.body.appendChild(modal);
+
+  // Create Monaco editors for side-by-side
+  const oursEditor = monaco.editor.create(document.getElementById('conflict-ours'), {
+    value: result.conflicts[0]?.ours.join('\\n') || '',
+    language: 'javascript',
+    theme: 'vs-dark',
+    readOnly: false,
+    minimap: { enabled: false }
+  });
+
+  const theirsEditor = monaco.editor.create(document.getElementById('conflict-theirs'), {
+    value: result.conflicts[0]?.theirs.join('\\n') || '',
+    language: 'javascript',
+    theme: 'vs-dark',
+    readOnly: false,
+    minimap: { enabled: false }
+  });
+
+  document.getElementById('accept-ours').onclick = async () => {
+    await window.makaw.gitResolveConflict(gitPathInput.value, file, oursEditor.getValue());
+    modal.remove();
+    gitOutput.textContent = `Resolved ${file} - accepted ours`;
+    checkRemainingConflicts();
+  };
+
+  document.getElementById('accept-theirs').onclick = async () => {
+    await window.makaw.gitResolveConflict(gitPathInput.value, file, theirsEditor.getValue());
+    modal.remove();
+    gitOutput.textContent = `Resolved ${file} - accepted theirs`;
+    checkRemainingConflicts();
+  };
+};
+
+async function checkRemainingConflicts() {
+  const result = await window.makaw.gitConflictedFiles(gitPathInput.value);
+  if (result.success && result.files.length === 0) {
+    document.getElementById('git-conflicts').style.display = 'none';
+    gitOutput.textContent = 'All conflicts resolved. Commit to complete merge.';
+  }
+}
+
+// Stash
+document.getElementById('git-stash').onclick = async () => {
+  const msg = prompt('Stash message:', 'WIP');
+  const result = await window.makaw.gitStash(gitPathInput.value, msg);
+  gitOutput.textContent = result.success? 'Stashed changes' : 'Error: ' + result.error;
+};
+
+document.getElementById('git-stash-pop').onclick = async () => {
+  const result = await window.makaw.gitStashPop(gitPathInput.value);
+  gitOutput.textContent = result.success? 'Stash applied' : 'Error: ' + result.error;
+};
+
+// Tag
+document.getElementById('git-tag-btn').onclick = async () => {
+  const tag = document.getElementById('git-tag-name').value;
+  if (!tag) return;
+  const result = await window.makaw.gitTag(gitPathInput.value, tag);
+  gitOutput.textContent = result.success? `Tagged ${tag}` : 'Error: ' + result.error;
+};
+
+// Reset Hard - with confirmation
+document.getElementById('git-reset-hard').onclick = async () => {
+  if (!confirm('Reset hard to HEAD? This will destroy uncommitted changes!')) return;
+  const result = await window.makaw.gitReset(gitPathInput.value, 'hard', 'HEAD');
+  gitOutput.textContent = result.success? 'Reset hard complete' : 'Error: ' + result.error;
+};
+
+    // File / Folder management
+    let openFiles = []; // { path, name, content, language, editorViewState, dirty }
+    let activeOpenFile = null; // path of active file
+    let openedFolder = null;
+
+    function detectLanguage(filename) {
+      const ext = filename.split('.').pop().toLowerCase();
+      const map = {
+        'html': 'html', 'htm': 'html',
+        'js': 'javascript', 'jsx': 'javascript',
+        'ts': 'typescript', 'tsx': 'typescript',
+        'css': 'css', 'json': 'json',
+        'py': 'python', 'md': 'markdown',
+        'xml': 'xml', 'svg': 'xml',
+        'c': 'c', 'cpp': 'cpp', 'h': 'c',
+        'java': 'java', 'rb': 'ruby',
+        'go': 'go', 'rs': 'rust',
+        'sh': 'shell', 'bash': 'shell',
+        'yaml': 'yaml', 'yml': 'yaml',
+        'sql': 'sql', 'vue': 'html',
+        'php': 'php', 'swift': 'swift',
+        'kt': 'kotlin', 'dart': 'dart',
+        'lua': 'lua', 'r': 'r',
+        'pl': 'perl', 'pm': 'perl',
+        'scala': 'scala', 'groovy': 'groovy',
+        'tex': 'latex'
+      };
+      return map[ext] || 'plaintext';
+    }
+
+    function renderOpenFileTabs() {
+      const container = document.getElementById('open-file-tabs');
+      container.innerHTML = '';
+      for (const f of openFiles) {
+        const tab = document.createElement('div');
+        tab.className = 'open-file-tab' + (f.path === activeOpenFile ? ' active' : '');
+        tab.textContent = f.name + (f.dirty ? ' ●' : '');
+        tab.onclick = () => switchToFile(f.path);
+        const close = document.createElement('span');
+        close.className = 'close';
+        close.textContent = '×';
+        close.onclick = (e) => { e.stopPropagation(); closeFile(f.path); };
+        tab.appendChild(close);
+        container.appendChild(tab);
+      }
+    }
+
+    async function switchToFile(filePath) {
+      const f = openFiles.find(x => x.path === filePath);
+      if (!f) return;
+      activeOpenFile = filePath;
+      renderOpenFileTabs();
+      if (editor) {
+        editor.setValue(f.content);
+        editor.setModelLanguage(editor.getModel(), f.language);
+        if (f.editorViewState) editor.restoreViewState(f.editorViewState);
+      }
+      languageSelect.value = f.language;
+      updateFileTab();
+      if (openedFolder) {
+        document.querySelectorAll('.file-tree-item').forEach(el => {
+          el.classList.toggle('active', el.dataset.path === filePath);
+        });
+      }
+    }
+
+    async function openFileInEditor(filePath, name, content) {
+      const existing = openFiles.findIndex(x => x.path === filePath);
+      if (existing >= 0) {
+        switchToFile(filePath);
+        return;
+      }
+      const lang = detectLanguage(name);
+      openFiles.push({ path: filePath, name, content, language: lang, editorViewState: null, dirty: false });
+      activeOpenFile = filePath;
+      renderOpenFileTabs();
+      if (editor) {
+        editor.setValue(content);
+        editor.setModelLanguage(editor.getModel(), lang);
+      }
+      languageSelect.value = lang;
+      updateFileTab();
+    }
+
+    function closeFile(filePath) {
+      const i = openFiles.findIndex(x => x.path === filePath);
+      if (i < 0) return;
+      const f = openFiles[i];
+      if (f.dirty && !confirm(`Save changes to ${f.name}?`)) return;
+      if (f.dirty && confirm(`Save changes to ${f.name}?`)) saveCurrentFile();
+      openFiles.splice(i, 1);
+      if (openFiles.length === 0) {
+        activeOpenFile = null;
+        renderOpenFileTabs();
+        if (editor) editor.setValue('');
+        return;
+      }
+      const next = openFiles[Math.min(i, openFiles.length - 1)];
+      switchToFile(next.path);
+    }
+
+    async function saveCurrentFile() {
+      if (!activeOpenFile) {
+        if (window.makaw && window.makaw.saveProject) {
+          const p = { name: projectNameInput.value || 'untitled', code: editor ? editor.getValue() : '', language: languageSelect.value };
+          await window.makaw.saveProject(p);
+          showToast('Project saved', 'success');
+        }
+        return;
+      }
+      const f = openFiles.find(x => x.path === activeOpenFile);
+      if (!f) return;
+      const content = editor ? editor.getValue() : '';
+      const result = await window.makaw.writeFile(f.path, content);
+      if (result.success) {
+        f.content = content;
+        f.dirty = false;
+        renderOpenFileTabs();
+        showToast(`Saved ${f.name}`, 'success');
+      } else {
+        showToast('Save failed: ' + result.error, 'error');
+      }
+    }
+
+    // File tree
+    async function renderFileTree(folderPath) {
+      const tree = document.getElementById('file-tree');
+      tree.innerHTML = '<div class="spinner" style="margin:20px auto;"></div>';
+      const result = await window.makaw.listFolder(folderPath);
+      if (!result.success) {
+        tree.innerHTML = '<div class="empty-state">Error: ' + result.error + '</div>';
+        return;
+      }
+      tree.innerHTML = '';
+      for (const item of result.files) {
+        const div = document.createElement('div');
+        div.className = 'file-tree-item';
+        div.dataset.path = item.path;
+        if (item.isDir) {
+          const chevron = document.createElement('span');
+          chevron.className = 'chevron';
+          chevron.textContent = '▶';
+          const icon = document.createElement('span');
+          icon.className = 'icon';
+          icon.textContent = '▾';
+          const name = document.createElement('span');
+          name.textContent = item.name;
+          const children = document.createElement('div');
+          children.className = 'file-tree-children';
+          children.style.display = 'none';
+          chevron.onclick = (e) => {
+            e.stopPropagation();
+            const open = children.style.display !== 'block';
+            children.style.display = open ? 'block' : 'none';
+            chevron.classList.toggle('open', open);
+            if (open && !children.children.length) {
+              renderFileTreeSub(item.path, children);
+            }
+          };
+          div.appendChild(chevron);
+          div.appendChild(icon);
+          div.appendChild(name);
+          div.ondblclick = () => {
+            const open = children.style.display !== 'block';
+            children.style.display = open ? 'block' : 'none';
+            chevron.classList.toggle('open', open);
+            if (open && !children.children.length) {
+              renderFileTreeSub(item.path, children);
+            }
+          };
+          tree.appendChild(div);
+          tree.appendChild(children);
+        } else {
+          const icon = document.createElement('span');
+          icon.className = 'icon';
+          icon.textContent = '·';
+          const name = document.createElement('span');
+          name.textContent = item.name;
+          div.appendChild(document.createElement('span')); // spacer for chevron
+          div.appendChild(icon);
+          div.appendChild(name);
+          div.onclick = async () => {
+            const res = await window.makaw.readFile(item.path);
+            if (res.success) {
+              openFileInEditor(item.path, res.name, res.content);
+            } else {
+              showToast('Error reading file: ' + res.error, 'error');
+            }
+          };
+          tree.appendChild(div);
+        }
+      }
+    }
+
+    async function renderFileTreeSub(folderPath, container) {
+      const result = await window.makaw.listFolder(folderPath);
+      if (!result.success) {
+        container.innerHTML = '<div class="empty-state" style="padding:8px;">' + result.error + '</div>';
+        return;
+      }
+      for (const item of result.files) {
+        const div = document.createElement('div');
+        div.className = 'file-tree-item';
+        div.dataset.path = item.path;
+        if (item.isDir) {
+          const chevron = document.createElement('span');
+          chevron.className = 'chevron';
+          chevron.textContent = '▶';
+          const icon = document.createElement('span');
+          icon.className = 'icon';
+          icon.textContent = '▾';
+          const name = document.createElement('span');
+          name.textContent = item.name;
+          const children = document.createElement('div');
+          children.className = 'file-tree-children';
+          children.style.display = 'none';
+          chevron.onclick = (e) => {
+            e.stopPropagation();
+            const open = children.style.display !== 'block';
+            children.style.display = open ? 'block' : 'none';
+            chevron.classList.toggle('open', open);
+            if (open && !children.children.length) renderFileTreeSub(item.path, children);
+          };
+          div.appendChild(chevron);
+          div.appendChild(icon);
+          div.appendChild(name);
+          container.appendChild(div);
+          container.appendChild(children);
+        } else {
+          const icon = document.createElement('span');
+          icon.className = 'icon';
+          icon.textContent = '·';
+          const name = document.createElement('span');
+          name.textContent = item.name;
+          div.appendChild(document.createElement('span'));
+          div.appendChild(icon);
+          div.appendChild(name);
+          div.onclick = async () => {
+            const res = await window.makaw.readFile(item.path);
+            if (res.success) openFileInEditor(item.path, res.name, res.content);
+            else showToast('Error: ' + res.error, 'error');
+          };
+          container.appendChild(div);
+        }
+      }
+    }
+
+    // Menu system
+    let activeMenu = null;
+    document.querySelectorAll('.menu-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = item.querySelector('.menu-dropdown');
+        if (!menu) return;
+        if (activeMenu && activeMenu !== menu) {
+          activeMenu.style.display = 'none';
+          activeMenu.parentElement.classList.remove('open');
+        }
+        const isOpen = menu.style.display === 'block';
+        menu.style.display = isOpen ? 'none' : 'block';
+        item.classList.toggle('open', !isOpen);
+        activeMenu = isOpen ? null : menu;
+      });
+    });
+    document.addEventListener('click', () => {
+      if (activeMenu) {
+        activeMenu.style.display = 'none';
+        activeMenu.parentElement.classList.remove('open');
+        activeMenu = null;
+      }
+    });
+
+    // File menu
+    document.getElementById('menu-new-file').onclick = () => {
+      if (!openedFolder) { showToast('Open a folder first', 'error'); return; }
+      const name = prompt('File name:', 'untitled.html');
+      if (!name) return;
+      window.makaw.createFile(openedFolder, name).then(r => {
+        if (r.success) {
+          window.makaw.readFile(r.path).then(res => {
+            if (res.success) openFileInEditor(r.path, res.name, res.content);
+      });
+      // Define Makaw custom theme with cyan accent
+      monaco.editor.defineTheme('makaw-dark', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [
+          { token: 'comment', foreground: '6B7280', fontStyle: 'italic' },
+          { token: 'keyword', foreground: '22D3EE' },
+          { token: 'string', foreground: '4ADE80' },
+          { token: 'number', foreground: 'FBBF24' },
+          { token: 'type', foreground: '22D3EE' },
+          { token: 'function', foreground: 'F9FAFB' },
+        ],
+        colors: {
+          'editor.background': '#0B0F19',
+          'editor.foreground': '#F9FAFB',
+          'editorCursor.foreground': '#22D3EE',
+          'editor.selectionBackground': '#22D3EE33',
+          'editorLineNumber.foreground': '#6B7280',
+          'editorLineNumber.activeForeground': '#9CA3AF',
+        }
+      });
+      monaco.editor.defineTheme('makaw-light', {
+        base: 'vs',
+        inherit: true,
+        rules: [
+          { token: 'comment', foreground: '9CA3AF', fontStyle: 'italic' },
+          { token: 'keyword', foreground: '0891B2' },
+          { token: 'string', foreground: '16A34A' },
+          { token: 'number', foreground: 'D97706' },
+        ],
+        colors: {
+          'editor.background': '#FFFFFF',
+          'editor.foreground': '#111827',
+          'editorCursor.foreground': '#0891B2',
+          'editor.selectionBackground': '#0891B233',
+          'editorLineNumber.foreground': '#9CA3AF',
+          'editorLineNumber.activeForeground': '#4B5563',
+        }
+      });
+      editor.updateOptions({ theme: initialDark ? 'makaw-dark' : 'makaw-light' });
+          renderFileTree(openedFolder);
+        } else showToast('Error: ' + r.error, 'error');
+      });
+    };
+    document.getElementById('menu-new-folder').onclick = () => {
+      if (!openedFolder) { showToast('Open a folder first', 'error'); return; }
+      const name = prompt('Folder name:', 'new-folder');
+      if (!name) return;
+      window.makaw.createFolder(openedFolder, name).then(r => {
+        if (r.success) { showToast('Folder created', 'success'); renderFileTree(openedFolder); }
+        else showToast('Error: ' + r.error, 'error');
+      });
+    };
+    document.getElementById('menu-open-file').onclick = async () => {
+      const result = await window.makaw.openFileDialog();
+      if (result && !result.canceled) openFileInEditor(result.path, result.name, result.content);
+    };
+    document.getElementById('menu-open-folder').onclick = async () => {
+      const result = await window.makaw.openFolderDialog();
+      if (result && !result.canceled) {
+        openedFolder = result.path;
+        document.getElementById('folder-path').textContent = result.path;
+        renderFileTree(result.path);
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+        document.querySelector('[data-tab="files"]').classList.add('active');
+        document.getElementById('files-tab').style.display = 'flex';
+        showToast('Project opened: ' + result.path, 'success');
+      }
+    };
+    document.getElementById('menu-save').onclick = saveCurrentFile;
+    document.getElementById('menu-export').onclick = async () => {
+      if (!currentProjectId) { showToast('Save project first', 'error'); return; }
+      const result = await window.makaw.exportProject(currentProjectId, 'vscode');
+      if (result.success) showToast('Exported: ' + result.path, 'success');
+    };
+
+    // Edit menu
+    document.getElementById('menu-format').onclick = () => {
+      if (editor) editor.getAction('editor.action.formatDocument')?.run();
+    };
+
+    // View menu
+    document.getElementById('menu-toggle-sidebar').onclick = () => {
+      document.getElementById('close-sidebar').click();
+    };
+    document.getElementById('menu-toggle-editor').onclick = () => {
+      document.getElementById('toggle-editor').click();
+    };
+    document.getElementById('menu-toggle-preview').onclick = () => {
+      document.getElementById('toggle-preview').click();
+    };
+    document.getElementById('menu-view-mode').onclick = () => {
+      document.getElementById('view-mode').click();
+    };
+    document.getElementById('menu-theme').onclick = () => {
+      document.getElementById('theme-toggle').click();
+    };
+    document.getElementById('menu-devtools').onclick = () => {
+      document.getElementById('devtools-btn').click();
+    };
+
+    // Go menu
+    document.getElementById('menu-go-back').onclick = () => document.getElementById('nav-back').click();
+    document.getElementById('menu-go-forward').onclick = () => document.getElementById('nav-forward').click();
+    document.getElementById('menu-go-reload').onclick = () => document.getElementById('nav-reload').click();
+
+    // Help menu  
+    document.getElementById('menu-about').onclick = () => {
+      showToast('Makaw Studio — Build something awesome.', 'success');
+    };
+
+    // Sidebar handlers
+    document.getElementById('open-file-from-sidebar').onclick = async () => {
+      const result = await window.makaw.openFileDialog();
+      if (result && !result.canceled) openFileInEditor(result.path, result.name, result.content);
+    };
+    document.getElementById('open-folder-from-sidebar').onclick = async () => {
+      const result = await window.makaw.openFolderDialog();
+      if (result && !result.canceled) {
+        openedFolder = result.path;
+        document.getElementById('folder-path').textContent = result.path;
+        renderFileTree(result.path);
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+        document.querySelector('[data-tab="files"]').classList.add('active');
+        document.getElementById('files-tab').style.display = 'flex';
+      }
+    };
+    document.getElementById('refresh-folder').onclick = () => {
+      if (openedFolder) renderFileTree(openedFolder);
+    };
+    // WSL/Windows quick-access shortcuts
+    function openFolderPath(path) {
+      openedFolder = path;
+      document.getElementById('folder-path').textContent = path;
+      renderFileTree(path);
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+      document.querySelector('[data-tab="files"]').classList.add('active');
+      document.getElementById('files-tab').style.display = 'flex';
+      showToast('Opened: ' + path, 'success');
+    }
+    document.getElementById('open-wsl-home').onclick = async () => {
+      const result = await window.makaw.resolvePath('$HOME');
+      if (result && result.path) openFolderPath(result.path);
+      else showToast('Could not resolve home directory', 'error');
+    };
+    document.getElementById('open-windows-root').onclick = async () => {
+      const result = await window.makaw.resolvePath('$WINDOWS_ROOT');
+      if (result && result.path) openFolderPath(result.path);
+      else showToast('/mnt/c not found — not running under WSL?', 'error');
+    };
+
+    // Monitor editor changes for dirty state
+    function setupDirtyTracking() {
+      if (editor) {
+        editor.onDidChangeModelContent(() => {
+          if (activeOpenFile) {
+            const f = openFiles.find(x => x.path === activeOpenFile);
+            if (f && !f.dirty) {
+              f.dirty = true;
+              renderOpenFileTabs();
+            }
+          }
+        });
+      } else {
+        setTimeout(setupDirtyTracking, 200);
+      }
+    }
+    setupDirtyTracking();
+
+    // Override Ctrl+S
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        saveCurrentFile();
+      }
+    });
+  </script>
+</body>
+</html>

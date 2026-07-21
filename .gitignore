@@ -1,0 +1,52 @@
+# Flutter
+build/
+.dart_tool/
+.packages
+.pub/
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node.js (electron builder)
+node_modules/
+
+# Android
+android/.gradle/
+android/app/build/
+android/local.properties
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Windows
+windows/out/
+
+# Linux
+linux/flutter/ephemeral
+
+# macOS
+macos/Pods/
+macos/.symlinks/
+
+# Web
+web/.dart_tool
+
+# Build outputs
+dist/
+*.apk
+*.aab
+android/.kotlin/
+
+# Generated
+*.g.dart
+*.freezed.dart

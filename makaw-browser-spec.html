@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hybrid Browser Specification Document</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm 15mm;
+            @bottom-right {
+                content: counter(page);
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                font-size: 9pt;
+                color: #888888;
+            }
+            @bottom-left {
+                content: "Hybrid Custom Web Browser - Product Specification";
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                font-size: 9pt;
+                color: #888888;
+            }
+        }
+        
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #2D3748;
+            line-height: 1.6;
+            font-size: 10.5pt;
+            margin: 0;
+            padding: 0;
+        }
+
+        h1, h2, h3, h4 {
+            color: #1A365D;
+            font-weight: 700;
+            margin-top: 0;
+        }
+
+        h1 {
+            font-size: 24pt;
+            border-bottom: 2px solid #2B6CB0;
+            padding-bottom: 8px;
+            margin-bottom: 25px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        h2 {
+            font-size: 15pt;
+            border-left: 5px solid #2B6CB0;
+            padding-left: 10px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            color: #2B6CB0;
+            page-break-after: avoid;
+        }
+
+        h3 {
+            font-size: 12pt;
+            margin-top: 20px;
+            margin-bottom: 8px;
+            color: #2D3748;
+            page-break-after: avoid;
+        }
+
+        p {
+            margin-top: 0;
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+
+        .meta-box {
+            background-color: #F7FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 30px;
+        }
+
+        .meta-grid {
+            display: table;
+            width: 100%;
+        }
+
+        .meta-row {
+            display: table-row;
+        }
+
+        .meta-label {
+            display: table-cell;
+            font-weight: bold;
+            width: 25%;
+            padding: 4px 0;
+            color: #4A5568;
+        }
+
+        .meta-value {
+            display: table-cell;
+            width: 75%;
+            padding: 4px 0;
+            color: #2D3748;
+        }
+
+        ul, ol {
+            margin-top: 0;
+            margin-bottom: 20px;
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 6px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            page-break-inside: avoid;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #E2E8F0;
+            font-size: 10pt;
+        }
+
+        th {
+            background-color: #2B6CB0;
+            color: white;
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) td {
+            background-color: #F7FAFC;
+        }
+
+        .math {
+            font-family: 'Times New Roman', Times, serif;
+            font-style: italic;
+            font-weight: bold;
+            color: #1A365D;
+        }
+
+        .highlight-box {
+            background-color: #EBF8FF;
+            border-left: 4px solid #3182CE;
+            padding: 12px 15px;
+            margin: 20px 0;
+            border-radius: 0 6px 6px 0;
+        }
+
+        .highlight-box p:last-child {
+            margin-bottom: 0;
+        }
+        
+        .tech-badge {
+            display: inline-block;
+            background-color: #EDF2F7;
+            color: #2B6CB0;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 9pt;
+            font-weight: 600;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Product Specification Document</h1>
+    
+    <div class="meta-box">
+        <div class="meta-grid">
+            <div class="meta-row">
+                <div class="meta-label">Project Name:</div>
+                <div class="meta-value">Hybrid Custom Web Browser (Desktop & Mobile)</div>
+            </div>
+            <div class="meta-row">
+                <div class="meta-label">Document Version:</div>
+                <div class="meta-value">v1.0.0</div>
+            </div>
+            <div class="meta-row">
+                <div class="meta-label">Target Platforms:</div>
+                <div class="meta-value">Windows, macOS, Linux, Android, iOS</div>
+            </div>
+            <div class="meta-row">
+                <div class="meta-label">Core Capabilities:</div>
+                <div class="meta-value">Dynamic HTML Execution, Multi-protocol Media Interception & Extraction</div>
+            </div>
+        </div>
+    </div>
+
+    <h2>1. Executive Concept</h2>
+    <p>
+        The Hybrid Custom Web Browser is a dual-engine sandbox browser application designed for desktop and mobile environments. The core ethos of this application is twofold: absolute user sovereignty over local code execution and autonomous media downloading capability. Unlike standard commercial browsers that isolate local files via restrictive CORS (Cross-Origin Resource Sharing) boundaries and strip media sniffing utilities to comply with ecosystem constraints, this application delivers an engine capable of dynamically rendering hot-pasted standalone HTML packages while serving as a network-level multi-threaded asset extraction manager.
+    </p>
+    <p>
+        The architecture treats pasted code segments as sandboxed virtual documents while deploying background asynchronous sniffers that monitor system-level sockets and framework-level rendering webviews to extract raw streams, chunked manifests, and responsive media tags.
+    </p>
+
+    <h2>2. Core Technical Features</h2>
+    
+    <h3>2.1 Dynamic Real-Time HTML Injection & Persistent Parsing</h3>
+    <ul>
+        <li><strong>Code Sandboxing:</strong> Provides a unified viewport interface allowing raw HTML strings or structural markup trees to be pasted directly into an interceptor input. The browser compiles these entries natively without disk storage overhead by parsing strings using memory buffers via localized data frames.</li>
+        <li><strong>Data URI Compilation:</strong> Standard injection structures utilize dynamic base64 conversion blocks. For deep multi-asset projects, the application translates text chunks using the formula: <span class="math">S_{uri} = \text{"data:text/html;base64,"} + \text{Base64}(S_{html})</span>.</li>
+        <li><strong>Hybrid Storage Cache:</strong> Integrated SQLite and indexed local file subsystems persist injected structures on-disk when explicitly flagged by the user, generating unique internal routes such as <code>local://hash_id/index.html</code> to allow subsequent sessions to re-render saved projects with cross-reference accessibility.</li>
+    </ul>
+
+    <h3>2.2 Autonomous Network-Level Media Sniffing & Interception</h3>
+    <ul>
+        <li><strong>Hooked Resource Sniffing:</strong> Intercepts outbound web requests generated by active tabs before communication handshakes resolve. It actively checks metadata headers for structural matching across image layers and network stream protocols.</li>
+        <li><strong>Adaptive Content Type Detection:</strong> Scans responding headers for target MIME definitions (e.g., <code>video/mp4</code>, <code>video/webm</code>, <code>image/webp</code>, <code>application/x-mpegURL</code>).</li>
+        <li><strong>Manifest Splicing (HLS/DASH):</strong> Recognizes index configurations containing stream structures (<code>.m3u8</code> or <code>.mpd</code> threads). The browser automatically intercepts the target chunk sequences, hooks an internal instance of a download utility, and serializes the dynamic stream blocks directly into a singular user file container.</li>
+    </ul>
+
+    <div class="highlight-box">
+        <p><strong>Universal Interception Mechanism:</strong> By binding code listeners directly into the application network engine wrappers (Electron <code>webRequest</code> API and Flutter <code>InAppWebView</code> framework), media payloads are parsed at the runtime kernel layer before modern obfuscation layers can intercept or mask the sources.</p>
+    </div>
+
+    <h3>2.3 Standard Web Browsing Package</h3>
+    <ul>
+        <li>Fully-featured browser UI featuring a unified address navigation bar, backward/forward navigation nodes, session-tracked tabs, bookmarks, history trackers, and full support for secure cryptographic handshakes (TLS/SSL).</li>
+    </ul>
+
+    <h2>3. Product Architectural Scope</h2>
+
+    <h3>3.1 In-Scope Capabilities</h3>
+    <ul>
+        <li>Cross-platform availability utilizing highly performant framework engines tailored for specific host environments (Desktop vs. Mobile).</li>
+        <li>Dynamic download dashboard featuring synchronous multi-threaded network connection streams to drastically optimize down-pipe speeds.</li>
+        <li>Execution layer for pasted HTML allowing full access to JavaScript rendering arrays, CSS canvas elements, and web graphics configurations.</li>
+        <li>Localized file-system mirroring for offline-rendered components, ensuring relative stylesheet directories or embedded image pointers map smoothly.</li>
+    </ul>
+
+    <h3>3.2 Out-of-Scope Capabilities</h3>
+    <ul>
+        <li>Cloud synchronizations or remote profile storage layers; all saved pages, downloaded binaries, and histories are kept strictly local to maximize privacy.</li>
+        <li>Bypassing Digital Rights Management (DRM) components like Widevine or FairPlay. Encrypted stream payloads requiring secure decryption keys remain bounded to respect hardware runtime rules.</li>
+    </ul>
+
+    <h2>4. Cross-Platform Technology Stack</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 25%;">Target Platform</th>
+                <th style="width: 35%;">Framework / Core Stack</th>
+                <th style="width: 40%;">Key Packages & Infrastructure Dependencies</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Desktop Browser</strong><br>(macOS, Win, Linux)</td>
+                <td>
+                    <span class="tech-badge">Electron</span>
+                    <span class="tech-badge">Node.js</span>
+                    <span class="tech-badge">Chromium</span>
+                </td>
+                <td>
+                    <code>session.webRequest</code> for network sniffing;<br>
+                    <code>ffmpeg-static</code> for media chunk aggregation;<br>
+                    <code>Better-SQLite3</code> for page management.
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Mobile Browser</strong><br>(iOS & Android)</td>
+                <td>
+                    <span class="tech-badge">Flutter</span>
+                    <span class="tech-badge">Dart</span>
+                    <span class="tech-badge">Native WebKit/Blink</span>
+                </td>
+                <td>
+                    <code>flutter_inappwebview</code> for intercepting headers;<br>
+                    <code>flutter_downloader</code> for background transfers;<br>
+                    <code>sqflite</code> for local state retention.
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Core Processing</strong><br>(Shared Utilities)</td>
+                <td>
+                    <span class="tech-badge">JavaScript (ES12)</span>
+                    <span class="tech-badge">FFmpeg C-Core</span>
+                </td>
+                <td>
+                    Binary demuxing libraries;<br>
+                    DOM parser selectors for image asset discovery.
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>5. Pipeline Workflow & Processing Model</h2>
+    <p>
+        The following processing sequencing outlines the workflow for media discovery and page transformation pipelines implemented across the structural components of the application:
+    </p>
+    <ol>
+        <li><strong>Initialization Node:</strong> Webview renders target structural frames using platform layout viewports. Custom JS files are continuously injected as content scripts upon frame handshakes.</li>
+        <li><strong>Network Evaluation:</strong> Network communication packets pass through processing gates. If an active data packet returns structural tags such as <code>Content-Type: application/vnd.apple.mpegurl</code>, a parsing interceptor breaks off the active link.</li>
+        <li><strong>Asset Reconstruction:</strong> For fragmented streams, the background file manager uses multithreaded download threads to fetch stream elements, feeding them to an integrated execution block to compile an intact, standalone media file.</li>
+    </ol>
+
+</body>
+</html>

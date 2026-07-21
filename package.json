@@ -1,0 +1,62 @@
+{
+  "name": "makaw-browser",
+  "version": "1.0.0",
+  "description": "Makaw with Code Studio + Git",
+  "main": "main.js",
+  "author": "Makaw",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder build",
+    "build:win": "electron-builder build --win",
+    "build:linux": "electron-builder build --linux",
+    "rebuild": "electron-rebuild -f -w better-sqlite3,node-pty"
+  },
+  "build": {
+    "appId": "com.makaw.browser",
+    "productName": "Makaw",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "style.css",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "assets/makaw_logo.ico"
+    },
+    "portable": {
+      "artifactName": "Makaw-${version}-portable.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/makaw_logo.ico"
+    }
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "electron": "^28.3.3",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "better-sqlite3": "^9.6.0",
+    "electron-updater": "^6.8.9",
+    "ffmpeg-static": "^5.2.0",
+    "monaco-editor": "^0.45.0",
+    "node-pty": "^1.0.0",
+    "simple-git": "^3.20.0"
+  }
+}

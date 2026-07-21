@@ -1,0 +1,107 @@
+Monaco Editor is wired up — Makaw Code Studio now has full VS Code–grade editing with IntelliSense, themes, and formatting.
+
+
+---
+
+Full Setup Instructions
+
+1. Install Node.js v18+ if you don’t have it: https://nodejs.org
+
+2. Create the project
+null
+3. Add all 4 files
+package.json ← from above
+main.js ← from previous v3 message  
+preload.js ← from previous v3 message
+index.html ← from above
+
+4. Install dependencies
+null
+This downloads electron, better-sqlite3, ffmpeg-static, and monaco-editor ∼200MB. Monaco is what gives you VS Code’s editor.
+
+5. Run Makaw
+null
+What You Get with Monaco
+null
+6. Using Makaw Code Studio
+Code: Type in Monaco with full IntelliSense
+Run: Click "Run Preview" → renders in right pane via sandboxed data: URI
+Save: Stores to SQLite — persists across restarts
+Export to VS Code: Generates .code-workspace file to open in native VS Code
+Snippets: Insert boilerplates with one click
+
+7. Mobile/Desktop Sync Ready
+Projects save to makaw-cache.db. When we build the Flutter version, it uses the same schema. Copy the .db file to your phone → instant access to all projects.
+
+
+
+How to Run Makaw Mobile
+
+1. Setup Flutter
+
+flutter create makaw_mobile
+cd makaw_mobile
+
+
+2. Install deps
+
+flutter pub get
+
+3. Run on device/simulator
+
+flutter run
+
+
+Mobile ↔ Desktop Workflow
+
+Code on phone: Edit in Makaw mobile, commit + push to GitHub
+Continue on desktop: Pull in Makaw desktop, full Monaco editor
+Browse + Extract: Use mobile InAppWebView to sniff media, download HLS
+SQLite sync: Copy makaw.db between devices or use Git to version project files
+
+Permissions needed iOS/Android:
+Storage: For projects + Git repos
+Network: For browser + Git push/pull
+
+Next steps:
+Add Monaco WebView: Load full Monaco Editor via WebView for better IntelliSense than code_text_field
+Git merge UI: Add side-by-side conflict resolver like desktop
+File sync: iCloud/Google Drive auto-sync for makaw.db
+
+Result: Full Ubuntu bash or PowerShell inside Makaw. Run:
+npm install -g @google/generative-ai-cli
+gemini "explain this code"
+npx opencode
+git status
+python3 script.py
+
+
+Limitations on Mobile: iOS blocks spawning shells. Use flutter_pty for Android + macOS. For iOS, you’ll need to SSH to a remote Linux box or use a web-based terminal via flutter_inappwebview pointed at your server.
+
+Workaround for iOS:
+// SSH to your dev machine
+final client = SSHClient(
+  await SSHSocket.connect('your-server.com', 22),
+  username: 'user',
+  onPasswordRequest: () => 'password',
+);
+final shell = await client.shell();
+terminal.onOutput = (data) => shell.write(const Utf8Encoder().convert(data));
+shell.stdout.cast<List<int>>().transform(Utf8Decoder()).listen(terminal.write);
+
+
+Using Gemini CLI, opencode, etc
+Desktop: Once the terminal is running, just install globally:
+
+npm i -g @google/generative-ai
+export GEMINI_API_KEY=your_key
+gemini -p "Refactor this function" < src/app.js
+
+npm i -g opencode-ai
+opencode
+
+Mobile Android: Install via pkg install nodejs in Termux, then use flutter_pty to spawn bash. iOS must use SSH to a machine with these tools.
+
+Security: The terminal has full access to your system. Sandbox with chroot or run in Docker if you’re worried.
+
+Want me to add split panes so you can have Monaco + Terminal side-by-side, or SSH manager so iOS can save connections to multiple dev boxes?
