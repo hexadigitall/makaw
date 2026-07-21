@@ -7,4 +7,6 @@ abstract class BrowserRepository {
   void removeTab(int tabId);
   void setActiveTab(int tabId);
   void updateTab(int tabId, {String? url, String? title});
+  void reorderTabs(int oldIndex, int newIndex);
+  void clearTabs();
 }

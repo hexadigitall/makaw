@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart' hide ContentBlocker;
 import 'package:url_launcher/url_launcher.dart';
-import 'services/password_manager.dart';
-import 'services/import_service.dart';
-import 'services/news_feed_service.dart';
+import 'features/browser/data/services/password_service.dart';
+import 'features/browser/data/services/import_service.dart';
+import 'features/news/data/services/news_feed_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
@@ -26,24 +27,29 @@ import 'package:open_filex/open_filex.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'services/content_blocker.dart';
-import 'services/download_manager.dart';
-import 'services/update_service.dart';
-import 'services/media_notification_service.dart';
-import 'widgets/news_feed_widget.dart';
-import 'widgets/downloads_widget.dart';
-import 'widgets/video_player_widget.dart';
-import 'widgets/pdf_viewer_widget.dart';
-import 'widgets/epub_viewer_widget.dart';
-import 'widgets/music_player_widget.dart';
-import 'widgets/image_viewer_widget.dart';
-import 'services/music_player_service.dart';
-import 'services/image_viewer_service.dart';
-import 'services/video_player_service.dart';
-import 'services/document_service.dart';
-import 'widgets/document_widget.dart';
+import 'features/browser/data/services/content_blocker_service.dart';
+import 'features/browser/presentation/providers/download_service.dart';
+import 'core/services/update_service.dart';
+import 'core/services/media_notification_service.dart';
+import 'features/news/presentation/pages/news_feed_page.dart';
+import 'features/media/presentation/pages/video_player_page.dart';
+import 'features/viewer/presentation/pages/pdf_viewer_page.dart';
+import 'features/viewer/presentation/pages/epub_viewer_page.dart';
+import 'features/music/presentation/pages/music_player_page.dart';
+import 'features/media/presentation/pages/image_viewer_page.dart';
+import 'features/music/data/services/music_player_service.dart';
+import 'features/media/data/services/image_viewer_service.dart';
+import 'features/media/data/services/video_player_service.dart';
+import 'features/documents/data/services/document_service.dart';
+import 'features/documents/presentation/pages/document_page.dart';
 import 'features/browser/domain/entities/entities.dart';
-import 'features/browser/presentation/screens/tab_tray_page.dart';
+import 'features/browser/presentation/pages/tab_tray_page.dart';
+import 'features/browser/presentation/pages/qr_scanner_page.dart';
+import 'features/viewer/presentation/pages/folder_video_player_page.dart';
+import 'features/browser/presentation/providers/download_manager_provider.dart';
+import 'app/providers/service_providers.dart';
+import 'features/browser/presentation/pages/media_sniffer_page.dart';
+import 'features/browser/presentation/widgets/downloads_widget.dart' as feature;
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 const kIconBgColor = Color(0xFF2B3845);
@@ -59,23 +65,6 @@ class ConflictPart {
   String ours = '';
   String theirs = '';
   bool inTheirs = false;
-}
-
-class MediaItem {
-  final String url;
-  final String type;
-  final String title;
-  final List<MediaFormat> formats;
-  MediaItem({required this.url, required this.type, this.title = '', this.formats = const []});
-}
-
-class MediaFormat {
-  final String label;
-  final String url;
-  final String mimeType;
-  final int? height;
-  final int? bitrate;
-  MediaFormat({required this.label, required this.url, this.mimeType = '', this.height, this.bitrate});
 }
 
 class EditorFile {
@@ -98,7 +87,7 @@ void main() async {
   };
   await globalMusicService.init();
   await _initMediaNotification();
-  runApp(MakawApp());
+  runApp(ProviderScope(child: MakawApp()));
 }
 
 final MusicPlayerService globalMusicService = MusicPlayerService();
@@ -156,13 +145,13 @@ Future<void> _requestNotificationPermission() async {
   }
 }
 
-class MakawApp extends StatefulWidget {
+class MakawApp extends ConsumerStatefulWidget {
   const MakawApp({super.key});
   @override
-  _MakawAppState createState() => _MakawAppState();
+  ConsumerState<MakawApp> createState() => _MakawAppState();
 }
 
-class _MakawAppState extends State<MakawApp> with WidgetsBindingObserver {
+class _MakawAppState extends ConsumerState<MakawApp> with WidgetsBindingObserver {
   String _themeMode = 'system';
 
   @override
@@ -260,15 +249,15 @@ class _MakawAppState extends State<MakawApp> with WidgetsBindingObserver {
 
 // ─── Home ─────────────────────────────────────────────────────────────────────
 
-class MakawHome extends StatefulWidget {
+class MakawHome extends ConsumerStatefulWidget {
   final String themeMode;
   final void Function(String mode)? onThemeChanged;
   const MakawHome({required this.themeMode, this.onThemeChanged});
   @override
-  _MakawHomeState createState() => _MakawHomeState();
+  ConsumerState<MakawHome> createState() => _MakawHomeState();
 }
 
-class _MakawHomeState extends State<MakawHome> {
+class _MakawHomeState extends ConsumerState<MakawHome> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentView = 'browser';
   ViewMode _viewMode = ViewMode.home;
@@ -387,7 +376,7 @@ class _MakawHomeState extends State<MakawHome> {
       case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
       case 'terminal': return _buildFeatureScaffold('Terminal', Icons.terminal, _buildTerminalTab());
       case 'downloads': return _buildFeatureScaffold('Downloads', Icons.download, _buildDownloadsTab());
-      case 'player': return VideoPlayerWidget(service: _videoService, onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media'));
+      case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media'));
       case 'music': return _buildMusicPlayerPage();
       case 'media': return _buildMediaHubPage();
       case 'images': return _buildImagePage();
@@ -406,8 +395,8 @@ class _MakawHomeState extends State<MakawHome> {
   int _fileIdCounter = 0;
 
   // Content blocker & download manager
-  final ContentBlocker _contentBlocker = ContentBlocker();
-  late final DownloadManager _downloadManager;
+  final ContentBlockerService _contentBlocker = ContentBlockerService();
+  late final DownloadService _downloadManager;
   late final UpdateService _updateService;
   String? _playVideoUrl;
   String? _playVideoTitle;
@@ -646,17 +635,21 @@ class _MakawHomeState extends State<MakawHome> {
       _initDownloadDir();
       _musicService.loadPlaylists();
       _musicService.loadFavorites();
+      ref.read(musicPlayerServiceProvider.notifier).state = _musicService;
       _requestNotificationPermission();
       _imageService.loadFavorites();
       _imageService.loadTrash();
+      ref.read(imageViewerServiceProvider.notifier).state = _imageService;
       // _imageService.scanAllImages(); // disabled — hangs on this device
       _videoService.loadFavorites();
       _videoService.loadPlaylists();
       _videoService.loadResumePositions();
       _videoService.scanAllVideos();
+      ref.read(videoPlayerServiceProvider.notifier).state = _videoService;
       _documentService.loadFavorites();
+      ref.read(documentServiceProvider.notifier).state = _documentService;
       // _documentService.scanAllDocuments(); // disabled — hangs on this device
-      _downloadManager = DownloadManager(
+      _downloadManager = DownloadService(
         dio: Dio(BaseOptions(
           connectTimeout: Duration(seconds: 15),
           receiveTimeout: Duration(seconds: 60),
@@ -666,6 +659,7 @@ class _MakawHomeState extends State<MakawHome> {
         showNotification: _showToast,
         onComplete: null,
       );
+      ref.read(downloadServiceProvider.notifier).state = _downloadManager;
       _updateService = UpdateService(
         updateUrl: 'https://your-org.github.io/makaw/update.json',
         dio: Dio(),
@@ -1294,7 +1288,7 @@ class _MakawHomeState extends State<MakawHome> {
       isDismissible: true,
       useSafeArea: true,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(0))),
-      builder: (ctx) => _MediaSnifferPage(
+      builder: (ctx) => MediaSnifferPage(
         items: items,
         showToast: _showToast,
         onDownload: (item) {
@@ -2137,8 +2131,7 @@ class _MakawHomeState extends State<MakawHome> {
   // ─── Downloads Tab ──────────────────────────────────────────────────────────
 
   Widget _buildDownloadsTab() {
-    return DownloadsWidget(
-      manager: _downloadManager,
+    return feature.DownloadsWidget(
       onOpenDownload: (url, filename, savePath) {
         if (savePath != null && savePath.isNotEmpty) {
           _openFile(savePath);
@@ -2271,7 +2264,7 @@ class _MakawHomeState extends State<MakawHome> {
   // ─── Folder Video Player ────────────────────────────────────────────────────
 
   Widget _buildFolderVideoPlayer(List<String> files) {
-    return _FolderVideoPlayerWidget(
+    return FolderVideoPlayerWidget(
       files: files,
       onClose: () => Navigator.of(context).pop(),
     );
@@ -2355,7 +2348,7 @@ class _MakawHomeState extends State<MakawHome> {
                   subtitle: 'Video Player',
                   onTap: () {
                     Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => VideoPlayerWidget(service: _videoService, onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media')),
+                      builder: (_) => VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media')),
                     ));
                   },
                 ),
@@ -2664,9 +2657,8 @@ class _MakawHomeState extends State<MakawHome> {
         }
       },
       child: MusicPlayerWidget(
-        service: _musicService,
         onOpenVideos: () {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => VideoPlayerWidget(service: _videoService, onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media'))));
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media'))));
         },
         onOpenSettings: () {
           _showToast('Music settings coming soon');
@@ -2676,12 +2668,11 @@ class _MakawHomeState extends State<MakawHome> {
   }
 
   Widget _buildImagePage() {
-    return ImageViewerWidget(service: _imageService);
+    return ImageViewerWidget();
   }
 
   Widget _buildDocumentPage() {
     return DocumentWidget(
-      service: _documentService,
       openFile: (path) => _openFile(path),
     );
   }
@@ -3902,7 +3893,7 @@ class _MakawHomeState extends State<MakawHome> {
     );
   }
 
-  Widget _buildToggleTile(StateSetter setDlgState, ContentBlocker cb, String label, bool value, ValueChanged<bool> onChanged) {
+  Widget _buildToggleTile(StateSetter setDlgState, ContentBlockerService cb, String label, bool value, ValueChanged<bool> onChanged) {
     return ListTile(
       dense: true,
       contentPadding: EdgeInsets.symmetric(horizontal: 4),
@@ -4581,7 +4572,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
   }
 
   void _autofillPassword(InAppWebViewController c, String url, String domain) async {
-    final entries = await passwordManager.getForUrl(url);
+    final entries = await passwordService.getForUrl(url);
     if (entries.isEmpty) return;
     final entry = entries.first;
     final escUser = entry.username.replaceAll("'", "\\'").replaceAll('\n', '\\n');
@@ -5040,7 +5031,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF14B8A6)),
             onPressed: () {
-              passwordManager.save(
+              passwordService.save(
                 _pendingPasswordUrl,
                 _pendingPasswordUsername,
                 _pendingPasswordPassword,
@@ -5059,7 +5050,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
   }
 
   Future<void> _showPasswordSettings() async {
-    final entries = await passwordManager.getAll();
+    final entries = await passwordService.getAll();
     final fixedEntries = List<PasswordEntry>.from(entries);
     if (!context.mounted) return;
     showModalBottomSheet(
@@ -5087,7 +5078,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                           if (fixedEntries.isNotEmpty)
                             TextButton(
                               onPressed: () async {
-                                for (final e in fixedEntries) { await passwordManager.delete(e.id); }
+                                for (final e in fixedEntries) { await passwordService.delete(e.id); }
                                 setSheetState(() { fixedEntries.clear(); });
                                 _showToast('All passwords cleared');
                               },
@@ -5129,7 +5120,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                                   IconButton(
                                     icon: Icon(Icons.delete_outline, color: Color(0xFFEF4444), size: 18),
                                     onPressed: () async {
-                                      await passwordManager.delete(entry.id);
+                                      await passwordService.delete(entry.id);
                                       setSheetState(() {
                                         fixedEntries.removeAt(i);
                                       });
@@ -5424,7 +5415,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     }
     if (!context.mounted) return;
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (ctx) => _QrScannerPage(
+      builder: (ctx) => QrScannerPage(
         onScan: (value) {
           Navigator.of(ctx).pop();
           if (value.startsWith('http://') || value.startsWith('https://')) {
@@ -5837,451 +5828,10 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
   }
 }
 
-// ─── Media Sniffer Page Widget ───────────────────────────────────────────
-
-class _MediaSnifferPage extends StatefulWidget {
-  final List<MediaItem> items;
-  final void Function(MediaItem) onDownload;
-  final void Function(List<MediaItem>) onDownloadAll;
-  final VoidCallback onClear;
-  final void Function(MediaItem, String) onRename;
-  final void Function(String) showToast;
-
-  const _MediaSnifferPage({
-    required this.items,
-    required this.onDownload,
-    required this.onDownloadAll,
-    required this.onClear,
-    required this.onRename,
-    required this.showToast,
-  });
-
-  @override
-  State<_MediaSnifferPage> createState() => _MediaSnifferPageState();
-}
-
-class _MediaSnifferPageState extends State<_MediaSnifferPage> {
-  bool _selectMode = false;
-  late List<bool> _selected;
-  late List<MediaItem> _items;
-
-  @override
-  void initState() {
-    super.initState();
-    _items = List.from(widget.items);
-    _selected = List.filled(_items.length, false);
-  }
-
-  int get _selectedCount => _selected.where((s) => s).length;
-
-  List<MediaItem> _sections(String type) =>
-      _items.where((m) => m.type == type).toList();
-
-  IconData _typeIcon(String type) {
-    switch (type) {
-      case 'video': return Icons.videocam;
-      case 'image': return Icons.image;
-      case 'audio': return Icons.music_note;
-      case 'document': return Icons.description;
-      default: return Icons.insert_drive_file;
-    }
-  }
-
-  Color _typeColor(String type) {
-    switch (type) {
-      case 'video': return const Color(0xFF818CF8);
-      case 'image': return const Color(0xFF34D399);
-      case 'audio': return const Color(0xFFFBBF24);
-      case 'document': return const Color(0xFFF87171);
-      default: return const Color(0xFF94A3B8);
-    }
-  }
-
-  String _sectionLabel(String type) {
-    switch (type) {
-      case 'video': return 'Videos';
-      case 'image': return 'Images';
-      case 'document': return 'Documents';
-      case 'audio': return 'Audio';
-      default: return 'Other';
-    }
-  }
-
-  IconData _sectionIcon(String type) {
-    switch (type) {
-      case 'video': return Icons.videocam;
-      case 'image': return Icons.image;
-      case 'document': return Icons.description;
-      case 'audio': return Icons.music_note;
-      default: return Icons.insert_drive_file;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final sectionTypes = ['video', 'image', 'document', 'audio'];
-    final availableTypes = sectionTypes.where((t) => _sections(t).isNotEmpty).toList();
-
-    return Container(
-      height: MediaQuery.of(context).size.height,
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: Column(
-        children: [
-          // ── Header ──
-          Container(
-            padding: EdgeInsets.fromLTRB(4, MediaQuery.of(context).padding.top + 4, 4, 4),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              border: Border(bottom: BorderSide(color: Theme.of(context).cardColor, width: 0.5)),
-            ),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.close, color: Theme.of(context).colorScheme.onSurface),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-                if (_selectMode) ...[
-                  Text('$_selectedCount Selected', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 15, fontWeight: FontWeight.w600)),
-                  Spacer(),
-                  TextButton(
-                    onPressed: _selectedCount == 0 ? null : () {
-                      final toDelete = <MediaItem>[];
-                      for (int i = _items.length - 1; i >= 0; i--) {
-                        if (_selected[i]) toDelete.add(_items[i]);
-                      }
-                      widget.onDownloadAll(toDelete);
-                      setState(() {
-                        for (final item in toDelete) _items.remove(item);
-                        _selected = List.filled(_items.length, false);
-                        _selectMode = false;
-                      });
-                    },
-                    child: Text('Delete', style: TextStyle(color: Colors.red, fontSize: 14)),
-                  ),
-                  SizedBox(width: 4),
-                  IconButton(
-                    icon: Icon(Icons.refresh, color: Theme.of(context).colorScheme.onSurface),
-                    onPressed: () {
-                      setState(() {
-                        _selected.fillRange(0, _selected.length, false);
-                        _selectMode = false;
-                      });
-                    },
-                    tooltip: 'Refresh',
-                  ),
-                ] else ...[
-                  Text('Media Sniffer', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w600)),
-                  Spacer(),
-                  TextButton(
-                    onPressed: () {
-                      widget.onClear();
-                      Navigator.of(context).pop();
-                    },
-                    child: Text('Clear', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 14)),
-                  ),
-                  SizedBox(width: 4),
-                  PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                    onSelected: (v) {
-                      if (v == 'select') setState(() => _selectMode = true);
-                      if (v == 'select_all') {
-                        setState(() {
-                          _selectMode = true;
-                          _selected.fillRange(0, _selected.length, true);
-                        });
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      PopupMenuItem(value: 'select', child: Text('Select', style: TextStyle(color: Theme.of(context).colorScheme.onSurface))),
-                      PopupMenuItem(value: 'select_all', child: Text('Select All', style: TextStyle(color: Theme.of(context).colorScheme.onSurface))),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-          // ── Content ──
-          Expanded(
-            child: _items.isEmpty
-                ? Center(child: Text('No media found', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))))
-                : ListView(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    children: [
-                      for (final type in availableTypes) ...[
-                        // Section header
-                        Padding(
-                          padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-                          child: Row(
-                            children: [
-                              Icon(_sectionIcon(type), size: 16, color: _typeColor(type)),
-                              SizedBox(width: 6),
-                              Text(_sectionLabel(type), style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.w600)),
-                              Spacer(),
-                              Text('${_sections(type).length}', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        // Items
-                        for (final item in _sections(type))
-                          _buildMediaItem(context, item),
-                      ],
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMediaItem(BuildContext context, MediaItem item) {
-    final idx = _items.indexOf(item);
-    final name = item.title.isNotEmpty ? item.title : item.url.split('/').last.split('?').first;
-    final displayName = name.length > 45 ? '${name.substring(0, 45)}...' : name;
-
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: _selectMode
-          ? CheckboxListTile(
-              dense: true,
-              value: idx >= 0 && idx < _selected.length ? _selected[idx] : false,
-              activeColor: kAccentTeal,
-              checkColor: Colors.white,
-              onChanged: (v) {
-                if (idx < 0) return;
-                setState(() => _selected[idx] = v ?? false);
-              },
-              secondary: Icon(_typeIcon(item.type), color: _typeColor(item.type), size: 22),
-              title: Text(displayName, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13)),
-              subtitle: Text(item.url, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
-            )
-          : Padding(
-              padding: EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(_typeIcon(item.type), color: _typeColor(item.type), size: 20),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(displayName, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500)),
-                            Text(item.url, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.edit, size: 16, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                        onPressed: () => _showRenameDialog(context, item),
-                        constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-                        padding: EdgeInsets.all(4),
-                        tooltip: 'Rename',
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.download, size: 18, color: kAccentTeal),
-                        onPressed: () {
-                          widget.onDownload(item);
-                          widget.showToast('Added to downloads');
-                        },
-                        constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-                        padding: EdgeInsets.all(4),
-                        tooltip: 'Download',
-                      ),
-                    ],
-                  ),
-                  if (item.formats.isNotEmpty) ...[
-                    SizedBox(height: 4),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: item.formats.map((f) {
-                        final selected = false;
-                        return GestureDetector(
-                          onTap: () {
-                            widget.onDownload(MediaItem(url: f.url, type: item.type, title: item.title));
-                            widget.showToast('Downloading ${f.label}');
-                          },
-                          child: Container(
-                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: selected ? kAccentTeal.withValues(alpha: 0.3) : Color(0xFF374151),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: selected ? kAccentTeal : Color(0xFF4B5563), width: 0.5),
-                            ),
-                            child: Text(f.label, style: TextStyle(fontSize: 11, color: selected ? kAccentTeal : Color(0xFF93C5FD))),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-    );
-  }
-
-  void _showRenameDialog(BuildContext context, MediaItem item) {
-    final ctl = TextEditingController(text: item.title.isNotEmpty ? item.title : item.url.split('/').last.split('?').first);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        title: Text('Rename', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16)),
-        content: TextField(
-          controller: ctl,
-          autofocus: true,
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-          decoration: InputDecoration(
-            hintText: 'Enter new name',
-            hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('Cancel', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)))),
-          TextButton(
-            onPressed: () {
-              final newName = ctl.text.trim();
-              if (newName.isNotEmpty) {
-                widget.onRename(item, newName);
-                setState(() {
-                  final idx = _items.indexOf(item);
-                  if (idx >= 0) _items[idx] = MediaItem(url: item.url, type: item.type, title: newName, formats: item.formats);
-                });
-              }
-              Navigator.of(ctx).pop();
-            },
-            child: Text('Rename', style: TextStyle(color: kAccentTeal)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── QR Scanner Page Widget ───────────────────────────────────────────────
 
-class _QrScannerPage extends StatefulWidget {
-  final void Function(String) onScan;
-  const _QrScannerPage({required this.onScan});
-
-  @override
-  State<_QrScannerPage> createState() => _QrScannerPageState();
-}
-
-class _QrScannerPageState extends State<_QrScannerPage> {
-  late final MobileScannerController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = MobileScannerController();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: Text('Scan Code', style: TextStyle(color: Colors.white)),
-        backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
-        leading: IconButton(
-          icon: Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: Stack(
-        children: [
-          MobileScanner(
-            controller: _controller,
-            errorBuilder: (ctx, error) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.error_outline, color: Colors.red, size: 48),
-                    SizedBox(height: 12),
-                    Text('Camera not available', style: TextStyle(color: Colors.white, fontSize: 16)),
-                    SizedBox(height: 4),
-                    Text('$error', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () async {
-                        await _controller.start();
-                      },
-                      child: Text('Retry'),
-                    ),
-                  ],
-                ),
-              );
-            },
-            onDetect: (capture) {
-              final barcode = capture.barcodes.firstOrNull;
-              if (barcode == null || barcode.rawValue == null) return;
-              final value = barcode.rawValue!;
-              widget.onScan(value);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Folder Video Player Widget ────────────────────────────────────────────
-
-class _FolderVideoPlayerWidget extends StatefulWidget {
-  final List<String> files;
-  final VoidCallback? onClose;
-
-  const _FolderVideoPlayerWidget({required this.files, this.onClose});
-
-  @override
-  State<_FolderVideoPlayerWidget> createState() => _FolderVideoPlayerWidgetState();
-}
-
-class _FolderVideoPlayerWidgetState extends State<_FolderVideoPlayerWidget> {
-  int _currentIndex = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final filePath = widget.files[_currentIndex];
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: Text(filePath.split('\\').last.split('/').last, style: TextStyle(fontSize: 13)),
-        backgroundColor: Colors.black87,
-        actions: [
-          if (_currentIndex > 0)
-            IconButton(icon: Icon(Icons.skip_previous), onPressed: () => setState(() => _currentIndex--)),
-          Text('${_currentIndex + 1}/${widget.files.length}', style: TextStyle(color: Colors.white54, fontSize: 12)),
-          if (_currentIndex < widget.files.length - 1)
-            IconButton(icon: Icon(Icons.skip_next), onPressed: () => setState(() => _currentIndex++)),
-          if (widget.onClose != null)
-            IconButton(icon: Icon(Icons.close), onPressed: widget.onClose),
-        ],
-      ),
-      body: DirectVideoPlayer(
-        filePath: filePath,
-        title: filePath.split('\\').last.split('/').last,
-      ),
-    );
-  }
-}
+// QrScannerPage moved to features/browser/presentation/pages/qr_scanner_page.dart
 
 // ─── Tab Tray Page ────────────────────────────────────────────────────────
 
-// TabTrayPage moved to features/browser/presentation/screens/tab_tray_page.dart
+// TabTrayPage moved to features/browser/presentation/pages/tab_tray_page.dart
