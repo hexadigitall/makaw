@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../domain/entities/browser_tab.dart';
 
@@ -10,19 +12,23 @@ const _kIncognitoPurple = Color(0xFF7C3AED);
 class TabTrayPage extends StatefulWidget {
   final List<BrowserTab> tabs;
   final int activeTabId;
+  final Map<int, Uint8List?> snapshots;
   final ValueChanged<int> onSwitchTab;
   final ValueChanged<int> onCloseTab;
   final VoidCallback onCreateTab;
   final VoidCallback? onCreateIncognitoTab;
+  final bool initialIsIncognito;
 
   const TabTrayPage({
     super.key,
     required this.tabs,
     required this.activeTabId,
+    this.snapshots = const {},
     required this.onSwitchTab,
     required this.onCloseTab,
     required this.onCreateTab,
     this.onCreateIncognitoTab,
+    this.initialIsIncognito = false,
   });
 
   @override
@@ -39,6 +45,7 @@ class _TabTrayPageState extends State<TabTrayPage> {
   void initState() {
     super.initState();
     _tabs = List.from(widget.tabs);
+    _showIncognito = widget.initialIsIncognito;
     _searchController.addListener(() {
       setState(() => _searchQuery = _searchController.text.toLowerCase());
     });
@@ -73,11 +80,73 @@ class _TabTrayPageState extends State<TabTrayPage> {
     }).toList();
   }
 
+  Widget _buildTabSnapshot(BrowserTab tab) {
+    if (tab.incognito) {
+      return Container(
+        color: _kIncognitoPurple.withValues(alpha: 0.15),
+        child: Center(
+          child: Icon(Icons.visibility_off, color: _kIncognitoPurple.withValues(alpha: 0.5), size: 48),
+        ),
+      );
+    }
+    final memoryData = widget.snapshots[tab.id];
+    if (memoryData != null) {
+      return Image.memory(memoryData, fit: BoxFit.cover, gaplessPlayback: true);
+    }
+    if (tab.snapshotPath != null) {
+      final file = File(tab.snapshotPath!);
+      if (file.existsSync()) {
+        return Image.file(file, fit: BoxFit.cover, gaplessPlayback: true);
+      }
+    }
+    if (tab.url.isNotEmpty && tab.url != 'about:blank') {
+      final domain = _friendlyTitle(tab.url);
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      final kAccentTeal = isDark ? _kAccentTealDark : _kAccentTealLight;
+      final kIconBgColor = isDark ? _kIconBgDark : _kIconBgLight;
+      return Container(
+        color: Theme.of(context).colorScheme.surface,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 48, height: 48,
+              decoration: BoxDecoration(color: kIconBgColor, borderRadius: BorderRadius.circular(8)),
+              child: Center(
+                child: Text(domain.isNotEmpty ? domain[0].toUpperCase() : '?',
+                    style: TextStyle(color: kAccentTeal, fontSize: 22, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(domain, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 11),
+                overflow: TextOverflow.ellipsis),
+          ],
+        ),
+      );
+    }
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 32, height: 32,
+              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
+              child: Center(child: Text('M', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
+            ),
+            SizedBox(height: 6),
+            Text('New Tab', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 10)),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final kAccentTeal = isDark ? _kAccentTealDark : _kAccentTealLight;
-    final kIconBgColor = isDark ? _kIconBgDark : _kIconBgLight;
 
     final hasIncognitoTabs = _tabs.any((t) => t.incognito);
     final regularCount = _tabs.where((t) => !t.incognito).length;
@@ -95,8 +164,8 @@ class _TabTrayPageState extends State<TabTrayPage> {
             child: Row(
               children: [
                 IconButton(
-                  icon: Icon(Icons.add_circle_outline, color: kAccentTeal, size: 28),
-                  onPressed: widget.onCreateTab,
+                  icon: Icon(Icons.add_circle_outline, color: _showIncognito ? _kIncognitoPurple : kAccentTeal, size: 28),
+                  onPressed: _showIncognito ? widget.onCreateIncognitoTab : widget.onCreateTab,
                   splashRadius: 20,
                 ),
                 Spacer(),
@@ -223,10 +292,7 @@ class _TabTrayPageState extends State<TabTrayPage> {
                   itemBuilder: (_, i) {
                     final tab = visible[i];
                     final isActive = tab.id == widget.activeTabId;
-                    final isNewTab = tab.url.isEmpty || tab.url == 'about:blank';
-                    final displayUrl = isNewTab ? '' : tab.url;
-                    final displayTitle = isNewTab ? 'New Tab' : tab.title;
-                    final domain = _friendlyTitle(displayUrl);
+                    final displayTitle = tab.url.isEmpty ? 'New Tab' : tab.title;
                     return Dismissible(
                       key: ValueKey('tab_${tab.id}'),
                       direction: DismissDirection.horizontal,
@@ -263,20 +329,17 @@ class _TabTrayPageState extends State<TabTrayPage> {
                                 ),
                                 child: Row(
                                   children: [
-                                    isNewTab
-                                      ? Container(
-                                          width: 20, height: 20,
-                                          child: Icon(Icons.public, size: 14, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
-                                        )
+                                    tab.incognito
+                                      ? Icon(Icons.visibility_off, size: 14, color: _kIncognitoPurple)
                                       : Container(
                                           width: 20, height: 20,
                                           decoration: BoxDecoration(
-                                            color: kIconBgColor,
+                                            color: _kIconBgDark,
                                             shape: BoxShape.circle,
                                           ),
                                           child: Center(
                                             child: Text(
-                                              domain.isNotEmpty ? domain[0].toUpperCase() : '?',
+                                              tab.url.isNotEmpty ? tab.url.replaceFirst(RegExp(r'^https?://(www\.)?'), '')[0].toUpperCase() : 'M',
                                               style: TextStyle(color: kAccentTeal, fontSize: 11, fontWeight: FontWeight.bold),
                                             ),
                                           ),
@@ -284,7 +347,7 @@ class _TabTrayPageState extends State<TabTrayPage> {
                                     SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
-                                        displayTitle.length > 14 ? '${displayTitle.substring(0, 14)}...' : displayTitle,
+                                        displayTitle.length > 16 ? '${displayTitle.substring(0, 16)}...' : displayTitle,
                                         style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 11),
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -300,54 +363,9 @@ class _TabTrayPageState extends State<TabTrayPage> {
                                 ),
                               ),
                               Expanded(
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.surface,
-                                    borderRadius: BorderRadius.vertical(bottom: Radius.circular(isActive ? 10 : 12)),
-                                  ),
-                                  child: Center(
-                                    child: isNewTab
-                                      ? Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Container(
-                                              width: 32, height: 32,
-                                              decoration: BoxDecoration(
-                                                color: Colors.black,
-                                                borderRadius: BorderRadius.circular(6),
-                                              ),
-                                              child: Center(
-                                                child: Text('M', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                                              ),
-                                            ),
-                                            SizedBox(height: 6),
-                                            Text('New Tab', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 10)),
-                                          ],
-                                        )
-                                      : Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Container(
-                                              width: 48, height: 48,
-                                              decoration: BoxDecoration(
-                                                color: kIconBgColor,
-                                                borderRadius: BorderRadius.circular(8),
-                                              ),
-                                              child: Center(
-                                                child: Text(
-                                                  domain.isNotEmpty ? domain[0].toUpperCase() : '?',
-                                                  style: TextStyle(color: kAccentTeal, fontSize: 22, fontWeight: FontWeight.bold),
-                                                ),
-                                              ),
-                                            ),
-                                            SizedBox(height: 6),
-                                            Text(domain,
-                                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 11),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ],
-                                        ),
-                                  ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.vertical(bottom: Radius.circular(isActive ? 10 : 12)),
+                                  child: _buildTabSnapshot(tab),
                                 ),
                               ),
                             ],

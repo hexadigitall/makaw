@@ -72,7 +72,8 @@ class DirectVideoPlayer extends StatefulWidget {
   final List<String>? playlist;
   final int initialIndex;
   final VoidCallback? onClose;
-  const DirectVideoPlayer({super.key, this.filePath, this.url, this.title = '', this.playlist, this.initialIndex = 0, this.onClose});
+  final VoidCallback? onDownload;
+  const DirectVideoPlayer({super.key, this.filePath, this.url, this.title = '', this.playlist, this.initialIndex = 0, this.onClose, this.onDownload});
   @override
   State<DirectVideoPlayer> createState() => _DirectVideoPlayerState();
 }
@@ -324,6 +325,8 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
             Expanded(
               child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold), textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
             ),
+            if (widget.onDownload != null)
+              IconButton(icon: const Icon(Icons.download, color: Colors.white70, size: 22), onPressed: widget.onDownload),
             if (!isLandscape)
               Column(mainAxisSize: MainAxisSize.min, children: [
                 IconButton(icon: const Icon(Icons.cast, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _toastCast),

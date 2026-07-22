@@ -18,6 +18,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:collection';
+import 'dart:typed_data';
 import 'package:xterm/xterm.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:dio/dio.dart';
@@ -55,6 +56,12 @@ import 'features/browser/presentation/widgets/downloads_widget.dart' as feature;
 const kIconBgColor = Color(0xFF2B3845);
 const kAccentOrange = Color(0xFFD44D33);
 const kAccentTeal = Color(0xFF00A7C2);
+
+const kIncognitoBg = Color(0xFF202124);
+const kIncognitoSurface = Color(0xFF2B2C2F);
+const kIncognitoInput = Color(0xFF3C4043);
+const kIncognitoAccent = Color(0xFFA8C7FA);
+const kIncognitoPurple = Color(0xFF7C3AED);
 
 
 // ─── Models ───────────────────────────────────────────────────────────────────
@@ -288,18 +295,20 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: [drive.DriveApi.driveFileScope]);
 
-  // Browser tabs
+  // Browser tabs — single WebView recycling
   List<BrowserTab> _browserTabs = [];
   int _activeBrowserTabId = 0;
   int _browserTabIdCounter = 0;
 
-  final Map<int, InAppWebViewController> _tabWebviews = {};
-  final Map<int, PullToRefreshController> _tabRefreshControllers = {};
-  final Map<int, bool> _tabReady = {};
+  final Map<int, InAppWebViewController> _tabControllers = {};
+  PullToRefreshController? _pullToRefreshController;
   final Map<int, int> _tabProgress = {};
-  final Map<int, String> _pendingNavigationUrls = {};
+  final Map<int, Uint8List?> _tabSnapshots = {};
   List<(String, String)> _shortcuts = [];
   bool _shortcutsLoaded = false;
+  bool _typeViewFromHome = false;
+  bool _isWebViewLoading = false;
+  DateTime? _lastPopupToast;
   bool _showPasswordDialog = false;
   String _pendingPasswordUrl = '';
   String _pendingPasswordUsername = '';
@@ -336,8 +345,15 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   // Navigation
   void _onUrlFocusChanged() {
     if (_urlFocusNode.hasFocus && _viewMode != ViewMode.typeView) {
-      setState(() {
-        _viewMode = ViewMode.typeView;
+      final rawUrl = _urlController.text;
+      final clean = _cleanDisplayUrl(rawUrl);
+      _typeViewFromHome = _showHomeScreen;
+      _ignoreUrlChanges = true;
+      if (clean.isNotEmpty) _urlController.text = clean;
+      _ignoreUrlChanges = false;
+      setState(() { _viewMode = ViewMode.typeView; });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
       });
     }
   }
@@ -1037,7 +1053,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
           _browserTabs.clear();
           for (final t in tabs) {
             final id = DateTime.now().microsecondsSinceEpoch + _browserTabs.length;
-            _browserTabs.add(BrowserTab(id: id, url: t['url'] as String? ?? '', title: t['title'] as String? ?? '', incognito: t['incognito'] as bool? ?? false));
+            _browserTabs.add(BrowserTab(
+              id: id,
+              url: t['url'] as String? ?? '',
+              title: t['title'] as String? ?? '',
+              incognito: t['incognito'] as bool? ?? false,
+              historyStack: (t['historyStack'] as List<dynamic>?)?.cast<String>() ?? [],
+              historyIndex: t['historyIndex'] as int? ?? 0,
+            ));
             setState(() {});
           }
           if (_browserTabs.isNotEmpty) {
@@ -1060,6 +1083,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       'url': t.url,
       'title': t.title,
       'incognito': t.incognito,
+      'historyStack': t.historyStack,
+      'historyIndex': t.historyIndex,
     }).toList());
     await prefs.setString('saved_tabs', tabsJson);
     await prefs.setInt('active_tab_id', _activeBrowserTabId);
@@ -1087,19 +1112,59 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   BrowserTab get _activeBrowserTab =>
       _browserTabs.isNotEmpty ? _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.first) : BrowserTab(id: 0, url: '');
 
-  InAppWebViewController? get _activeWebview =>
-      _tabWebviews[_activeBrowserTabId];
+  InAppWebViewController? get _activeWebview => _tabControllers[_activeBrowserTabId];
 
-  void _createBrowserTab({bool incognito = false}) {
+  BrowserTab get _activeTab =>
+      _browserTabs.isNotEmpty
+          ? _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.first)
+          : BrowserTab(id: 0, url: '');
+
+  void _warmUpDns(String url) {
+    try {
+      final uri = Uri.parse(url);
+      if (uri.host.isNotEmpty) {
+        InternetAddress.lookup(uri.host).catchError((_) {});
+      }
+    } catch (_) {}
+  }
+
+  void _createBrowserTab({bool incognito = false, String? url}) {
     final id = ++_browserTabIdCounter;
+    final tab = BrowserTab(id: id, url: url ?? '', incognito: incognito, title: incognito ? 'Incognito' : 'New Tab');
     setState(() {
-      _browserTabs.add(BrowserTab(id: id, url: '', incognito: incognito));
+      _browserTabs.add(tab);
       _activeBrowserTabId = id;
+      _tabProgress[id] = 0;
       _viewMode = ViewMode.newTab;
     });
     _urlController.clear();
     _syncUrlController();
     _saveSession();
+  }
+
+
+  Future<void> _captureCurrentTabSnapshot() async {
+    final c = _activeWebview;
+    if (c == null) return;
+    final tab = _activeTab;
+    if (tab.incognito || tab.url.isEmpty) return;
+    try {
+      final data = await c.takeScreenshot(
+        screenshotConfiguration: ScreenshotConfiguration(
+          compressFormat: CompressFormat.JPEG,
+          quality: 60,
+        ),
+      );
+      if (data != null) {
+        _tabSnapshots[tab.id] = data;
+        final dir = await getApplicationDocumentsDirectory();
+        final file = File('${dir.path}/tab_snapshots/${tab.id}.jpg');
+        await file.create(recursive: true);
+        await file.writeAsBytes(data);
+        final idx = _browserTabs.indexWhere((t) => t.id == tab.id);
+        if (idx >= 0) _browserTabs[idx].snapshotPath = file.path;
+      }
+    } catch (_) {}
   }
 
   void _showBrowsingView() {
@@ -1108,30 +1173,43 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     });
   }
 
-  void _switchBrowserTab(int id) {
+  Future<void> _switchBrowserTab(int id) async {
+    if (id == _activeBrowserTabId) {
+      final tab = _browserTabs.firstWhere((t) => t.id == id, orElse: () => _browserTabs.first);
+      if (!tab.isEmpty && _showHomeScreen) {
+        setState(() { _viewMode = ViewMode.browsing; });
+        _syncUrlController();
+      }
+      return;
+    }
     _urlFocusNode.unfocus();
+    _captureCurrentTabSnapshot();
+    final tab = _browserTabs.firstWhere((t) => t.id == id, orElse: () => _browserTabs.first);
     setState(() {
       _activeBrowserTabId = id;
-      final tab = _browserTabs.firstWhere((t) => t.id == id, orElse: () => _browserTabs.first);
-      _viewMode = tab.url.isEmpty ? ViewMode.newTab : ViewMode.browsing;
+      if (!tab.isEmpty) {
+        _viewMode = ViewMode.browsing;
+      } else {
+        _viewMode = ViewMode.newTab;
+      }
     });
     _syncUrlController();
   }
 
   void _closeBrowserTab(int id) {
     final idx = _browserTabs.indexWhere((t) => t.id == id);
+    _tabSnapshots.remove(id);
+    _tabProgress.remove(id);
+    _tabControllers.remove(id);
     setState(() {
       _browserTabs.removeWhere((t) => t.id == id);
-      _tabWebviews.remove(id);
-      _tabReady.remove(id);
-      _tabProgress.remove(id);
-      _tabRefreshControllers.remove(id);
       if (_browserTabs.isEmpty) {
         _goHome();
         _activeBrowserTabId = 0;
       } else if (_activeBrowserTabId == id) {
         final next = _browserTabs[idx > 0 ? idx - 1 : 0];
         _activeBrowserTabId = next.id;
+        _viewMode = !next.isEmpty ? ViewMode.browsing : ViewMode.newTab;
       }
     });
     _syncUrlController();
@@ -1139,11 +1217,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   }
 
   void _onBrowserNavigation(String url) {
-    final idx = _browserTabs.indexWhere((t) => t.id == _activeBrowserTabId);
-    if (idx < 0) return;
-    final tab = _browserTabs[idx];
+    final tab = _activeTab;
     if (tab.url == url && tab.url.isNotEmpty) return;
-    _browserTabs[idx] = tab.copyWith(url: url, title: url);
+    tab.url = url;
+    tab.title = url;
+    tab.pushHistory(url);
     _suggestDebounce?.cancel();
     _ignoreUrlChanges = true;
     if (!_showHomeScreen) _urlController.text = url;
@@ -1192,19 +1270,49 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     }
 
     _suggestDebounce?.cancel();
-    final id = ++_browserTabIdCounter;
-    _ignoreUrlChanges = true;
-    _urlController.text = url;
-    _ignoreUrlChanges = false;
-    setState(() {
-      _browserTabs.add(BrowserTab(id: id, url: url, incognito: false));
-      _activeBrowserTabId = id;
-      _viewMode = ViewMode.browsing;
-      _urlSuggestions = [];
-      _searchSuggestions = [];
-    });
+    _warmUpDns(url);
+    if (_browserTabs.isEmpty) {
+      final id = ++_browserTabIdCounter;
+      final tab = BrowserTab(id: id, url: url, incognito: false);
+      tab.pushHistory(url);
+      _ignoreUrlChanges = true;
+      _urlController.text = url;
+      _ignoreUrlChanges = false;
+      setState(() {
+        _browserTabs.add(tab);
+        _activeBrowserTabId = id;
+        _viewMode = ViewMode.browsing;
+        _urlSuggestions = [];
+        _searchSuggestions = [];
+      });
+    } else {
+      final tab = _activeTab;
+      tab.url = url;
+      tab.title = url;
+      tab.pushHistory(url);
+      _ignoreUrlChanges = true;
+      _urlController.text = url;
+      _ignoreUrlChanges = false;
+      setState(() {
+        _viewMode = ViewMode.browsing;
+        _urlSuggestions = [];
+        _searchSuggestions = [];
+      });
+    }
     _addHistoryEntry(url, url);
     _saveSession();
+    final c = _activeWebview;
+    if (c != null) {
+      c.loadUrl(urlRequest: URLRequest(url: WebUri(url))).catchError((_) {});
+    }
+  }
+
+  void _typeViewNavigate(String raw) {
+    if (_typeViewFromHome) {
+      _navigateOrOpenNewTab(raw);
+    } else {
+      _navigateInCurrentTab(raw);
+    }
   }
 
   void _navigateInCurrentTab(String raw) {
@@ -1220,13 +1328,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     _urlController.text = url;
     _ignoreUrlChanges = false;
     if (_browserTabs.isEmpty) {
-      // No tabs exist — create a new tab via _navigateToUrl
       _navigateToUrl(raw);
       return;
     }
-    final idx = _browserTabs.indexWhere((t) => t.id == _activeBrowserTabId);
-    if (idx < 0) return;
-    _browserTabs[idx] = _browserTabs[idx].copyWith(url: url, title: url);
+    final tab = _activeTab;
+    tab.url = url;
+    tab.title = url;
+    tab.pushHistory(url);
+    _warmUpDns(url);
     setState(() {
       _viewMode = ViewMode.browsing;
       _urlSuggestions = [];
@@ -1236,19 +1345,76 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     _saveSession();
     final c = _activeWebview;
     if (c != null) {
-      c.loadUrl(urlRequest: URLRequest(url: WebUri(url)))
-          .catchError((_) {});
-    } else {
-      _pendingNavigationUrls[_activeBrowserTabId] = url;
+      c.loadUrl(urlRequest: URLRequest(url: WebUri(url))).catchError((_) {});
     }
   }
 
-  void _showTabSwitcher() {
+  void _navigateOrOpenNewTab(String raw) {
+    String url;
+    if (raw.contains(' ') || (!raw.contains('.') && !raw.contains('://'))) {
+      url = 'https://www.google.com/search?q=${Uri.encodeComponent(raw)}';
+    } else {
+      url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : 'https://$raw';
+    }
+
+    final tab = _activeTab;
+    final isNtp = tab.url.isEmpty || tab.url == 'about:blank';
+
+    if (isNtp) {
+      tab.url = url;
+      tab.title = url;
+      tab.pushHistory(url);
+      _suggestDebounce?.cancel();
+      _urlFocusNode.unfocus();
+      _ignoreUrlChanges = true;
+      _urlController.text = url;
+      _ignoreUrlChanges = false;
+      _warmUpDns(url);
+      setState(() {
+        _viewMode = ViewMode.browsing;
+        _urlSuggestions = [];
+        _searchSuggestions = [];
+      });
+      _addHistoryEntry(url, url);
+      _saveSession();
+      final c = _activeWebview;
+      if (c != null) {
+        c.loadUrl(urlRequest: URLRequest(url: WebUri(url))).catchError((_) {});
+      }
+    } else {
+      _createBrowserTab(url: url);
+      final newTab = _activeTab;
+      newTab.pushHistory(url);
+      _suggestDebounce?.cancel();
+      _urlFocusNode.unfocus();
+      _ignoreUrlChanges = true;
+      _urlController.text = url;
+      _ignoreUrlChanges = false;
+      _warmUpDns(url);
+      setState(() {
+        _viewMode = ViewMode.browsing;
+        _urlSuggestions = [];
+        _searchSuggestions = [];
+      });
+      _addHistoryEntry(url, url);
+      _saveSession();
+    }
+  }
+
+  Future<void> _showTabSwitcher() async {
+    await _captureCurrentTabSnapshot();
+    if (!mounted) return;
+    final activeTab = _browserTabs.firstWhere(
+      (t) => t.id == _activeBrowserTabId,
+      orElse: () => _browserTabs.first,
+    );
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => TabTrayPage(
           tabs: _browserTabs,
           activeTabId: _activeBrowserTabId,
+          snapshots: _tabSnapshots,
+          initialIsIncognito: activeTab.incognito,
           onSwitchTab: (id) {
             _switchBrowserTab(id);
           },
@@ -2045,7 +2211,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     } else {
       c.setSettings(settings: InAppWebViewSettings(
         javaScriptEnabled: true,
-        userAgent: null,
+        userAgent: _stealthUA,
       ));
     }
     c.reload();
@@ -2070,7 +2236,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     _searchController.dispose();
     _terminalInputController.dispose();
     _terminalFocusNode.dispose();
-    _tabWebviews.clear();
+    _tabControllers.clear();
+    _tabSnapshots.clear();
     super.dispose();
   }
 
@@ -2161,6 +2328,12 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
             builder: (_) => DirectVideoPlayer(
               url: _playVideoUrl,
               title: _playVideoTitle ?? 'Video',
+              onDownload: _playVideoUrl != null ? () {
+                final url = _playVideoUrl!;
+                final filename = url.split('/').last.split('?').first;
+                _downloadManager.enqueue(url, filename: filename.isNotEmpty ? filename : 'video_${DateTime.now().millisecondsSinceEpoch}.mp4');
+                _showToast('Downloading: $filename');
+              } : null,
             ),
           )).then((_) {
             setState(() { _playVideoUrl = null; _playVideoTitle = null; });
@@ -2463,9 +2636,20 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
             onPopInvokedWithResult: (didPop, _) async {
               if (didPop) return;
               if (_currentView == 'browser') {
-                if (_urlFocusNode.hasFocus) {
+                if (_viewMode == ViewMode.typeView) {
                   _urlFocusNode.unfocus();
-                  primaryFocus?.unfocus();
+                  _suggestDebounce?.cancel();
+                  final tab = _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.first);
+                  _ignoreUrlChanges = true;
+                  if (!_showHomeScreen) {
+                    _urlController.text = tab.url.isEmpty ? '' : tab.url;
+                  }
+                  _ignoreUrlChanges = false;
+                  setState(() {
+                    _viewMode = _typeViewFromHome ? ViewMode.home : ViewMode.browsing;
+                    _urlSuggestions = [];
+                    _searchSuggestions = [];
+                  });
                   return;
                 }
                 final c = _activeWebview;
@@ -2853,85 +3037,132 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     );
   }
 
+  bool get _isIncognitoActive {
+    final tab = _activeTab;
+    return tab.incognito;
+  }
+
+  int get _currentModeTabCount {
+    if (_isIncognitoActive) {
+      return _browserTabs.where((t) => t.incognito).length;
+    }
+    return _browserTabs.where((t) => !t.incognito).length;
+  }
+
   // ─── Browser Header ──────────────────────────────────────────────────────────
 
   Widget _buildBrowserHeader() {
-    final tabCount = _browserTabs.length;
+    final tabCount = _currentModeTabCount;
+    final inc = _isIncognitoActive;
     final isHome = _isMakawHome;
-    final isNewTab = _isNewTabView;
 
     if (_viewMode == ViewMode.typeView) {
       return _buildTypeViewHeader();
     }
 
+    final headerBg = inc ? kIncognitoBg : Theme.of(context).colorScheme.surface;
+    final iconColor = inc ? Colors.white70 : Theme.of(context).colorScheme.onSurface;
+    final urlBarBg = inc ? kIncognitoInput : Theme.of(context).cardColor;
+    final urlTextColor = inc ? Colors.white70 : Theme.of(context).colorScheme.onSurface;
+    final urlHintColor = inc ? Colors.white38 : Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
+
     return Container(
-      color: Theme.of(context).colorScheme.surface,
+      color: headerBg,
       padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         children: [
-          if (isHome)
+          if (isHome && !inc)
             IconButton(
-              icon: Icon(Icons.menu, color: Theme.of(context).colorScheme.onSurface),
+              icon: Icon(Icons.menu, color: iconColor),
               onPressed: () => _scaffoldKey.currentState?.openDrawer(),
             )
           else
             IconButton(
-              icon: Icon(Icons.home_outlined, color: Theme.of(context).colorScheme.onSurface),
+              icon: Icon(inc ? Icons.visibility_off : Icons.home_outlined, color: iconColor),
               onPressed: _goHome,
             ),
           if (_viewMode == ViewMode.browsing)
             Expanded(
               child: GestureDetector(
                 onTap: () {
-                  setState(() {
-                    _viewMode = ViewMode.typeView;
-                  });
+                  final clean = _cleanDisplayUrl(_urlController.text);
+                  _typeViewFromHome = false;
+                  _ignoreUrlChanges = true;
+                  if (clean.isNotEmpty) _urlController.text = clean;
+                  _ignoreUrlChanges = false;
+                  setState(() { _viewMode = ViewMode.typeView; });
                   _urlFocusNode.requestFocus();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
+                  });
                 },
                 child: Container(
                   margin: EdgeInsets.symmetric(horizontal: 8),
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
+                    color: urlBarBg,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(
-                    _urlController.text.isNotEmpty ? _urlController.text : 'Search or enter address',
-                    style: TextStyle(
-                      color: _urlController.text.isNotEmpty ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                      fontSize: 14,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                  child: Row(
+                    children: [
+                      if (inc) ...[
+                        Icon(Icons.visibility_off, size: 16, color: kIncognitoAccent),
+                        SizedBox(width: 8),
+                      ],
+                      if (!inc && _urlController.text.isNotEmpty && _urlController.text.startsWith('https'))
+                        Icon(Icons.lock_outline, size: 14, color: Colors.green),
+                      Expanded(
+                        child: Text(
+                          _urlController.text.isNotEmpty ? _cleanDisplayUrl(_urlController.text) : (inc ? 'Search privately' : 'Search or enter address'),
+                          style: TextStyle(
+                            color: _urlController.text.isNotEmpty ? urlTextColor : urlHintColor,
+                            fontSize: 14,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
             )
           else
             Spacer(),
-          if (_viewMode != ViewMode.newTab && _viewMode != ViewMode.home)
-            _buildIncognitoBadge(),
           GestureDetector(
             onTap: _showTabSwitcher,
             child: Container(
               padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
+                color: inc ? kIncognitoPurple.withValues(alpha: 0.15) : Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
+                border: Border.all(
+                  color: inc ? kIncognitoPurple.withValues(alpha: 0.5) : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
+                ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.tab, size: 18, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+                  Icon(
+                    inc ? Icons.visibility_off : Icons.tab,
+                    size: 18,
+                    color: inc ? kIncognitoPurple : iconColor,
+                  ),
                   SizedBox(width: 4),
-                  Text('$tabCount', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.w600)),
+                  Text(
+                    '$tabCount',
+                    style: TextStyle(
+                      color: inc ? kIncognitoPurple : iconColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
           SizedBox(width: 4),
           IconButton(
-            icon: Icon(Icons.more_horiz, color: Theme.of(context).colorScheme.onSurface),
+            icon: Icon(Icons.more_horiz, color: iconColor),
             onPressed: _showEllipsisMenu,
           ),
         ],
@@ -2939,23 +3170,21 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     );
   }
 
-  Widget _buildIncognitoBadge() {
-    if (!_browserTabs.any((t) => t.incognito)) return SizedBox.shrink();
-    return Padding(
-      padding: EdgeInsets.only(right: 4),
-      child: Icon(Icons.visibility_off, size: 16, color: Color(0xFF7C3AED)),
-    );
-  }
-
   Widget _buildTypeViewHeader() {
+    final inc = _isIncognitoActive;
+    final headerBg = inc ? kIncognitoBg : Theme.of(context).colorScheme.surface;
+    final iconColor = inc ? Colors.white70 : Theme.of(context).colorScheme.onSurface;
+    final inputBg = inc ? kIncognitoInput : Theme.of(context).cardColor;
+    final textColor = inc ? Colors.white : Theme.of(context).colorScheme.onSurface;
+    final hintColor = inc ? Colors.white38 : Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
+
     return Container(
-      color: Theme.of(context).colorScheme.surface,
+      color: headerBg,
       padding: EdgeInsets.only(left: 4, right: 4, top: 4, bottom: 6),
       child: Row(
         children: [
-          // + icon for file attachment
           PopupMenuButton<String>(
-            icon: Icon(Icons.add_circle_outline, color: Theme.of(context).colorScheme.onSurface, size: 26),
+            icon: Icon(Icons.add_circle_outline, color: iconColor, size: 26),
             onSelected: (v) {
               if (v == 'tabs') _showTabSwitcher();
               else if (v == 'camera') _scanQRCode();
@@ -2963,26 +3192,30 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
               else if (v == 'files') _pickFile();
             },
             itemBuilder: (_) => [
-              PopupMenuItem(value: 'tabs', child: ListTile(leading: Icon(Icons.tab, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)), title: Text('Tabs', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)), dense: true)),
-              PopupMenuItem(value: 'camera', child: ListTile(leading: Icon(Icons.camera_alt, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)), title: Text('Camera', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)), dense: true)),
-              PopupMenuItem(value: 'gallery', child: ListTile(leading: Icon(Icons.photo_library, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)), title: Text('Gallery', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)), dense: true)),
-              PopupMenuItem(value: 'files', child: ListTile(leading: Icon(Icons.folder, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)), title: Text('Files', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)), dense: true)),
+              PopupMenuItem(value: 'tabs', child: ListTile(leading: Icon(Icons.tab, color: iconColor), title: Text('Tabs', style: TextStyle(color: textColor)), dense: true)),
+              PopupMenuItem(value: 'camera', child: ListTile(leading: Icon(Icons.camera_alt, color: iconColor), title: Text('Camera', style: TextStyle(color: textColor)), dense: true)),
+              PopupMenuItem(value: 'gallery', child: ListTile(leading: Icon(Icons.photo_library, color: iconColor), title: Text('Gallery', style: TextStyle(color: textColor)), dense: true)),
+              PopupMenuItem(value: 'files', child: ListTile(leading: Icon(Icons.folder, color: iconColor), title: Text('Files', style: TextStyle(color: textColor)), dense: true)),
             ],
           ),
           Expanded(
             child: Container(
               margin: EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
+                color: inputBg,
                 borderRadius: BorderRadius.circular(24),
               ),
               child: TextField(
                 controller: _urlController,
                 focusNode: _urlFocusNode,
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
+                style: TextStyle(color: textColor, fontSize: 16),
                 decoration: InputDecoration(
-                  hintText: 'Search or enter address',
-                  hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 16),
+                  hintText: inc ? 'Search privately' : 'Search or enter address',
+                  hintStyle: TextStyle(color: hintColor, fontSize: 16),
+                  prefixIcon: inc ? Padding(
+                    padding: EdgeInsets.only(left: 12, right: 4),
+                    child: Icon(Icons.visibility_off, size: 18, color: kIncognitoAccent),
+                  ) : null,
                   border: InputBorder.none,
                   isDense: true,
                   contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -2990,18 +3223,18 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                 keyboardType: TextInputType.url,
                 textInputAction: TextInputAction.go,
                 onSubmitted: (v) {
-                  if (v.trim().isNotEmpty) _navigateInCurrentTab(v.trim());
+                  if (v.trim().isNotEmpty) _typeViewNavigate(v.trim());
                 },
               ),
             ),
           ),
           SizedBox(width: 6),
           IconButton(
-            icon: Icon(Icons.mic, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 22),
+            icon: Icon(Icons.mic, color: iconColor, size: 22),
             onPressed: () => _showToast('Voice search'),
           ),
           IconButton(
-            icon: Icon(Icons.qr_code_scanner, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 22),
+            icon: Icon(Icons.qr_code_scanner, color: iconColor, size: 22),
             onPressed: _scanQRCode,
           ),
         ],
@@ -3055,15 +3288,13 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                   shrinkWrap: true,
                   padding: EdgeInsets.symmetric(vertical: 4),
                   children: [
-                    _ellipsisItem(Icons.tab, 'New Tab', () { Navigator.of(ctx).pop(); Future.microtask(_createBrowserTab); }),
+                    _ellipsisItem(Icons.tab, 'New Tab', () { Navigator.of(ctx).pop(); Future.microtask(() => _createBrowserTab(incognito: _isIncognitoActive)); }),
                     _ellipsisItem(Icons.visibility_off, 'New Incognito', () { Navigator.of(ctx).pop(); Future.microtask(() => _createBrowserTab(incognito: true)); }),
                     _ellipsisItem(Icons.folder, 'Add to Group', () { _showToast('Tab groups coming soon'); Navigator.of(ctx).pop(); }),
                     _ellipsisItem(Icons.history, 'History', () { Navigator.of(ctx).pop(); _switchToView('history'); }),
                     _ellipsisItem(Icons.delete_sweep, 'Delete Browsing Data', () {
-                      _tabWebviews.forEach((_, c) {
-                        CookieManager.instance().deleteAllCookies().catchError((_) {});
-                        c.clearCache().catchError((_) {});
-                      });
+                      CookieManager.instance().deleteAllCookies().catchError((_) {});
+                      _activeWebview?.clearCache().catchError((_) {});
                       _showToast('Browsing data cleared');
                       Navigator.of(ctx).pop();
                     }),
@@ -3156,7 +3387,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                   children: _shortcuts.map((s) => ListTile(
                     title: Text(s.$1, style: TextStyle(color: Colors.white)),
                     subtitle: Text(s.$2, style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                    onTap: () { Navigator.of(ctx2).pop(); _navigateInCurrentTab(s.$2); },
+                    onTap: () { Navigator.of(ctx2).pop(); _navigateOrOpenNewTab(s.$2); },
                   )).toList(),
                 ),
               ),
@@ -3172,52 +3403,44 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   Widget _buildBrowserContent() {
     final showHome = _showHomeScreen;
     final progress = _tabProgress[_activeBrowserTabId];
-    return Stack(
+    final isTypeView = _viewMode == ViewMode.typeView;
+
+    return Column(
       children: [
-        Column(
-          children: [
-            if (!_isFullscreen) _buildBrowserHeader(),
-            if (!showHome && progress != null && progress > 0 && progress < 100)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: progress / 100.0,
-                  backgroundColor: Theme.of(context).colorScheme.surface,
-                  valueColor: AlwaysStoppedAnimation(kAccentTeal),
-                  minHeight: 2,
-                ),
-              ),
-            Expanded(
-              child: showHome ? _buildHomeContent() : _buildWebviewArea(),
+        if (!_isFullscreen) _buildBrowserHeader(),
+        if (!showHome && !isTypeView && progress != null && progress > 0 && progress < 100)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: progress / 100.0,
+              backgroundColor: _isIncognitoActive ? kIncognitoBg : Theme.of(context).colorScheme.surface,
+              valueColor: AlwaysStoppedAnimation(_isIncognitoActive ? kIncognitoPurple : kAccentTeal),
+              minHeight: 2,
             ),
-            if (!showHome && _musicService.currentSong != null) _buildMiniMusicPlayer(),
-          ],
+          ),
+        Expanded(
+          child: Stack(
+            children: [
+              if (!showHome) _buildWebviewArea(),
+              if (showHome && !isTypeView) _buildHomeContent(),
+              if (isTypeView) _buildTypeView(),
+            ],
+          ),
         ),
-        if (_viewMode == ViewMode.typeView)
-          Positioned.fill(child: _buildTypeView()),
+        if (!showHome && !isTypeView && _musicService.currentSong != null) _buildMiniMusicPlayer(),
       ],
     );
   }
 
   Widget _buildWebviewArea() {
-    Widget content;
-    if (_activeBrowserTabId != 0 && _browserTabs.isNotEmpty) {
-      final tab = _browserTabs.firstWhere(
-        (t) => t.id == _activeBrowserTabId,
-        orElse: () => _browserTabs.first,
-      );
-      content = SizedBox(
-        key: ValueKey('wv_${tab.id}'),
-        child: _buildWebview(tab),
-      );
-    } else if (_browserTabs.isNotEmpty) {
-      content = Container(color: Theme.of(context).colorScheme.surface);
-    } else {
-      content = Center(child: Text('No tabs open', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))));
-    }
+    final activeIndex = _browserTabs.indexWhere((t) => t.id == _activeBrowserTabId);
     return Stack(
       children: [
-        content,
+        if (_browserTabs.isNotEmpty && activeIndex >= 0)
+          IndexedStack(
+            index: activeIndex,
+            children: _browserTabs.map((tab) => _buildTabWebView(tab)).toList(),
+          ),
         if (_isFullscreen)
           Positioned(
             top: 12,
@@ -3279,6 +3502,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   // ─── Home Screen ───────────────────────────────────────────────────────────
 
   Widget _buildHomeContent() {
+    if (_isIncognitoActive) return _buildIncognitoLandingPage();
     if (_showHomeScreen) _urlController.clear();
     return RefreshIndicator(
       onRefresh: _refreshNewsFeed,
@@ -3332,7 +3556,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                         ),
                         keyboardType: TextInputType.url,
                         textInputAction: TextInputAction.go,
-                        onSubmitted: _navigateInCurrentTab,
+                        onSubmitted: _navigateOrOpenNewTab,
                       ),
                   ),
                   SizedBox(width: 14),
@@ -3524,13 +3748,115 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
             NewsFeedWidget(
               key: _newsFeedKey,
               service: _newsFeedService!,
-              onNavigate: (url) => _navigateInCurrentTab(url),
+              onNavigate: (url) => _navigateOrOpenNewTab(url),
               scrollController: _newsFeedScrollController,
             ),
           SizedBox(height: 24),
         ],
       ),
       ),
+    );
+  }
+
+  Widget _buildIncognitoLandingPage() {
+    _urlController.clear();
+    return Container(
+      color: kIncognitoBg,
+      padding: EdgeInsets.symmetric(horizontal: 24),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80, height: 80,
+              decoration: BoxDecoration(
+                color: kIncognitoPurple.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.visibility_off, color: kIncognitoPurple, size: 40),
+            ),
+            SizedBox(height: 24),
+            Text(
+              'You\'re browsing privately',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Your activity won\'t be saved in this browser.',
+              style: TextStyle(
+                color: Colors.white54,
+                fontSize: 14,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 36),
+            // Omnibox
+            GestureDetector(
+              onTap: () {
+                setState(() { _typeViewFromHome = true; _viewMode = ViewMode.typeView; });
+                _urlFocusNode.requestFocus();
+              },
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                decoration: BoxDecoration(
+                  color: kIncognitoInput,
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: kIncognitoPurple.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, color: Colors.white54, size: 22),
+                    SizedBox(width: 12),
+                    Text(
+                      'Search privately',
+                      style: TextStyle(color: Colors.white38, fontSize: 16),
+                    ),
+                    Spacer(),
+                    Icon(Icons.qr_code_scanner, color: Colors.white38, size: 22),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 40),
+            // Privacy features
+            _buildIncognitoFeature(Icons.history, 'Activity is erased', 'Tabs, history, and cookies are deleted when you close all incognito tabs'),
+            SizedBox(height: 20),
+            _buildIncognitoFeature(Icons.lock_outline, 'Safer connection', 'Pages you visit won\'t be saved to this device'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIncognitoFeature(IconData icon, String title, String subtitle) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(
+            color: kIncognitoPurple.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: kIncognitoAccent, size: 20),
+        ),
+        SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500)),
+              SizedBox(height: 3),
+              Text(subtitle, style: TextStyle(color: Colors.white38, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -3579,7 +3905,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     final faviconUrl = domain.isNotEmpty ? 'https://www.google.com/s2/favicons?domain=$domain&sz=64' : '';
     return GestureDetector(
       onTap: () {
-        if (url != null && url.isNotEmpty) _navigateInCurrentTab(url);
+        if (url != null && url.isNotEmpty) _navigateOrOpenNewTab(url);
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -3788,7 +4114,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                     ),
                   ),
                   GestureDetector(
-                    onTap: () => _navigateInCurrentTab(lastUrl),
+                    onTap: () => _typeViewNavigate(lastUrl),
                     child: Icon(Icons.arrow_forward_ios, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 16),
                   ),
                 ],
@@ -4139,7 +4465,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
   Widget _buildSuggestionItem(String display, String url, IconData icon) {
     return InkWell(
-      onTap: () => _navigateInCurrentTab(url),
+      onTap: () => _typeViewNavigate(url),
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         child: Row(
@@ -4156,47 +4482,41 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   }
 
   Widget _buildTypeView() {
-    return Column(
-      children: [
-        if (_urlSuggestions.isNotEmpty || _searchSuggestions.isNotEmpty)
-          Expanded(
-            child: Container(
-              color: Theme.of(context).colorScheme.surface.withOpacity(0.95),
-              child: ListView(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                children: [
-                  if (_searchSuggestions.isNotEmpty) ...[
-                    Padding(
-                      padding: EdgeInsets.only(bottom: 8),
-                      child: Text('Search suggestions', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-                    ),
-                    ..._searchSuggestions.take(5).map((s) => ListTile(
-                      dense: true,
-                      leading: Icon(Icons.search, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
-                      title: Text(s, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
-                      onTap: () => _navigateInCurrentTab(s),
-                    )),
-                  ],
-                  if (_urlSuggestions.isNotEmpty) ...[
-                    if (_searchSuggestions.isNotEmpty) Divider(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
-                    ..._urlSuggestions.take(5).map((s) {
-                      final url = s['url'] as String? ?? '';
-                      final title = s['title'] as String? ?? '';
-                      return ListTile(
-                        dense: true,
-                        leading: Icon(Icons.language, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
-                        title: Text(title.isNotEmpty ? title : url, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
-                        onTap: () => _navigateInCurrentTab(url),
-                      );
-                    }),
-                  ],
-                ],
-              ),
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      child: (_urlSuggestions.isEmpty && _searchSuggestions.isEmpty)
+          ? const SizedBox.shrink()
+          : ListView(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        children: [
+          if (_searchSuggestions.isNotEmpty) ...[
+            Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('Search suggestions', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12, fontWeight: FontWeight.w600)),
             ),
-          )
-        else
-          Expanded(child: SizedBox.shrink()),
-      ],
+            ..._searchSuggestions.take(5).map((s) => ListTile(
+              dense: true,
+              leading: Icon(Icons.search, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
+              title: Text(s, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
+              onTap: () => _typeViewNavigate(s),
+            )),
+          ],
+          if (_urlSuggestions.isNotEmpty) ...[
+            if (_searchSuggestions.isNotEmpty) Divider(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
+            ..._urlSuggestions.take(5).map((s) {
+              final url = s['url'] as String? ?? '';
+              final title = s['title'] as String? ?? '';
+              final display = _cleanDisplayUrl(url.isNotEmpty ? url : title);
+              return ListTile(
+                dense: true,
+                leading: Icon(Icons.language, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
+                title: Text(display, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
+      onTap: () => _typeViewNavigate(url),
+              );
+            }),
+          ],
+        ],
+      ),
     );
   }
 
@@ -4306,38 +4626,263 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     }
   }
 
-  Widget _buildWebview(BrowserTab tab) {
+  String _cleanDisplayUrl(String rawUrl) {
+    if (rawUrl.isEmpty || rawUrl == 'about:blank' || rawUrl == 'makaw://newtab') return '';
+    try {
+      final uri = Uri.parse(rawUrl);
+      if (uri.host.contains('google.') && uri.path.contains('/search')) {
+        final query = uri.queryParameters['q'];
+        if (query != null && query.isNotEmpty) return query;
+      }
+      return uri.host.startsWith('www.') ? uri.host.substring(4) : uri.host;
+    } catch (_) {
+      return rawUrl;
+    }
+  }
+
+  static const _stealthUA = 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36';
+
+  static final _blockedRedirectDomains = [
+    'popads.net','popcash.net','exoclick.com','propellerads.com','adsterra.com',
+    'hilltopads.com','clickadu.com','trafficjunky.com','juicyads.com','trafficfactory.com',
+    'galaksion.com','monuanceli.com','surmounttemperbooklet.com','lievestcrasser.com',
+    'responservbzh.icu','aclib.js','acscdn.com','d33f51dyacx7bd.cloudfront.net',
+    'dpjf9a2rbjbvp.cloudfront.net','1xbet','bet9ja','betway','bet365',
+    'casino.com','pornhub','xvideos','xhamster','redtube','youporn',
+    'popunder','clickunder','adnxs.com','criteo.com','pubmatic.com',
+    'outbrain.com','taboola.com','revcontent.com','mgid.com','spotx.tv',
+    'smartadserver.com','rubiconproject.com','indexww.com','openx.net',
+    'casalemedia.com','bidswitch.net','sharethrough.com','teads.tv',
+    'connatix.com','moatads.com','doubleverify.com','iasds01.com',
+  ];
+
+  static final _blockedRedirectKeywords = [
+    'casino','betting','gambling','slots','poker','blackjack',
+    'porn','xxx','sex','nude','nsfw','adult',
+    'popunder','clickunder','popads','popcash',
+    'malware','phishing','keylogger','ransomware',
+    'apkpure','apk-dl','download-app','install-app',
+  ];
+
+  static bool _isBlockedRedirect(String url) {
+    final lower = url.toLowerCase();
+    for (final d in _blockedRedirectDomains) {
+      if (lower.contains(d)) return true;
+    }
+    for (final k in _blockedRedirectKeywords) {
+      if (lower.contains(k)) return true;
+    }
+    return false;
+  }
+
+  String _antiTapjackScript() => '''
+(function(){
+  // 1. Override window.open — block ALL popups from page scripts
+  try {
+    window.open = function(u, n, f) {
+      if (u && u !== 'about:blank' && typeof flutter_inappwebview !== 'undefined') {
+        try { flutter_inappwebview.callHandler('popupBlocked', u); } catch(e) {}
+      }
+      return null;
+    };
+  } catch(e) {}
+
+  // 2. Click handler: strip _blank from ad overlays, but NEVER touch download links
+  try {
+    document.addEventListener('click', function(e) {
+      var t = e.target;
+      for (var i = 0; i < 10 && t && t.tagName !== 'A'; i++) t = t.parentElement;
+      if (!t || t.tagName !== 'A') return;
+      if (t.hasAttribute('download') || t.classList.contains('download')) return;
+      var href = (t.getAttribute('href') || '').toLowerCase();
+      var dlExts = ['.mp4','.mp3','.zip','.rar','.apk','.exe','.pdf','.epub','.m4a','.flac','.ogg','.wav','.mkv','.avi','.mov','.doc','.docx','.xls','.xlsx','.csv','.txt','.iso','.dmg','.deb','.rpm','.bin','.7z','.tar','.gz'];
+      for (var j = 0; j < dlExts.length; j++) { if (href.indexOf(dlExts[j]) >= 0) return; }
+      if (t.getAttribute('target') === '_blank') {
+        t.removeAttribute('target');
+      }
+    }, true);
+  } catch(e) {}
+
+  // 3. Aggressive overlay removal — MutationObserver (runs forever, no timer limit)
+  try {
+    var isScanning = false;
+    var _adIdCls = /ad[s]?[-_]|popup|overlay|interstitial|modal-backdrop|tap[-_]?jack|click[-_]?under|pop[-_]?under|outbrain|taboola|mgid|revcontent/i;
+    var _safeTags = {NAV:1,HEADER:1,FOOTER:1,MAIN:1,SECTION:1};
+
+    function removeTapjacks() {
+      var els = document.querySelectorAll('div,iframe,ins,section,a');
+      for (var i = els.length - 1; i >= 0; i--) {
+        var el = els[i];
+        var s = getComputedStyle(el);
+        if (!s) continue;
+        if (_safeTags[el.tagName]) continue;
+        // Rule A: fixed/absolute + low opacity + high z-index → remove
+        if ((s.position === 'fixed' || s.position === 'absolute') &&
+            (s.opacity < 0.1 || s.visibility === 'hidden' || s.pointerEvents === 'none') &&
+            parseInt(s.zIndex) > 900 &&
+            el.offsetWidth > window.innerWidth * 0.3) {
+          el.remove(); continue;
+        }
+        // Rule B: full-screen overlay (>80% viewport) with low opacity → remove
+        if ((s.position === 'fixed' || s.position === 'absolute') &&
+            s.opacity < 0.06 &&
+            el.offsetWidth > window.innerWidth * 0.8 &&
+            el.offsetHeight > window.innerHeight * 0.8) {
+          el.remove(); continue;
+        }
+        // Rule C: ad-named id/class that is positioned over content → remove
+        if ((s.position === 'fixed' || s.position === 'absolute') &&
+            el.id && el.id.match(_adIdCls) && parseInt(s.zIndex) > 100) {
+          el.remove(); continue;
+        }
+        if ((s.position === 'fixed' || s.position === 'absolute') &&
+            el.className && typeof el.className === 'string' && el.className.match(_adIdCls) &&
+            parseInt(s.zIndex) > 100 && el.offsetWidth > window.innerWidth * 0.3) {
+          el.remove(); continue;
+        }
+        // Rule D: iframes that are invisible overlays
+        if (el.tagName === 'IFRAME' &&
+            (s.opacity < 0.05 || s.visibility === 'hidden' || s.pointerEvents === 'none') &&
+            parseInt(s.zIndex) > 900) {
+          el.remove(); continue;
+        }
+        // Rule E: full-screen transparent div with z-index > 5000
+        if (el.tagName === 'DIV' && parseInt(s.zIndex) > 5000 &&
+            (s.opacity < 0.05 || s.backgroundColor === 'transparent' || s.backgroundColor === 'rgba(0, 0, 0, 0)') &&
+            el.offsetWidth > window.innerWidth * 0.9 &&
+            el.offsetHeight > window.innerHeight * 0.9) {
+          el.remove();
+        }
+      }
+    }
+
+    function runScan() {
+      if (isScanning) return;
+      isScanning = true;
+      window.requestAnimationFrame(function() {
+        removeTapjacks();
+        isScanning = false;
+      });
+    }
+
+    if (document.body) {
+      var obs = new MutationObserver(function(muts) {
+        for (var i = 0; i < muts.length; i++) {
+          var added = muts[i].addedNodes;
+          for (var j = 0; j < added.length; j++) {
+            var n = added[j];
+            if (n.nodeType === 1) runScan();
+          }
+        }
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
+    }
+    // Also run once immediately and after small delay for pre-existing overlays
+    runScan();
+    setTimeout(runScan, 300);
+    setTimeout(runScan, 1000);
+  } catch(e) {}
+
+  // 4. Block location.replace / location.assign / location.href redirects to ad domains
+  try {
+    var _blockedKw = ['casino','betting','gambling','slots','poker','porn','xxx','sex','nude','nsfw','adult','popunder','clickunder','popads','malware','phishing'];
+    function _isBadRedirect(url) {
+      if (!url || typeof url !== 'string') return false;
+      var l = url.toLowerCase();
+      for (var k = 0; k < _blockedKw.length; k++) {
+        if (l.indexOf(_blockedKw[k]) >= 0) return true;
+      }
+      return false;
+    }
+    var origReplace = window.location.replace.bind(window.location);
+    var origAssign = window.location.assign.bind(window.location);
+    window.location.replace = function(url) {
+      if (_isBadRedirect(url)) return;
+      origReplace(url);
+    };
+    window.location.assign = function(url) {
+      if (_isBadRedirect(url)) return;
+      origAssign(url);
+    };
+  } catch(e) {}
+
+  // 5. Block document.write injection attacks
+  try {
+    document.write = function(){};
+    document.writeln = function(){};
+  } catch(e) {}
+
+  // 6. Anti-detection: hide automation flags
+  try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch(e) {}
+  try { window.chrome = window.chrome || { runtime: {}, loadTimes: function(){}, csi: function(){} }; } catch(e) {}
+  try {
+    var origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = function(p) {
+      return p.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        origQuery(p);
+    };
+  } catch(e) {}
+  try { Object.defineProperty(navigator, 'plugins', { get: function(){ return [1,2,3,4,5]; } }); } catch(e) {}
+  try { Object.defineProperty(navigator, 'languages', { get: function(){ return ['en-US','en']; } }); } catch(e) {}
+})();
+''';
+
+  Widget _buildTabWebView(BrowserTab tab) {
     final settings = InAppWebViewSettings(
+      userAgent: _stealthUA,
       javaScriptEnabled: true,
+      javaScriptCanOpenWindowsAutomatically: false,
+      supportMultipleWindows: true,
       mediaPlaybackRequiresUserGesture: false,
       allowsInlineMediaPlayback: true,
       supportZoom: true,
       cacheEnabled: true,
+      clearCache: false,
+      clearSessionCache: false,
+      thirdPartyCookiesEnabled: true,
       cacheMode: CacheMode.LOAD_DEFAULT,
       domStorageEnabled: true,
       databaseEnabled: true,
       allowFileAccess: true,
+      useShouldInterceptRequest: true,
+      preferredContentMode: UserPreferredContentMode.MOBILE,
+      offscreenPreRaster: true,
+      incognito: tab.incognito,
+      useOnDownloadStart: true,
     );
 
-    return InAppWebView(
-      key: ValueKey('webview_${tab.id}'),
-      initialSettings: settings,
-      initialUrlRequest: tab.url.isNotEmpty ? URLRequest(url: WebUri(tab.url)) : null,
-      pullToRefreshController: _tabRefreshControllers.putIfAbsent(tab.id, () => PullToRefreshController(
-        settings: PullToRefreshSettings(color: kAccentTeal),
-        onRefresh: () {
-          _tabWebviews[tab.id]?.reload();
-        },
-      )),
-      onWebViewCreated: (ctrl) {
-        _tabWebviews[tab.id] = ctrl;
-        _tabReady[tab.id] = true;
+    _pullToRefreshController ??= PullToRefreshController(
+      settings: PullToRefreshSettings(
+        color: kAccentTeal,
+        enabled: true,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+      ),
+      onRefresh: () {
+        _activeWebview?.reload();
+      },
+    );
 
-        if (_pendingNavigationUrls.containsKey(tab.id) && tab.id == _activeBrowserTabId) {
-          final url = _pendingNavigationUrls.remove(tab.id)!;
-          ctrl.loadUrl(urlRequest: URLRequest(url: WebUri(url)))
-              .catchError((e) => _showToast('Nav error: $e'));
+    final initialUrl = tab.url.isNotEmpty ? tab.url : 'about:blank';
+
+    return InAppWebView(
+      key: tab.webViewKey,
+      initialSettings: settings,
+      initialUrlRequest: URLRequest(url: WebUri(initialUrl)),
+      initialUserScripts: UnmodifiableListView([
+        UserScript(source: _antiTapjackScript(), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
+      ]),
+      pullToRefreshController: _pullToRefreshController,
+      onCreateWindow: (ctrl, request) async {
+        final targetUrl = request.request.url?.toString() ?? '';
+        if (targetUrl.isEmpty || targetUrl == 'about:blank' || _isBlockedRedirect(targetUrl)) {
+          return false;
         }
+        _navigateOrOpenNewTab(targetUrl);
+        return false;
+      },
+      onWebViewCreated: (ctrl) {
+        _tabControllers[tab.id] = ctrl;
 
         ctrl.addJavaScriptHandler(handlerName: 'PasswordSaveChannel', callback: (args) {
           try {
@@ -4364,9 +4909,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
         ctrl.addJavaScriptHandler(handlerName: 'MakawMediaSnifferChannel', callback: (args) {
           try {
-            final tabId = tab.id;
             final data = args.isNotEmpty && args[0] is List ? List<Map<String, dynamic>>.from(args[0]) : [];
-            final list = _tabMedia.putIfAbsent(tabId, () => []);
+            final list = _pendingMedia;
             for (final item in data) {
               final url = item['url'] as String? ?? '';
               final type = item['type'] as String? ?? '';
@@ -4437,18 +4981,25 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
               } else {
                 type = 'other';
               }
-              final list = _tabMedia.putIfAbsent(_activeBrowserTabId, () => []);
+              final list = _pendingMedia;
               final exists = list.any((m) => m.url == url);
               if (!exists) {
                 list.add(MediaItem(url: url, type: type, title: filename));
-                if (_activeBrowserTabId == tab.id) setState(() {});
+                setState(() {});
               }
             }
           } catch (_) {}
         });
         ctrl.addJavaScriptHandler(handlerName: 'popupBlocked', callback: (args) {
+          final now = DateTime.now();
+          if (_lastPopupToast != null && now.difference(_lastPopupToast!) < const Duration(seconds: 3)) return;
+          _lastPopupToast = now;
           final url = args.isNotEmpty ? args[0] as String : '';
-          _showToast('Popup blocked: ${url.isNotEmpty ? url.split('/').last : 'unknown'}');
+          String label = 'Popup blocked';
+          if (url.isNotEmpty) {
+            try { label += ': ${Uri.parse(url).host}'; } catch (_) {}
+          }
+          _showToast(label);
         });
         ctrl.addJavaScriptHandler(handlerName: 'popUnderDetected', callback: (args) {
           _showToast('Pop-under attempt detected and blocked');
@@ -4466,54 +5017,95 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       },
       shouldOverrideUrlLoading: (ctrl, navAction) async {
         final url = navAction.request.url.toString();
+        // 1. Block non-http protocols (intent://, market://, etc.)
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          return NavigationActionPolicy.CANCEL;
+        }
+        // 2. Block known ad/tracker/malware domains
         if (_contentBlocker.shouldBlockUrl(url)) {
           return NavigationActionPolicy.CANCEL;
         }
-        final ext = url.split('?')[0].split('#')[0].split('.').last.toLowerCase();
-        final binaryExts = ['zip','rar','7z','tar','gz','apk','exe','msi','iso','img','dmg','deb','rpm','bin'];
-        if (url.startsWith('http') && binaryExts.contains(ext)) {
+        // 3. Block redirect to ad/porn/betting domains
+        if (_isBlockedRedirect(url)) {
           return NavigationActionPolicy.CANCEL;
+        }
+        // 4. Block ad redirect patterns (?url=, ?redirect=, ?go=, ?dest=, adurl=, clickid=)
+        final lowerUrl = url.toLowerCase();
+        if (lowerUrl.contains('adurl=') || lowerUrl.contains('clickid=') ||
+            lowerUrl.contains('fbclid=') || lowerUrl.contains('gclid=')) {
+          return NavigationActionPolicy.CANCEL;
+        }
+        // 5. Block suspicious redirect params (but allow OAuth: accounts.google.com, facebook.com, github.com login flows)
+        if (!lowerUrl.contains('accounts.google.com') &&
+            !lowerUrl.contains('facebook.com/login') &&
+            !lowerUrl.contains('github.com/login') &&
+            !lowerUrl.contains('apple.com/signin')) {
+          final redirectParams = ['?url=', '&url=', '?redirect=', '&redirect=', '?go=', '&go=', '?dest=', '&dest=', '?link=', '&link=', '?next=', '&next='];
+          for (final p in redirectParams) {
+            if (lowerUrl.contains(p)) {
+              final idx = lowerUrl.indexOf(p);
+              final afterParam = lowerUrl.substring(idx + p.length);
+              // If the redirect param value contains an ad/blocked keyword, block it
+              if (_isBlockedRedirect(afterParam)) {
+                return NavigationActionPolicy.CANCEL;
+              }
+            }
+          }
         }
         return NavigationActionPolicy.ALLOW;
       },
       onLoadStart: (ctrl, url) {
-        print('WEBVIEW_DEBUG: onLoadStart tab=${tab.id} url=$url');
-        if (tab.id == _activeBrowserTabId) {
-          _tabProgress[tab.id] = 0;
+        final urlStr = url.toString();
+        final tabId = tab.id;
+        _tabProgress[tabId] = 0;
+        if (tabId == _activeBrowserTabId) {
           _pendingMedia.clear();
-          setState(() {});
-          _onBrowserNavigation(url.toString());
+          if (urlStr != 'about:blank') _isWebViewLoading = true;
+          _onBrowserNavigation(urlStr);
         }
+        setState(() {});
       },
       onLoadStop: (ctrl, url) {
-        print('WEBVIEW_DEBUG: onLoadStop tab=${tab.id} url=$url');
-        _tabRefreshControllers[tab.id]?.endRefreshing();
-        _tabProgress[tab.id] = 100;
-        if (tab.id == _activeBrowserTabId) {
+        final tabId = tab.id;
+        _tabProgress[tabId] = 100;
+        if (tabId == _activeBrowserTabId) {
+          _pullToRefreshController?.endRefreshing();
+          _isWebViewLoading = false;
           setState(() {
             _urlSuggestions = [];
             _searchSuggestions = [];
           });
+        } else {
+          setState(() {});
         }
-        if (tab.id == _activeBrowserTabId) {
-          final cbScript = _contentBlocker.fullUserScript;
-          if (cbScript.isNotEmpty) {
-            ctrl.evaluateJavascript(source: cbScript).catchError((_) {});
-          }
-          _injectPasswordScripts(ctrl, url.toString());
-          _injectFilePickerScript(ctrl);
-          _injectMediaSnifferScript(ctrl);
-          _injectDownloadInterceptorScript(ctrl);
+        final cbScript = _contentBlocker.fullUserScript;
+        if (cbScript.isNotEmpty) {
+          ctrl.evaluateJavascript(source: cbScript).catchError((_) {});
         }
+        _injectPasswordScripts(ctrl, url.toString());
+        _injectFilePickerScript(ctrl);
+        _injectMediaSnifferScript(ctrl);
+        _injectDownloadInterceptorScript(ctrl);
+      },
+      onDownloadStartRequest: (ctrl, downloadStartRequest) async {
+        final fileUrl = downloadStartRequest.url.toString();
+        String filename = downloadStartRequest.suggestedFilename ?? '';
+        if (filename.isEmpty) {
+          final uriPath = downloadStartRequest.url.uriValue.path;
+          filename = uriPath.split('/').lastWhere((s) => s.isNotEmpty, orElse: () => 'download');
+        }
+        if (!filename.contains('.')) {
+          filename = '$filename.bin';
+        }
+        _downloadManager.enqueue(fileUrl, filename: filename);
+        _showToast('Downloading: $filename');
       },
       onProgressChanged: (ctrl, progress) {
-        if (progress % 25 == 0) print('WEBVIEW_DEBUG: onProgressChanged tab=${tab.id} progress=$progress');
         _tabProgress[tab.id] = progress;
         if (tab.id == _activeBrowserTabId) setState(() {});
       },
       onReceivedError: (ctrl, request, error) {
-        print('WEBVIEW_DEBUG: onReceivedError tab=${tab.id} url=${request.url} desc=${error.description} type=${error.type}');
-        if (tab.id == _activeBrowserTabId && (request.isForMainFrame ?? false)) {
+        if ((request.isForMainFrame ?? false) && tab.id == _activeBrowserTabId) {
           _showToast('${error.description} (${error.type})');
           setState(() {});
         }
