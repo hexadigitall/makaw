@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart' hide ContentBlocker;
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'features/browser/data/services/password_service.dart';
 import 'features/browser/data/services/import_service.dart';
+import 'features/browser/data/services/ad_blocker_service.dart';
 import 'features/news/data/services/news_feed_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sqflite/sqflite.dart';
@@ -412,6 +413,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
   // Content blocker & download manager
   final ContentBlockerService _contentBlocker = ContentBlockerService();
+  final AdBlockerService _adBlocker = AdBlockerService();
   late final DownloadService _downloadManager;
   late final UpdateService _updateService;
   String? _playVideoUrl;
@@ -676,6 +678,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         onComplete: null,
       );
       ref.read(downloadServiceProvider.notifier).state = _downloadManager;
+      _adBlocker.updateBlacklist(); // fire-and-forget: fetch EasyList + AdGuard filter lists
       _updateService = UpdateService(
         updateUrl: 'https://your-org.github.io/makaw/update.json',
         dio: Dio(),
@@ -1217,6 +1220,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   }
 
   void _onBrowserNavigation(String url) {
+    if (url.isEmpty || url == 'about:blank') return;
     final tab = _activeTab;
     if (tab.url == url && tab.url.isNotEmpty) return;
     tab.url = url;
@@ -3421,7 +3425,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         Expanded(
           child: Stack(
             children: [
-              if (!showHome) _buildWebviewArea(),
+              if (!showHome && !(isTypeView && _typeViewFromHome)) _buildWebviewArea(),
               if (showHome && !isTypeView) _buildHomeContent(),
               if (isTypeView) _buildTypeView(),
             ],
@@ -4850,6 +4854,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       offscreenPreRaster: true,
       incognito: tab.incognito,
       useOnDownloadStart: true,
+      contentBlockers: _adBlocker.getContentBlockerRules(),
     );
 
     _pullToRefreshController ??= PullToRefreshController(
@@ -5025,17 +5030,21 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         if (_contentBlocker.shouldBlockUrl(url)) {
           return NavigationActionPolicy.CANCEL;
         }
-        // 3. Block redirect to ad/porn/betting domains
+        // 3. Block via dynamic blacklist (EasyList + AdGuard + hardcoded)
+        if (_adBlocker.isBlocked(url)) {
+          return NavigationActionPolicy.CANCEL;
+        }
+        // 4. Block redirect to ad/porn/betting domains
         if (_isBlockedRedirect(url)) {
           return NavigationActionPolicy.CANCEL;
         }
-        // 4. Block ad redirect patterns (?url=, ?redirect=, ?go=, ?dest=, adurl=, clickid=)
+        // 5. Block ad redirect patterns (?url=, ?redirect=, ?go=, ?dest=, adurl=, clickid=)
         final lowerUrl = url.toLowerCase();
         if (lowerUrl.contains('adurl=') || lowerUrl.contains('clickid=') ||
             lowerUrl.contains('fbclid=') || lowerUrl.contains('gclid=')) {
           return NavigationActionPolicy.CANCEL;
         }
-        // 5. Block suspicious redirect params (but allow OAuth: accounts.google.com, facebook.com, github.com login flows)
+        // 6. Block suspicious redirect params (but allow OAuth: accounts.google.com, facebook.com, github.com login flows)
         if (!lowerUrl.contains('accounts.google.com') &&
             !lowerUrl.contains('facebook.com/login') &&
             !lowerUrl.contains('github.com/login') &&
@@ -5045,7 +5054,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
             if (lowerUrl.contains(p)) {
               final idx = lowerUrl.indexOf(p);
               final afterParam = lowerUrl.substring(idx + p.length);
-              // If the redirect param value contains an ad/blocked keyword, block it
               if (_isBlockedRedirect(afterParam)) {
                 return NavigationActionPolicy.CANCEL;
               }
@@ -5061,13 +5069,16 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         if (tabId == _activeBrowserTabId) {
           _pendingMedia.clear();
           if (urlStr != 'about:blank') _isWebViewLoading = true;
+          if (urlStr == 'about:blank') return;
           _onBrowserNavigation(urlStr);
         }
         setState(() {});
       },
       onLoadStop: (ctrl, url) {
+        final urlStr = url.toString();
         final tabId = tab.id;
         _tabProgress[tabId] = 100;
+        if (urlStr == 'about:blank') return;
         if (tabId == _activeBrowserTabId) {
           _pullToRefreshController?.endRefreshing();
           _isWebViewLoading = false;
@@ -5079,7 +5090,16 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
           setState(() {});
         }
         final cbScript = _contentBlocker.fullUserScript;
-        if (cbScript.isNotEmpty) {
+        final urlLower = urlStr.toLowerCase();
+        final skipBlocker = urlLower.contains('accounts.google') ||
+            urlLower.contains('consent.google') ||
+            urlLower.contains('play.google') ||
+            urlLower.contains('myaccount.google') ||
+            urlLower.contains('youtube.com/embed') ||
+            urlLower.contains('github.com/login') ||
+            urlLower.contains('facebook.com/login') ||
+            urlLower.contains('apple.com/signin');
+        if (!skipBlocker && cbScript.isNotEmpty) {
           ctrl.evaluateJavascript(source: cbScript).catchError((_) {});
         }
         _injectPasswordScripts(ctrl, url.toString());
