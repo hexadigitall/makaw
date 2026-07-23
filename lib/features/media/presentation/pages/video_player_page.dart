@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -104,16 +106,51 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   double _subOutlineSize = 1.0;
   Color _subOutlineColor = Colors.black87;
 
+  // ─── Gesture / Volume / Brightness ──────────────────────────────────────
+  static const _videoChannel = MethodChannel('com.example.makaw_mobile/video_control');
+  final GlobalKey _videoKey = GlobalKey();
+  double _volume = 1.0;
+  int _maxVolume = 15;
+  double _brightness = 0.5;
+  bool _showVolumeOverlay = false;
+  bool _showBrightnessOverlay = false;
+  bool _showSeekPreview = false;
+  int _seekPreviewDelta = 0;
+  Timer? _overlayTimer;
+  bool _draggingVertical = false;
+  double _dragStartY = 0;
+  double _dragStartX = 0;
+  String _dragSide = '';
+  DateTime? _lastTapTime;
+  String _doubleTapSide = '';
+  Timer? _doubleTapTimer;
+
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _initPlayer();
+    _loadSystemVolume();
+    _loadSystemBrightness();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       systemNavigationBarColor: Color(0xFF0F0F1A),
       systemNavigationBarIconBrightness: Brightness.light,
     ));
+  }
+
+  Future<void> _loadSystemVolume() async {
+    try {
+      _maxVolume = await _videoChannel.invokeMethod<int>('getMaxVolume') ?? 15;
+      final vol = await _videoChannel.invokeMethod<int>('getVolume') ?? _maxVolume;
+      _volume = vol / _maxVolume;
+    } catch (_) {}
+  }
+
+  Future<void> _loadSystemBrightness() async {
+    try {
+      _brightness = (await _videoChannel.invokeMethod<double>('getScreenBrightness')) ?? 0.5;
+    } catch (_) {}
   }
 
   void _initPlayer() {
@@ -169,6 +206,8 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   @override
   void dispose() {
     _subtitleTimer?.cancel();
+    _overlayTimer?.cancel();
+    _doubleTapTimer?.cancel();
     _controller?.removeListener(_onVideoEvent);
     _controller?.dispose();
     SystemChrome.restoreSystemUIOverlays();
@@ -193,6 +232,132 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     if (_showControls) {
       _startAutoHide();
     }
+  }
+
+  // ─── Double-tap seek ────────────────────────────────────────────────────
+  void _onDoubleTapDown(TapDownDetails details) {
+    if (_locked || _controller == null) return;
+    final screenW = MediaQuery.of(context).size.width;
+    final dx = details.globalPosition.dx;
+    final isLeft = dx < screenW / 2;
+    final delta = isLeft ? -10 : 10;
+    final pos = _controller!.value.position;
+    final newPos = Duration(seconds: (pos.inSeconds + delta).clamp(0, _controller!.value.duration.inSeconds));
+    _controller!.seekTo(newPos);
+    setState(() {
+      _doubleTapSide = isLeft ? 'left' : 'right';
+      _seekPreviewDelta = delta;
+      _showSeekPreview = true;
+    });
+    _doubleTapTimer?.cancel();
+    _doubleTapTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) setState(() => _showSeekPreview = false);
+    });
+  }
+
+  // ─── Vertical drag (volume / brightness) ────────────────────────────────
+  void _onVerticalDragStart(DragStartDetails details) {
+    if (_locked || _controller == null) return;
+    final screenW = MediaQuery.of(context).size.width;
+    _dragStartX = details.globalPosition.dx;
+    _dragSide = _dragStartX > screenW / 2 ? 'volume' : 'brightness';
+    _dragStartY = details.globalPosition.dy;
+    _draggingVertical = true;
+    if (_dragSide == 'volume') {
+      _showVolumeOverlay = true;
+      _showBrightnessOverlay = false;
+    } else {
+      _showBrightnessOverlay = true;
+      _showVolumeOverlay = false;
+    }
+    _overlayTimer?.cancel();
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
+    if (!_draggingVertical) return;
+    final dy = _dragStartY - details.globalPosition.dy;
+    final sensitivity = MediaQuery.of(context).size.height * 0.6;
+    final delta = (dy / sensitivity).clamp(-1.0, 1.0);
+
+    if (_dragSide == 'volume') {
+      _volume = (_volume + delta).clamp(0.0, 1.0);
+      final vol = (_volume * _maxVolume).round();
+      _videoChannel.invokeMethod('setVolume', {'volume': vol});
+    } else {
+      _brightness = (_brightness + delta).clamp(0.01, 1.0);
+      _videoChannel.invokeMethod('setScreenBrightness', {'brightness': _brightness});
+    }
+    _dragStartY = details.globalPosition.dy;
+    setState(() {});
+  }
+
+  void _onVerticalDragEnd(DragEndDetails details) {
+    _draggingVertical = false;
+    _overlayTimer?.cancel();
+    _overlayTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() {
+        _showVolumeOverlay = false;
+        _showBrightnessOverlay = false;
+      });
+    });
+  }
+
+  Widget _buildVolumeOverlay() {
+    final pct = (_volume * 100).round();
+    return Container(
+      width: 52, height: 140,
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(26),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(_volume > 0 ? Icons.volume_up : Icons.volume_off, color: Colors.white, size: 18),
+          const SizedBox(height: 6),
+          Expanded(
+            child: RotatedBox(
+              quarterTurns: -1,
+              child: SliderTheme(
+                data: const SliderThemeData(trackHeight: 3, thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5), activeTrackColor: Color(0xFF818CF8), inactiveTrackColor: Colors.white24, thumbColor: Color(0xFF818CF8)),
+                child: Slider(value: _volume, min: 0, max: 1, onChanged: null),
+              ),
+            ),
+          ),
+          Text('$pct', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBrightnessOverlay() {
+    final pct = (_brightness * 100).round();
+    return Container(
+      width: 52, height: 140,
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(26),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(_brightness > 0.5 ? Icons.brightness_high : Icons.brightness_low, color: Colors.white, size: 18),
+          const SizedBox(height: 6),
+          Expanded(
+            child: RotatedBox(
+              quarterTurns: -1,
+              child: SliderTheme(
+                data: const SliderThemeData(trackHeight: 3, thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5), activeTrackColor: Color(0xFFFFC107), inactiveTrackColor: Colors.white24, thumbColor: Color(0xFFFFC107)),
+                child: Slider(value: _brightness, min: 0.01, max: 1, onChanged: null),
+              ),
+            ),
+          ),
+          Text('$pct%', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
   }
 
   String _fmt(Duration d) { final m = d.inMinutes.remainder(60).toString().padLeft(2, '0'); final s = d.inSeconds.remainder(60).toString().padLeft(2, '0'); return '${d.inHours > 0 ? '${d.inHours}:' : ''}$m:$s'; }
@@ -265,12 +430,56 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
         children: [
           GestureDetector(
             onTap: _onToggleControls,
+            onDoubleTapDown: _onDoubleTapDown,
+            onVerticalDragStart: _locked ? null : _onVerticalDragStart,
+            onVerticalDragUpdate: _locked ? null : _onVerticalDragUpdate,
+            onVerticalDragEnd: _locked ? null : _onVerticalDragEnd,
             child: Container(
               color: Colors.black,
               width: double.infinity, height: double.infinity,
-              child: videoWidget,
+              child: RepaintBoundary(
+                key: _videoKey,
+                child: videoWidget,
+              ),
             ),
           ),
+          // Double-tap seek preview
+          if (_showSeekPreview)
+            Positioned(
+              left: _doubleTapSide == 'left' ? 0 : null,
+              right: _doubleTapSide == 'right' ? 0 : null,
+              top: 0, bottom: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(_doubleTapSide == 'left' ? Icons.replay_10 : Icons.forward_10, color: Colors.white, size: 20),
+                      const SizedBox(width: 6),
+                      Text('${_seekPreviewDelta > 0 ? '+' : ''}${_seekPreviewDelta}s',
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          // Volume overlay
+          if (_showVolumeOverlay)
+            Positioned(
+              right: 20, top: MediaQuery.of(context).size.height * 0.25,
+              child: _buildVolumeOverlay(),
+            ),
+          // Brightness overlay
+          if (_showBrightnessOverlay)
+            Positioned(
+              left: 20, top: MediaQuery.of(context).size.height * 0.25,
+              child: _buildBrightnessOverlay(),
+            ),
           if (_showControls && !_locked && !isLandscape)
             _buildSeekOverlay(pos),
           if (_showControls && !_locked) ...[
@@ -331,14 +540,14 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
               Column(mainAxisSize: MainAxisSize.min, children: [
                 IconButton(icon: const Icon(Icons.cast, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _toastCast),
                 IconButton(icon: const Icon(Icons.screenshot_monitor, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _toastCapture),
-                IconButton(icon: const Icon(Icons.volume_up, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _toastMute),
+                IconButton(icon: Icon(_isMuted ? Icons.volume_off : Icons.volume_up, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _toastMute),
                 IconButton(icon: const Icon(Icons.screen_rotation, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: () => SystemChrome.setPreferredOrientations(DeviceOrientation.values)),
               ])
             else
               Row(mainAxisSize: MainAxisSize.min, children: [
                 IconButton(icon: const Icon(Icons.cast, color: Colors.white70, size: 20), onPressed: _toastCast),
                 IconButton(icon: const Icon(Icons.screenshot_monitor, color: Colors.white70, size: 20), onPressed: _toastCapture),
-                IconButton(icon: const Icon(Icons.volume_up, color: Colors.white70, size: 20), onPressed: _toastMute),
+                IconButton(icon: Icon(_isMuted ? Icons.volume_off : Icons.volume_up, color: Colors.white70, size: 20), onPressed: _toastMute),
                 IconButton(icon: const Icon(Icons.screen_rotation, color: Colors.white70, size: 20), onPressed: () => SystemChrome.setPreferredOrientations(DeviceOrientation.values)),
               ]),
           ],
@@ -487,10 +696,54 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     );
   }
 
-  void _toastCast() => _toast('Cast coming soon');
-  void _toastCapture() => _toast('Screen capture coming soon');
-  void _toastMute() => _toast('Mute coming soon');
-  void _toastAudio() => _toast('Audio track coming soon');
+  // ─── Mute toggle ────────────────────────────────────────────────────────
+  bool _isMuted = false;
+  double _volumeBeforeMute = 1.0;
+
+  void _toastCast() => _toast('Cast not supported on this device');
+
+  Future<void> _toastCapture() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    try {
+      final boundary = _videoKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) { _toast('Capture failed'); return; }
+      final image = await boundary.toImage(pixelRatio: 1.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) { _toast('Capture failed'); return; }
+      final bytes = byteData.buffer.asUint8List();
+      final dir = await getApplicationDocumentsDirectory();
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final file = File('${dir.path}/screenshot_$ts.png');
+      await file.writeAsBytes(bytes);
+      image.dispose();
+      if (mounted) {
+        _toast('Screenshot saved: ${file.path.split('/').last}');
+        Share.shareXFiles([XFile(file.path)], text: 'Screenshot from Makaw');
+      }
+    } catch (e) {
+      _toast('Capture error: $e');
+    }
+  }
+
+  Future<void> _toastMute() async {
+    if (_controller == null) return;
+    try {
+      if (_isMuted) {
+        _isMuted = false;
+        final vol = (_volumeBeforeMute * _maxVolume).round();
+        _videoChannel.invokeMethod('setVolume', {'volume': vol});
+      } else {
+        _isMuted = true;
+        _volumeBeforeMute = _volume;
+        _videoChannel.invokeMethod('setVolume', {'volume': 0});
+      }
+      _toast(_isMuted ? 'Muted' : 'Unmuted');
+    } catch (_) {
+      _toast('Volume control not available');
+    }
+  }
+
+  void _toastAudio() => _toast('Audio track not available');
 
   void _showPlaylistSheet() {
     _toast('Playlist not available');

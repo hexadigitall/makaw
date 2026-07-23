@@ -6,6 +6,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'features/browser/data/services/password_service.dart';
 import 'features/browser/data/services/import_service.dart';
 import 'features/browser/data/services/ad_blocker_service.dart';
+import 'features/browser/data/services/suggestion_engine.dart';
+import 'features/browser/data/models/suggestion_item.dart';
+import 'features/viewer/presentation/pages/document_viewer_page.dart';
+import 'features/history/data/history_service.dart';
+import 'features/history/domain/history_item.dart';
+import 'features/history/presentation/pages/makaw_history_page.dart';
 import 'features/news/data/services/news_feed_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sqflite/sqflite.dart';
@@ -35,8 +41,10 @@ import 'core/services/update_service.dart';
 import 'core/services/media_notification_service.dart';
 import 'features/news/presentation/pages/news_feed_page.dart';
 import 'features/media/presentation/pages/video_player_page.dart';
-import 'features/viewer/presentation/pages/pdf_viewer_page.dart';
+import 'features/pdf/presentation/pages/pdf_viewer_page.dart';
 import 'features/viewer/presentation/pages/epub_viewer_page.dart';
+import 'features/viewer/presentation/pages/text_viewer_page.dart';
+import 'features/viewer/presentation/pages/html_viewer_page.dart';
 import 'features/music/presentation/pages/music_player_page.dart';
 import 'features/media/presentation/pages/image_viewer_page.dart';
 import 'features/music/data/services/music_player_service.dart';
@@ -88,11 +96,22 @@ class EditorFile {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Catch Flutter framework errors (widget build/layout/paint failures)
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     print('FLUTTER ERROR: ${details.exception}');
     print('STACK: ${details.stack}');
   };
+
+  // Catch unhandled async errors and platform errors (network failures,
+  // file I/O, codec errors, corrupt media — prevents OS kill)
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    print('PLATFORM ERROR: $error');
+    print('STACK: $stack');
+    return true; // handled — prevents app process crash
+  };
+
   await globalMusicService.init();
   await _initMediaNotification();
   runApp(ProviderScope(child: MakawApp()));
@@ -265,7 +284,7 @@ class MakawHome extends ConsumerStatefulWidget {
   ConsumerState<MakawHome> createState() => _MakawHomeState();
 }
 
-class _MakawHomeState extends ConsumerState<MakawHome> {
+class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentView = 'browser';
   ViewMode _viewMode = ViewMode.home;
@@ -321,6 +340,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   List<Map<String, dynamic>> _browserHistory = [];
   List<Map<String, dynamic>> _urlSuggestions = [];
   List<String> _searchSuggestions = [];
+  List<SuggestionItem> _suggestions = [];
   bool _ignoreUrlChanges = false;
   Timer? _suggestDebounce;
   int _historyPage = 0;
@@ -328,6 +348,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
   bool _desktopSite = false;
   final TextEditingController _findController = TextEditingController();
+  final List<Map<String, String>> _recentTabs = [];
+  static const int _maxRecentTabs = 20;
 
   NewsFeedService? _newsFeedService;
   final GlobalKey<NewsFeedWidgetState> _newsFeedKey = GlobalKey<NewsFeedWidgetState>();
@@ -369,7 +391,12 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       final page = _buildFeaturePage(view);
       if (page != null) {
         final wasBrowsing = !_showHomeScreen;
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)).then((_) {
+        Navigator.of(context).push(PageRouteBuilder(
+          pageBuilder: (_, __, ___) => page,
+          transitionDuration: Duration(milliseconds: 200),
+          reverseTransitionDuration: Duration(milliseconds: 150),
+          transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+        )).then((_) {
           if (mounted) {
             _urlController.clear();
             setState(() {
@@ -384,7 +411,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
   Widget? _buildFeaturePage(String view) {
     switch (view) {
-      case 'history': return _buildFeatureScaffold('Browser History', Icons.history, _buildHistoryTab());
+      case 'history': return MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url));
       case 'studio': return _buildFeatureScaffold('Code Studio', Icons.code, _buildStudioTab());
       case 'sniffer': return _buildFeatureScaffold('Media Sniffer', Icons.wifi_tethering, _buildSnifferTab());
       case 'snippets': return _buildFeatureScaffold('Snippets', Icons.content_paste, _buildSnippetsTab());
@@ -393,7 +420,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
       case 'terminal': return _buildFeatureScaffold('Terminal', Icons.terminal, _buildTerminalTab());
       case 'downloads': return _buildFeatureScaffold('Downloads', Icons.download, _buildDownloadsTab());
-      case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media'));
+      case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => Navigator.of(context).pop());
       case 'music': return _buildMusicPlayerPage();
       case 'media': return _buildMediaHubPage();
       case 'images': return _buildImagePage();
@@ -631,25 +658,37 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _saveSession();
+    }
+    if (state == AppLifecycleState.detached) {
+      _saveSession();
+      MediaNotificationService.instance.hide();
+    }
+  }
+
+  @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _urlController = TextEditingController();
     _searchController = TextEditingController();
     _terminalInputController = TextEditingController();
     _terminalFocusNode = FocusNode();
     _newsFeedService = NewsFeedService();
-    _newsFeedService!.init();
-    _newsFeedService!.ensureLocationReady();
     _urlController.addListener(_onUrlChanged);
     _urlFocusNode.addListener(_onUrlFocusChanged);
     _musicService.addListener(_onMusicChanged);
 
     // Defer heavy init to after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _loadSavedSession();
-      setState(() => _ready = true);
+      await _newsFeedService!.init();
+      await _newsFeedService!.ensureLocationReady();
       _newsFeedService!.loadTaps();
-      _loadShortcuts();
+      await _loadSavedSession();
+      await _loadShortcuts();
+      setState(() => _ready = true);
       _initDownloadDir();
       _musicService.loadPlaylists();
       _musicService.loadFavorites();
@@ -666,7 +705,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       ref.read(videoPlayerServiceProvider.notifier).state = _videoService;
       _documentService.loadFavorites();
       ref.read(documentServiceProvider.notifier).state = _documentService;
-      // _documentService.scanAllDocuments(); // disabled — hangs on this device
+      _documentService.scanAllDocuments(); // runs in background isolate — no UI freeze
       _downloadManager = DownloadService(
         dio: Dio(BaseOptions(
           connectTimeout: Duration(seconds: 15),
@@ -678,12 +717,20 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         onComplete: null,
       );
       ref.read(downloadServiceProvider.notifier).state = _downloadManager;
+      _adBlocker.onBlacklistUpdated = () {
+        // Push new contentBlocker rules to all existing tabs
+        final rules = _adBlocker.getContentBlockerRules();
+        for (final entry in _tabControllers.entries) {
+          entry.value.setSettings(settings: InAppWebViewSettings(
+            contentBlockers: rules,
+          ));
+        }
+      };
       _adBlocker.updateBlacklist(); // fire-and-forget: fetch EasyList + AdGuard filter lists
       _updateService = UpdateService(
         updateUrl: 'https://your-org.github.io/makaw/update.json',
         dio: Dio(),
       );
-      CookieManager.instance().deleteAllCookies().catchError((_) {});
       _initDb();
       _initSnippets();
       _checkUpdatesOnStartup();
@@ -750,8 +797,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       _openFile(path);
     } else if (mimeType.contains('text') || ['txt','md','json','xml','yaml','yml','ini','log','csv'].any((e) => path.endsWith('.$e'))) {
       _openFile(path);
-    } else if (mimeType.contains('msword') || mimeType.contains('openxmlformats') || path.endsWith('.doc') || path.endsWith('.docx')) {
-      OpenFilex.open(path);
+    } else if (mimeType.contains('msword') || mimeType.contains('openxmlformats') || path.endsWith('.doc') || path.endsWith('.docx') || path.endsWith('.odt') || path.endsWith('.rtf') || path.endsWith('.pages')) {
+      _openFile(path);
     } else {
       OpenFilex.open(path);
     }
@@ -988,7 +1035,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
     _db = await openDatabase(
       p.join(dir.path, 'makaw.db'),
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE projects (
@@ -1006,9 +1053,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
             url TEXT NOT NULL,
             title TEXT,
             time TEXT NOT NULL,
+            favicon_url TEXT,
             UNIQUE(url)
           )
         ''');
+        await db.execute('CREATE INDEX idx_history_time ON history(time DESC)');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -1022,10 +1071,39 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
             )
           ''');
         }
+        if (oldVersion < 3) {
+          try {
+            await db.execute('ALTER TABLE history ADD COLUMN favicon_url TEXT');
+          } catch (_) {}
+          try {
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_history_time ON history(time DESC)');
+          } catch (_) {}
+        }
       },
     );
+    HistoryService.init(_db!);
+    _preseedGoogleConsentCookies();
     _loadProjects();
     _loadHistory();
+    HistoryService.pruneOldEntries().catchError((_) {});
+  }
+
+  Future<void> _preseedGoogleConsentCookies() async {
+    try {
+      final cm = CookieManager.instance();
+      final existing = await cm.getCookies(url: WebUri('https://www.google.com'));
+      final hasSOCS = existing.any((c) => c.name == 'SOCS');
+      if (!hasSOCS) {
+        await cm.setCookie(
+          url: WebUri('https://www.google.com'),
+          name: 'SOCS',
+          value: 'CAISHAgBEhJnd3NfMjAyNDA0MTYtMF9SQzEgGgJlbiAEGgIgAQ',
+          domain: '.google.com',
+          path: '/',
+          isSecure: true,
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadProjects() async {
@@ -1055,12 +1133,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         if (tabs.isNotEmpty) {
           _browserTabs.clear();
           for (final t in tabs) {
+            final isIncognito = t['incognito'] as bool? ?? false;
+            if (isIncognito) continue;
             final id = DateTime.now().microsecondsSinceEpoch + _browserTabs.length;
             _browserTabs.add(BrowserTab(
               id: id,
               url: t['url'] as String? ?? '',
               title: t['title'] as String? ?? '',
-              incognito: t['incognito'] as bool? ?? false,
+              incognito: false,
               historyStack: (t['historyStack'] as List<dynamic>?)?.cast<String>() ?? [],
               historyIndex: t['historyIndex'] as int? ?? 0,
             ));
@@ -1078,11 +1158,15 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         }
       } catch (_) {}
     }
+    if (_browserTabs.isEmpty) {
+      _initBrowserTab();
+    }
   }
 
   Future<void> _saveSession() async {
     final prefs = await SharedPreferences.getInstance();
-    final tabsJson = jsonEncode(_browserTabs.map((t) => {
+    final savedTabs = _browserTabs.where((t) => !t.incognito).toList();
+    final tabsJson = jsonEncode(savedTabs.map((t) => {
       'url': t.url,
       'title': t.title,
       'incognito': t.incognito,
@@ -1090,7 +1174,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       'historyIndex': t.historyIndex,
     }).toList());
     await prefs.setString('saved_tabs', tabsJson);
-    await prefs.setInt('active_tab_id', _activeBrowserTabId);
+    final activeTab = _activeTab;
+    await prefs.setInt('active_tab_id', activeTab.incognito ? (savedTabs.isNotEmpty ? savedTabs.first.id : 0) : _activeBrowserTabId);
   }
 
   // ─── Terminal ───────────────────────────────────────────────────────────────
@@ -1138,7 +1223,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       _browserTabs.add(tab);
       _activeBrowserTabId = id;
       _tabProgress[id] = 0;
-      _viewMode = ViewMode.newTab;
+      _viewMode = url != null && url.isNotEmpty ? ViewMode.browsing : ViewMode.newTab;
     });
     _urlController.clear();
     _syncUrlController();
@@ -1155,7 +1240,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       final data = await c.takeScreenshot(
         screenshotConfiguration: ScreenshotConfiguration(
           compressFormat: CompressFormat.JPEG,
-          quality: 60,
+          quality: 80,
         ),
       );
       if (data != null) {
@@ -1201,6 +1286,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
   void _closeBrowserTab(int id) {
     final idx = _browserTabs.indexWhere((t) => t.id == id);
+    if (idx >= 0) {
+      final tab = _browserTabs[idx];
+      if (tab.url.isNotEmpty && !tab.incognito) {
+        _recentTabs.removeWhere((t) => t['url'] == tab.url);
+        _recentTabs.insert(0, {'url': tab.url, 'title': tab.title});
+        if (_recentTabs.length > _maxRecentTabs) _recentTabs.removeLast();
+      }
+    }
     _tabSnapshots.remove(id);
     _tabProgress.remove(id);
     _tabControllers.remove(id);
@@ -1236,6 +1329,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       _viewMode = ViewMode.browsing;
       _urlSuggestions = [];
       _searchSuggestions = [];
+      _suggestions = [];
     });
   }
 
@@ -1251,18 +1345,34 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     setState(() {
       _urlSuggestions = [];
       _searchSuggestions = [];
+      _suggestions = [];
     });
   }
 
   void _addHistoryEntry(String url, String title) {
-    _browserHistory.removeWhere((e) => e['url'] == url);
-    _browserHistory.insert(0, <String, dynamic>{'url': url, 'title': title, 'time': DateTime.now().toIso8601String()});
+    if (_activeTab.incognito) return;
+    final existing = _browserHistory.indexWhere((e) => e['url'] == url);
+    if (existing >= 0) {
+      final entry = _browserHistory.removeAt(existing);
+      final count = (entry['visit_count'] as int? ?? 1) + 1;
+      entry['time'] = DateTime.now().toIso8601String();
+      entry['visit_count'] = count;
+      _browserHistory.insert(0, entry);
+    } else {
+      _browserHistory.insert(0, <String, dynamic>{'url': url, 'title': title, 'time': DateTime.now().toIso8601String(), 'visit_count': 1});
+    }
     if (_browserHistory.length > 500) _browserHistory.removeRange(500, _browserHistory.length);
-    _db?.insert('history', {
-      'url': url,
-      'title': title,
-      'time': DateTime.now().toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace).catchError((_) {});
+    HistoryService.addEntry(HistoryItem(
+      url: url,
+      title: title,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+    )).catchError((_) {});
+  }
+
+  void _updateHistoryTitle(String url, String title) {
+    final idx = _browserHistory.indexWhere((e) => e['url'] == url);
+    if (idx >= 0) _browserHistory[idx]['title'] = title;
+    HistoryService.updateTitle(url, title).catchError((_) {});
   }
 
   void _navigateToUrl(String raw) {
@@ -1288,6 +1398,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         _viewMode = ViewMode.browsing;
         _urlSuggestions = [];
         _searchSuggestions = [];
+        _suggestions = [];
       });
     } else {
       final tab = _activeTab;
@@ -1301,6 +1412,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         _viewMode = ViewMode.browsing;
         _urlSuggestions = [];
         _searchSuggestions = [];
+        _suggestions = [];
       });
     }
     _addHistoryEntry(url, url);
@@ -1332,7 +1444,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     _urlController.text = url;
     _ignoreUrlChanges = false;
     if (_browserTabs.isEmpty) {
-      _navigateToUrl(raw);
+      _navigateOrOpenNewTab(raw);
       return;
     }
     final tab = _activeTab;
@@ -1344,6 +1456,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       _viewMode = ViewMode.browsing;
       _urlSuggestions = [];
       _searchSuggestions = [];
+      _suggestions = [];
     });
     _addHistoryEntry(url, url);
     _saveSession();
@@ -1359,6 +1472,26 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       url = 'https://www.google.com/search?q=${Uri.encodeComponent(raw)}';
     } else {
       url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : 'https://$raw';
+    }
+
+    if (_browserTabs.isEmpty) {
+      _createBrowserTab(url: url);
+      final tab = _activeTab;
+      tab.pushHistory(url);
+      _suggestDebounce?.cancel();
+      _urlFocusNode.unfocus();
+      _ignoreUrlChanges = true;
+      _urlController.text = url;
+      _ignoreUrlChanges = false;
+      _warmUpDns(url);
+      setState(() {
+        _viewMode = ViewMode.browsing;
+        _urlSuggestions = [];
+        _searchSuggestions = [];
+      });
+      _addHistoryEntry(url, url);
+      _saveSession();
+      return;
     }
 
     final tab = _activeTab;
@@ -1408,13 +1541,17 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   Future<void> _showTabSwitcher() async {
     await _captureCurrentTabSnapshot();
     if (!mounted) return;
+    if (_browserTabs.isEmpty) {
+      _createBrowserTab();
+      return;
+    }
     final activeTab = _browserTabs.firstWhere(
       (t) => t.id == _activeBrowserTabId,
       orElse: () => _browserTabs.first,
     );
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TabTrayPage(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => TabTrayPage(
           tabs: _browserTabs,
           activeTabId: _activeBrowserTabId,
           snapshots: _tabSnapshots,
@@ -1426,15 +1563,20 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
             _closeBrowserTab(id);
           },
           onCreateTab: () {
-            Navigator.of(context).pop();
             _createBrowserTab();
+            Navigator.of(context).pop();
           },
           onCreateIncognitoTab: () {
-            Navigator.of(context).pop();
             _createBrowserTab(incognito: true);
+            Navigator.of(context).pop();
           },
         ),
-        fullscreenDialog: true,
+        transitionDuration: Duration(milliseconds: 200),
+        reverseTransitionDuration: Duration(milliseconds: 150),
+        transitionsBuilder: (_, anim, __, child) => SlideTransition(
+          position: Tween<Offset>(begin: Offset(0, 1), end: Offset.zero).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          child: child,
+        ),
       ),
     );
   }
@@ -2221,6 +2363,126 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     c.reload();
   }
 
+  void _showRecentTabs() {
+    if (_recentTabs.isEmpty) {
+      _showToast('No recent tabs');
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: EdgeInsets.only(top: 8),
+              width: 32, height: 4,
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+            ),
+            Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Recent Tabs', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _recentTabs.length,
+                itemBuilder: (_, i) {
+                  final tab = _recentTabs[i];
+                  return ListTile(
+                    leading: Icon(Icons.history, color: Colors.white54, size: 20),
+                    title: Text(tab['title'] ?? tab['url']!, style: TextStyle(color: Colors.white, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(tab['url']!, style: TextStyle(color: Colors.white54, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _createBrowserTab(url: tab['url']);
+                    },
+                    trailing: IconButton(
+                      icon: Icon(Icons.close, color: Colors.white38, size: 16),
+                      onPressed: () => setState(() => _recentTabs.removeAt(i)),
+                    ),
+                  );
+                },
+              ),
+            ),
+            SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showReadingMode() async {
+    final url = _activeTab.url;
+    if (url.isEmpty || url == 'about:blank') {
+      _showToast('No page to read');
+      return;
+    }
+    final c = _activeWebview;
+    if (c == null) return;
+    _showToast('Extracting content...');
+    try {
+      final result = await c.evaluateJavascript(source: r'''
+        (function() {
+          var content = '';
+          var title = document.title || '';
+          var article = document.querySelector('article, [role="article"], .post-content, .article-content, .entry-content, main, .content');
+          if (article) {
+            content = article.innerHTML;
+          } else {
+            var paragraphs = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre');
+            var texts = [];
+            paragraphs.forEach(function(p) {
+              var text = p.innerText.trim();
+              if (text.length > 20) texts.push('<p>' + text + '</p>');
+            });
+            content = texts.join('\n');
+          }
+          if (!content || content.length < 50) {
+            content = '<p>' + (document.body ? document.body.innerText : '').substring(0, 10000) + '</p>';
+          }
+          return JSON.stringify({title: title, content: content});
+        })();
+      ''');
+      if (result != null) {
+        final data = jsonDecode(result.toString());
+        final title = data['title'] ?? 'Reading Mode';
+        final htmlBody = data['content'] ?? '';
+        final html = '''<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{background:#0F172A;color:#E2E8F0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:18px;line-height:1.8;padding:24px;max-width:800px;margin:0 auto}
+h1,h2,h3{color:#F8FAFC;margin:1em 0 0.5em}p{margin:0.6em 0}a{color:#38BDF8}img{max-width:100%;border-radius:8px}
+blockquote{border-left:3px solid #38BDF8;padding:8px 16px;margin:12px 0;background:rgba(56,189,248,0.05)}
+pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
+</style></head><body><h1 style="font-size:1.5em">$title</h1>$htmlBody</body></html>''';
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/reading_mode.html');
+        await tempFile.writeAsString(html);
+        if (mounted) {
+          Navigator.push(context, MaterialPageRoute(
+            builder: (_) => HtmlViewerPage(filePath: tempFile.path, title: 'Reading Mode'),
+          ));
+        }
+      }
+    } catch (e) {
+      _showToast('Failed to extract content');
+    }
+  }
+
+  void _addToHomeScreen() async {
+    final url = _activeTab.url;
+    final title = _activeTab.title.isNotEmpty ? _activeTab.title : url;
+    if (url.isEmpty || url == 'about:blank') {
+      _showToast('No page to add');
+      return;
+    }
+    Share.share('$title\n$url', subject: title);
+  }
+
   void _showToast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
@@ -2231,6 +2493,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _urlFocusNode.removeListener(_onUrlFocusChanged);
     _musicService.removeListener(_onMusicChanged);
     _downloadManager.dispose();
@@ -2525,7 +2788,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                   subtitle: 'Video Player',
                   onTap: () {
                     Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media')),
+                      builder: (_) => VideoPlayerWidget(onOpenMusic: () { Navigator.of(context).pop(); _switchToView('music'); }, onHome: () => Navigator.of(context).pop()),
                     ));
                   },
                 ),
@@ -2643,6 +2906,15 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                 if (_viewMode == ViewMode.typeView) {
                   _urlFocusNode.unfocus();
                   _suggestDebounce?.cancel();
+                  if (_browserTabs.isEmpty) {
+                    setState(() {
+                      _viewMode = ViewMode.home;
+                      _urlSuggestions = [];
+                      _searchSuggestions = [];
+                      _suggestions = [];
+                    });
+                    return;
+                  }
                   final tab = _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.first);
                   _ignoreUrlChanges = true;
                   if (!_showHomeScreen) {
@@ -2841,12 +3113,13 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()));
+          Navigator.of(context).pop();
         }
       },
       child: MusicPlayerWidget(
         onOpenVideos: () {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => _switchToView('media'))));
+          Navigator.of(context).pop();
+          _switchToView('player');
         },
         onOpenSettings: () {
           _showToast('Music settings coming soon');
@@ -2856,21 +3129,37 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   }
 
   Widget _buildImagePage() {
-    return ImageViewerWidget();
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()));
+        }
+      },
+      child: ImageViewerWidget(),
+    );
   }
 
   Widget _buildDocumentPage() {
-    return DocumentWidget(
-      openFile: (path) => _openFile(path),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()));
+        }
+      },
+      child: DocumentWidget(
+        openFile: (path) => _openFile(path),
+      ),
     );
   }
 
   Widget _buildFeatureScaffold(String title, IconData icon, Widget body, {bool backToMediaHub = false}) {
     return PopScope(
-      canPop: !backToMediaHub,
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && backToMediaHub) {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()));
+        if (!didPop) {
+          Navigator.of(context).pop();
         }
       },
       child: Scaffold(
@@ -2880,9 +3169,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
           backgroundColor: Theme.of(context).colorScheme.surface,
           leading: IconButton(
             icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
-            onPressed: backToMediaHub
-                ? () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()))
-                : () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(context).pop(),
           ),
           actions: [
             IconButton(
@@ -3095,8 +3382,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                   if (clean.isNotEmpty) _urlController.text = clean;
                   _ignoreUrlChanges = false;
                   setState(() { _viewMode = ViewMode.typeView; });
-                  _urlFocusNode.requestFocus();
                   WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _urlFocusNode.requestFocus();
                     _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
                   });
                 },
@@ -3212,6 +3499,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
               child: TextField(
                 controller: _urlController,
                 focusNode: _urlFocusNode,
+                autofocus: true,
                 style: TextStyle(color: textColor, fontSize: 16),
                 decoration: InputDecoration(
                   hintText: inc ? 'Search privately' : 'Search or enter address',
@@ -3297,28 +3585,34 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                     _ellipsisItem(Icons.folder, 'Add to Group', () { _showToast('Tab groups coming soon'); Navigator.of(ctx).pop(); }),
                     _ellipsisItem(Icons.history, 'History', () { Navigator.of(ctx).pop(); _switchToView('history'); }),
                     _ellipsisItem(Icons.delete_sweep, 'Delete Browsing Data', () {
-                      CookieManager.instance().deleteAllCookies().catchError((_) {});
-                      _activeWebview?.clearCache().catchError((_) {});
-                      _showToast('Browsing data cleared');
                       Navigator.of(ctx).pop();
+                      _showClearBrowsingDataDialog();
                     }),
                     _ellipsisItem(Icons.download, 'Downloads', () { Navigator.of(ctx).pop(); _switchToView('downloads'); }),
                     _ellipsisItem(Icons.bookmark, 'Bookmarks', () {
                       Navigator.of(ctx).pop();
                       _showBookmarksDialog();
                     }),
-                    _ellipsisItem(Icons.recent_actors, 'Recent Tabs', () { _showToast('Recent tabs'); Navigator.of(ctx).pop(); }),
+                    _ellipsisItem(Icons.recent_actors, 'Recent Tabs', () { Navigator.of(ctx).pop(); _showRecentTabs(); }),
                     _ellipsisItem(Icons.share, 'Share', () {
-                      final url = _urlController.text;
-                      if (url.isNotEmpty) {
-                        Share.share(url);
-                      }
+                      final url = _activeTab.url;
+                      if (url.isNotEmpty) Share.share(url);
                       Navigator.of(ctx).pop();
                     }),
                     _ellipsisItem(Icons.search, 'Find in Page', () { _showFindInPage(); Navigator.of(ctx).pop(); }),
-                    _ellipsisItem(Icons.translate, 'Translate', () { _showToast('Translate'); Navigator.of(ctx).pop(); }),
-                    _ellipsisItem(Icons.text_snippet, 'Show Reading Mode', () { _showToast('Reading mode'); Navigator.of(ctx).pop(); }),
-                    _ellipsisItem(Icons.add_to_home_screen, 'Add to Home screen', () { _showToast('Add to Home screen'); Navigator.of(ctx).pop(); }),
+                    _ellipsisItem(Icons.translate, 'Translate', () {
+                      final url = _activeTab.url;
+                      Navigator.of(ctx).pop();
+                      if (url.isNotEmpty) _openFile('https://translate.google.com/translate?sl=auto&tl=en&u=${Uri.encodeComponent(url)}');
+                    }),
+                    _ellipsisItem(Icons.text_snippet, 'Show Reading Mode', () {
+                      Navigator.of(ctx).pop();
+                      _showReadingMode();
+                    }),
+                    _ellipsisItem(Icons.add_to_home_screen, 'Add to Home screen', () {
+                      Navigator.of(ctx).pop();
+                      _addToHomeScreen();
+                    }),
                     // Desktop site checkbox
                     StatefulBuilder(
                       builder: (ctx2, setInnerState) {
@@ -3373,6 +3667,77 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       leading: Icon(icon, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
       title: Text(label, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
       onTap: onTap,
+    );
+  }
+
+  void _showClearBrowsingDataDialog() {
+    bool clearHistory = true;
+    bool clearCookies = false;
+    bool clearCache = false;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDlgState) {
+            return AlertDialog(
+              backgroundColor: Color(0xFF1E293B),
+              title: Text('Clear Browsing Data', style: TextStyle(color: Colors.white, fontSize: 18)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CheckboxListTile(
+                    value: clearHistory,
+                    onChanged: (v) => setDlgState(() => clearHistory = v ?? false),
+                    title: Text('Browsing history', style: TextStyle(color: Colors.white, fontSize: 14)),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    activeColor: kAccentTeal,
+                  ),
+                  CheckboxListTile(
+                    value: clearCookies,
+                    onChanged: (v) => setDlgState(() => clearCookies = v ?? false),
+                    title: Text('Cookies and site data', style: TextStyle(color: Colors.white, fontSize: 14)),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    activeColor: kAccentTeal,
+                  ),
+                  CheckboxListTile(
+                    value: clearCache,
+                    onChanged: (v) => setDlgState(() => clearCache = v ?? false),
+                    title: Text('Cached images and files', style: TextStyle(color: Colors.white, fontSize: 14)),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    activeColor: kAccentTeal,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    if (clearHistory) {
+                      await HistoryService.clearAll();
+                      setState(() => _browserHistory.clear());
+                    }
+                    if (clearCookies) {
+                      CookieManager.instance().deleteAllCookies().catchError((_) {});
+                    }
+                    if (clearCache) {
+                      _activeWebview?.clearCache().catchError((_) {});
+                    }
+                    _showToast('Browsing data cleared');
+                  },
+                  child: Text('Clear', style: TextStyle(color: Color(0xFFF87171))),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -3438,55 +3803,84 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
 
   Widget _buildWebviewArea() {
     final activeIndex = _browserTabs.indexWhere((t) => t.id == _activeBrowserTabId);
-    return Stack(
-      children: [
-        if (_browserTabs.isNotEmpty && activeIndex >= 0)
-          IndexedStack(
-            index: activeIndex,
-            children: _browserTabs.map((tab) => _buildTabWebView(tab)).toList(),
-          ),
-        if (_isFullscreen)
-          Positioned(
-            top: 12,
-            right: 16,
-            child: FloatingActionButton(
-              mini: true,
-              backgroundColor: Colors.black87,
-              onPressed: () {
-                _activeWebview?.evaluateJavascript(source: 'document.exitFullscreen();');
-              },
-              child: Icon(Icons.fullscreen_exit, color: Colors.white, size: 20),
+    final activeTab = activeIndex >= 0 ? _browserTabs[activeIndex] : null;
+    final isLoading = activeTab != null && (_tabProgress[activeTab.id] ?? 0) < 100;
+    return Container(
+      color: Color(0xFF0F172A),
+      child: Stack(
+        children: [
+          if (_browserTabs.isNotEmpty && activeIndex >= 0)
+            IndexedStack(
+              index: activeIndex,
+              children: _browserTabs.map((tab) => _buildTabWebView(tab)).toList(),
             ),
-          ),
-        if (_pendingMedia.isNotEmpty)
-          Positioned(
-            right: 16,
-            bottom: 16 + MediaQuery.of(context).padding.bottom,
-            child: FloatingActionButton(
-              mini: true,
-              backgroundColor: kAccentTeal,
-              onPressed: _showMediaSnifferPage,
-              child: Stack(
-                children: [
-                  Icon(Icons.wifi_tethering, color: Colors.white),
-                  Positioned(
-                    right: 0, top: 0,
-                    child: Container(
-                      padding: EdgeInsets.all(2),
-                      decoration: BoxDecoration(color: kAccentOrange, shape: BoxShape.circle),
-                      constraints: BoxConstraints(minWidth: 16, minHeight: 16),
-                      child: Text(
-                        '${_pendingMedia.length}',
-                        style: TextStyle(fontSize: 10, color: Colors.white),
-                        textAlign: TextAlign.center,
+          if (isLoading)
+            Container(
+              color: Color(0xFF0F172A),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 28, height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: kAccentTeal,
+                        value: (_tabProgress[activeTab!.id] ?? 0) / 100.0,
                       ),
                     ),
-                  ),
-                ],
+                    SizedBox(height: 12),
+                    Text(
+                      '${_tabProgress[activeTab.id] ?? 0}%',
+                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-      ],
+          if (_isFullscreen)
+            Positioned(
+              top: 12,
+              right: 16,
+              child: FloatingActionButton(
+                mini: true,
+                backgroundColor: Colors.black87,
+                onPressed: () {
+                  _activeWebview?.evaluateJavascript(source: 'document.exitFullscreen();');
+                },
+                child: Icon(Icons.fullscreen_exit, color: Colors.white, size: 20),
+              ),
+            ),
+          if (_pendingMedia.isNotEmpty)
+            Positioned(
+              right: 16,
+              bottom: 16 + MediaQuery.of(context).padding.bottom,
+              child: FloatingActionButton(
+                mini: true,
+                backgroundColor: kAccentTeal,
+                onPressed: _showMediaSnifferPage,
+                child: Stack(
+                  children: [
+                    Icon(Icons.wifi_tethering, color: Colors.white),
+                    Positioned(
+                      right: 0, top: 0,
+                      child: Container(
+                        padding: EdgeInsets.all(2),
+                        decoration: BoxDecoration(color: kAccentOrange, shape: BoxShape.circle),
+                        constraints: BoxConstraints(minWidth: 16, minHeight: 16),
+                        child: Text(
+                          '${_pendingMedia.length}',
+                          style: TextStyle(fontSize: 10, color: Colors.white),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -3514,17 +3908,16 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         physics: AlwaysScrollableScrollPhysics(),
         child: Column(
         children: [
-          SizedBox(height: 24),
-          Image.asset('assets/makaw_logo_48.png', width: 48, height: 48, fit: BoxFit.contain),
-          SizedBox(height: 10),
-          Text('Makaw Browser',
+          SizedBox(height: 16),
+          Text('Makaw',
             style: TextStyle(
+              fontFamily: 'Outfit',
               color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 20,
-              fontWeight: FontWeight.w400,
-              letterSpacing: 0.3,
+              fontSize: 42,
+              fontWeight: FontWeight.w500,
+              letterSpacing: -0.5,
             )),
-          SizedBox(height: 36),
+          SizedBox(height: 24),
           // Omnibox
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
@@ -3763,7 +4156,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   }
 
   Widget _buildIncognitoLandingPage() {
-    _urlController.clear();
     return Container(
       color: kIncognitoBg,
       padding: EdgeInsets.symmetric(horizontal: 24),
@@ -3802,7 +4194,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
             GestureDetector(
               onTap: () {
                 setState(() { _typeViewFromHome = true; _viewMode = ViewMode.typeView; });
-                _urlFocusNode.requestFocus();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _urlFocusNode.requestFocus();
+                });
               },
               child: Container(
                 width: double.infinity,
@@ -4296,51 +4690,48 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   void _openFile(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
 
-    final goToMediaHub = () => Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => _buildMediaHubPage()),
+    final goBack = () {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    };
+
+    Route fastRoute(Widget child) => PageRouteBuilder(
+      pageBuilder: (_, __, ___) => child,
+      transitionDuration: Duration(milliseconds: 200),
+      reverseTransitionDuration: Duration(milliseconds: 150),
+      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
     );
 
     if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp'].contains(ext)) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => DirectVideoPlayer(
-          filePath: filePath,
-          title: filePath.split('\\').last.split('/').last,
-        ),
-      ));
+      Navigator.of(context).push(fastRoute(DirectVideoPlayer(
+        filePath: filePath,
+        title: filePath.split('\\').last.split('/').last,
+      )));
       return;
     }
     if (ext == 'pdf') {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => PdfViewerWidget(
-          filePath: filePath,
-          title: filePath.split('\\').last.split('/').last,
-          onClose: goToMediaHub,
-        ),
-      ));
+      Navigator.of(context).push(fastRoute(MakawPdfViewerPage(
+        filePath: filePath,
+        title: filePath.split('\\').last.split('/').last,
+        onClose: goBack,
+      )));
     } else if (ext == 'epub') {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => EpubReaderWidget(
-          filePath: filePath,
-          title: filePath.split('\\').last.split('/').last,
-          onClose: goToMediaHub,
-        ),
-      ));
+      Navigator.of(context).push(fastRoute(EpubReaderWidget(
+        filePath: filePath,
+        title: filePath.split('\\').last.split('/').last,
+        onClose: goBack,
+      )));
     } else if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'opus'].contains(ext)) {
       _playAudioFileFromIntent(filePath);
     } else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].contains(ext)) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => _buildImageViewer(filePath, goToMediaHub),
-      ));
+      Navigator.of(context).push(fastRoute(_buildImageViewer(filePath, goBack)));
     } else if (['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'log', 'csv'].contains(ext)) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => _buildTextViewer(filePath, goToMediaHub),
-      ));
+      Navigator.of(context).push(fastRoute(TextViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
     } else if (['html', 'htm', 'xhtml'].contains(ext)) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => _buildHtmlViewer(filePath, goToMediaHub),
-      ));
-    } else if (['doc', 'docx'].contains(ext)) {
-      OpenFilex.open(filePath);
+      Navigator.of(context).push(fastRoute(HtmlViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
+    } else if (['doc', 'docx', 'odt', 'rtf', 'pages'].contains(ext)) {
+      Navigator.of(context).push(fastRoute(DocumentViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
     } else {
       OpenFilex.open(filePath);
     }
@@ -4365,87 +4756,27 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     );
   }
 
-  Widget _buildTextViewer(String filePath, VoidCallback onBack) {
-    final name = filePath.split('\\').last.split('/').last;
-    return FutureBuilder<String>(
-      future: File(filePath).readAsString(),
-      builder: (ctx, snap) {
-        return Scaffold(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: AppBar(
-            title: Text(name, style: TextStyle(fontSize: 14)),
-            backgroundColor: Theme.of(context).colorScheme.surface,
-            leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: onBack),
-          ),
-          body: snap.hasData
-              ? SingleChildScrollView(
-                  padding: EdgeInsets.all(16),
-                  child: SelectableText(
-                    snap.data!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13, fontFamily: 'monospace'),
-                  ),
-                )
-              : Center(child: CircularProgressIndicator(color: kAccentTeal)),
-        );
-      },
-    );
-  }
-
-  Widget _buildHtmlViewer(String filePath, VoidCallback onBack) {
-    final name = filePath.split('\\').last.split('/').last;
-    final uri = Uri.file(filePath);
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Text(name, style: TextStyle(fontSize: 14)),
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: onBack),
-      ),
-      body: InAppWebView(
-        initialUrlRequest: URLRequest(url: WebUri(uri.toString())),
-        initialSettings: InAppWebViewSettings(
-          javaScriptEnabled: true,
-          useWideViewPort: true,
-          supportZoom: true,
-        ),
-      ),
-    );
-  }
-
   void _onUrlChanged() {
     if (_ignoreUrlChanges) return;
     final text = _urlController.text.trim();
     if (text.isEmpty) {
-      setState(() => _urlSuggestions = []);
+      setState(() { _suggestions = []; _urlSuggestions = []; _searchSuggestions = []; });
       return;
     }
-    final lower = text.toLowerCase();
-    final results = <Map<String, dynamic>>[];
-    final seen = <String>{};
-    for (final h in _browserHistory) {
-      if (results.length >= 8) break;
-      final url = (h['url'] as String? ?? '').toLowerCase();
-      final title = (h['title'] as String? ?? '').toLowerCase();
-      if ((url.contains(lower) || title.contains(lower)) && seen.add(url)) {
-        results.add(h);
-      }
-    }
-    // Add matching shortcuts/bookmarks too
-    for (final s in _shortcuts) {
-      if (results.length >= 8) break;
-      final label = s.$1.toLowerCase();
-      final url = s.$2.toLowerCase();
-      if ((label.contains(lower) || url.contains(lower)) && seen.add(url)) {
-        results.add(<String, dynamic>{'url': s.$2, 'title': s.$1, 'time': ''});
-      }
-    }
-    setState(() => _urlSuggestions = results);
+    final results = SuggestionEngine.rank(
+      query: text,
+      history: _browserHistory,
+      shortcuts: _shortcuts,
+      searchSuggestions: _searchSuggestions,
+      isIncognito: _isIncognitoActive,
+    );
+    setState(() => _suggestions = results);
     _fetchSearchSuggestions(text);
   }
 
   void _fetchSearchSuggestions(String query) {
     _suggestDebounce?.cancel();
-    if (query.length < 2) { setState(() => _searchSuggestions = []); return; }
+    if (query.length < 2) { setState(() { _searchSuggestions = []; _suggestions = []; }); return; }
     _suggestDebounce = Timer(const Duration(milliseconds: 200), () async {
       try {
         final uri = Uri.parse('https://suggestqueries.google.com/complete/search?client=firefox&q=${Uri.encodeComponent(query)}');
@@ -4460,7 +4791,20 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         final decoded = jsonDecode(body) as List;
         if (decoded.length < 2 || decoded[1] is! List) return;
         final suggestions = (decoded[1] as List).map((e) => e.toString()).where((s) => s.isNotEmpty).take(6).toList();
-        if (mounted) setState(() => _searchSuggestions = suggestions);
+        if (mounted) {
+          setState(() => _searchSuggestions = suggestions);
+          final text = _urlController.text.trim();
+          if (text.isNotEmpty) {
+            final ranked = SuggestionEngine.rank(
+              query: text,
+              history: _browserHistory,
+              shortcuts: _shortcuts,
+              searchSuggestions: suggestions,
+              isIncognito: _isIncognitoActive,
+            );
+            setState(() => _suggestions = ranked);
+          }
+        }
       } catch (_) {}
     });
   }
@@ -4486,40 +4830,119 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
   }
 
   Widget _buildTypeView() {
+    if (_suggestions.isEmpty) return SizedBox.shrink();
+    final inc = _isIncognitoActive;
+    final bgColor = inc ? kIncognitoBg : Theme.of(context).colorScheme.surface;
+    final textColor = inc ? Colors.white : Theme.of(context).colorScheme.onSurface;
+    final subColor = inc ? Colors.white54 : Theme.of(context).colorScheme.onSurface.withOpacity(0.5);
+    final dividerColor = inc ? Colors.white12 : Theme.of(context).colorScheme.onSurface.withOpacity(0.15);
+
+    final historySuggestions = _suggestions.where((s) => s.source == SuggestionSource.history).toList();
+    final bookmarkSuggestions = _suggestions.where((s) => s.source == SuggestionSource.bookmark).toList();
+    final searchSuggestions = _suggestions.where((s) => s.source == SuggestionSource.search).toList();
+    final tabSuggestions = _suggestions.where((s) => s.source == SuggestionSource.openTab).toList();
+
     return Container(
-      color: Theme.of(context).colorScheme.surface,
-      child: (_urlSuggestions.isEmpty && _searchSuggestions.isEmpty)
-          ? const SizedBox.shrink()
-          : ListView(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: bgColor,
+      child: ListView(
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         children: [
-          if (_searchSuggestions.isNotEmpty) ...[
-            Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text('Search suggestions', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-            ),
-            ..._searchSuggestions.take(5).map((s) => ListTile(
-              dense: true,
-              leading: Icon(Icons.search, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
-              title: Text(s, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
-              onTap: () => _typeViewNavigate(s),
-            )),
+          if (bookmarkSuggestions.isNotEmpty) ...[
+            _sectionHeader('Shortcuts', textColor, subColor),
+            ...bookmarkSuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
           ],
-          if (_urlSuggestions.isNotEmpty) ...[
-            if (_searchSuggestions.isNotEmpty) Divider(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
-            ..._urlSuggestions.take(5).map((s) {
-              final url = s['url'] as String? ?? '';
-              final title = s['title'] as String? ?? '';
-              final display = _cleanDisplayUrl(url.isNotEmpty ? url : title);
-              return ListTile(
-                dense: true,
-                leading: Icon(Icons.language, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
-                title: Text(display, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
-      onTap: () => _typeViewNavigate(url),
-              );
-            }),
+          if (historySuggestions.isNotEmpty) ...[
+            if (bookmarkSuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
+            _sectionHeader('History', textColor, subColor),
+            ...historySuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
+          ],
+          if (tabSuggestions.isNotEmpty) ...[
+            if (bookmarkSuggestions.isNotEmpty || historySuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
+            _sectionHeader('Open Tabs', textColor, subColor),
+            ...tabSuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
+          ],
+          if (searchSuggestions.isNotEmpty) ...[
+            if (bookmarkSuggestions.isNotEmpty || historySuggestions.isNotEmpty || tabSuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
+            _sectionHeader('Search', textColor, subColor),
+            ...searchSuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String label, Color textColor, Color subColor) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(12, 10, 12, 4),
+      child: Text(label.toUpperCase(), style: TextStyle(color: subColor, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+    );
+  }
+
+  Widget _suggestionTile(SuggestionItem item, Color textColor, Color subColor) {
+    final icon = item.source == SuggestionSource.search
+        ? Icons.search
+        : item.source == SuggestionSource.bookmark
+            ? Icons.bookmark
+            : item.source == SuggestionSource.openTab
+                ? Icons.tab
+                : Icons.history;
+    final iconColor = item.source == SuggestionSource.bookmark
+        ? kAccentTeal
+        : item.source == SuggestionSource.search
+            ? subColor
+            : subColor;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _typeViewNavigate(item.url),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: (textColor == Colors.white ? Colors.white : Colors.black).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: item.source == SuggestionSource.history && item.googleFaviconUrl.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.network(
+                          item.googleFaviconUrl,
+                          width: 32, height: 32, fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Icon(icon, color: iconColor, size: 18),
+                        ),
+                      )
+                    : Icon(icon, color: iconColor, size: 18),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.displayTitle,
+                      style: TextStyle(color: textColor, fontSize: 14),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (item.source != SuggestionSource.search)
+                      Text(
+                        item.domain,
+                        style: TextStyle(color: subColor, fontSize: 12),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -4679,8 +5102,70 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
     return false;
   }
 
+  String _googleConsentAutoDismissScript() => '''
+(function(){
+  function killConsentHaze() {
+    try {
+      var selectors = [
+        'iframe[src*="consent.google"]',
+        '#lb',
+        '.SS20bd',
+        'div[role="dialog"][aria-modal="true"]',
+        '.GoogleConsentBanner',
+        '#consent-bump',
+        '[data-consent]',
+        'div[class*="consent"]',
+        'div[id*="consent"]'
+      ];
+      for (var i = 0; i < selectors.length; i++) {
+        var els = document.querySelectorAll(selectors[i]);
+        for (var j = 0; j < els.length; j++) {
+          var el = els[j];
+          var src = (el.src || '').toLowerCase();
+          var cls = (el.className || '').toLowerCase();
+          var id = (el.id || '').toLowerCase();
+          if (src.indexOf('consent.google') >= 0 ||
+              cls.indexOf('consent') >= 0 ||
+              id.indexOf('consent') >= 0 ||
+              id === 'lb') {
+            el.remove();
+          }
+        }
+      }
+      if (document.body) {
+        document.body.style.overflow = 'auto';
+        document.body.style.position = 'static';
+        document.documentElement.style.overflow = 'auto';
+      }
+    } catch(e) {}
+  }
+  killConsentHaze();
+  if (document.body) {
+    var obs = new MutationObserver(function(muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var added = muts[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var n = added[j];
+          if (n.nodeType === 1) killConsentHaze();
+        }
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  setTimeout(killConsentHaze, 500);
+  setTimeout(killConsentHaze, 1500);
+})();
+''';
+
   String _antiTapjackScript() => '''
 (function(){
+  try {
+    var loc = window.location.href.toLowerCase();
+    if (loc.indexOf('consent.google') >= 0 || loc.indexOf('accounts.google') >= 0 ||
+        loc.indexOf('play.google') >= 0 || loc.indexOf('myaccount.google') >= 0 ||
+        loc.indexOf('facebook.com/login') >= 0 || loc.indexOf('github.com/login') >= 0 ||
+        loc.indexOf('apple.com/signin') >= 0) { return; }
+  } catch(e) {}
   // 1. Override window.open — block ALL popups from page scripts
   try {
     window.open = function(u, n, f) {
@@ -4699,7 +5184,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       if (!t || t.tagName !== 'A') return;
       if (t.hasAttribute('download') || t.classList.contains('download')) return;
       var href = (t.getAttribute('href') || '').toLowerCase();
-      var dlExts = ['.mp4','.mp3','.zip','.rar','.apk','.exe','.pdf','.epub','.m4a','.flac','.ogg','.wav','.mkv','.avi','.mov','.doc','.docx','.xls','.xlsx','.csv','.txt','.iso','.dmg','.deb','.rpm','.bin','.7z','.tar','.gz'];
+      var dlExts = ['.mp4','.mp3','.zip','.rar','.apk','.exe','.pdf','.epub','.m4a','.flac','.ogg','.wav','.mkv','.avi','.mov','.doc','.docx','.odt','.rtf','.pages','.xls','.xlsx','.csv','.txt','.iso','.dmg','.deb','.rpm','.bin','.7z','.tar','.gz'];
       for (var j = 0; j < dlExts.length; j++) { if (href.indexOf(dlExts[j]) >= 0) return; }
       if (t.getAttribute('target') === '_blank') {
         t.removeAttribute('target');
@@ -4840,6 +5325,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       supportMultipleWindows: true,
       mediaPlaybackRequiresUserGesture: false,
       allowsInlineMediaPlayback: true,
+      allowsPictureInPictureMediaPlayback: true,
       supportZoom: true,
       cacheEnabled: true,
       clearCache: false,
@@ -4875,6 +5361,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
       initialSettings: settings,
       initialUrlRequest: URLRequest(url: WebUri(initialUrl)),
       initialUserScripts: UnmodifiableListView([
+        UserScript(source: _googleConsentAutoDismissScript(), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
         UserScript(source: _antiTapjackScript(), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
       ]),
       pullToRefreshController: _pullToRefreshController,
@@ -4981,7 +5468,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
                 type = 'audio';
               } else if (['jpg','jpeg','png','gif','webp','bmp','svg','ico','avif'].contains(ext)) {
                 type = 'image';
-              } else if (['pdf','epub','doc','docx','xls','xlsx','ppt','pptx','txt','csv'].contains(ext)) {
+              } else if (['pdf','epub','doc','docx','odt','rtf','pages','xls','xlsx','ppt','pptx','txt','csv'].contains(ext)) {
                 type = 'document';
               } else {
                 type = 'other';
@@ -5074,7 +5561,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         }
         setState(() {});
       },
-      onLoadStop: (ctrl, url) {
+      onLoadStop: (ctrl, url) async {
         final urlStr = url.toString();
         final tabId = tab.id;
         _tabProgress[tabId] = 100;
@@ -5085,9 +5572,18 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
           setState(() {
             _urlSuggestions = [];
             _searchSuggestions = [];
+            _suggestions = [];
           });
         } else {
           setState(() {});
+        }
+        if (!tab.incognito) {
+          try {
+            final title = await ctrl.getTitle();
+            if (title != null && title.isNotEmpty && title != 'about:blank') {
+              _updateHistoryTitle(urlStr, title);
+            }
+          } catch (_) {}
         }
         final cbScript = _contentBlocker.fullUserScript;
         final urlLower = urlStr.toLowerCase();
@@ -5106,6 +5602,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> {
         _injectFilePickerScript(ctrl);
         _injectMediaSnifferScript(ctrl);
         _injectDownloadInterceptorScript(ctrl);
+        _injectMediaSessionBridge(ctrl);
       },
       onDownloadStartRequest: (ctrl, downloadStartRequest) async {
         final fileUrl = downloadStartRequest.url.toString();
@@ -5254,7 +5751,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
   var videoExts = ['mp4','webm','mkv','avi','mov','flv','wmv','m3u8','mpd','ts'];
   var audioExts = ['mp3','wav','flac','ogg','aac','m4a','opus'];
   var imageExts = ['jpg','jpeg','png','gif','webp','bmp','svg','ico','avif'];
-  var docExts = ['pdf','epub','doc','docx','xls','xlsx','ppt','pptx','txt','csv'];
+  var docExts = ['pdf','epub','doc','docx','odt','rtf','pages','xls','xlsx','ppt','pptx','txt','csv'];
   var allExts = videoExts.concat(audioExts).concat(imageExts).concat(docExts);
 
   function classifyExt(ext) {
@@ -5604,6 +6101,83 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     });
   });
   if (document.body) observer.observe(document.body, {childList: true, subtree: true});
+})();
+''').catchError((_) {});
+  }
+
+  void _injectMediaSessionBridge(InAppWebViewController c) {
+    c.evaluateJavascript(source: '''
+(function() {
+  if (window._makawMediaSessionInit) return;
+  window._makawMediaSessionInit = true;
+
+  var lastUrl = '';
+
+  function tryBridge() {
+    try {
+      var media = document.querySelector('video, audio');
+      if (!media || media.paused) return;
+
+      var now = location.href;
+      var changed = (now !== lastUrl);
+      lastUrl = now;
+
+      if (!navigator.mediaSession) return;
+
+      if (changed || !navigator.mediaSession.metadata) {
+        var title = document.title || 'Makaw Web Player';
+        var artist = location.hostname;
+        var artworkUrl = 'https://www.google.com/s2/favicons?domain=' + location.hostname + '&sz=128';
+
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: title,
+            artist: artist,
+            artwork: [{ src: artworkUrl, sizes: '128x128', type: 'image/png' }]
+          });
+        } catch(e) {}
+
+        try {
+          navigator.mediaSession.setActionHandler('play', function() { media.play(); });
+          navigator.mediaSession.setActionHandler('pause', function() { media.pause(); });
+          navigator.mediaSession.setActionHandler('seekbackward', function() { media.currentTime = Math.max(0, media.currentTime - 10); });
+          navigator.mediaSession.setActionHandler('seekforward', function() { media.currentTime = Math.min(media.duration, media.currentTime + 10); });
+        } catch(e) {}
+
+        try {
+          navigator.mediaSession.setActionHandler('previoustrack', null);
+          navigator.mediaSession.setActionHandler('nexttrack', null);
+        } catch(e) {}
+
+        try {
+          navigator.mediaSession.setActionHandler('seekto', function(details) {
+            if (details.seekTime != null) media.currentTime = details.seekTime;
+          });
+        } catch(e) {}
+      }
+
+      navigator.mediaSession.playbackState = media.paused ? 'paused' : 'playing';
+    } catch(e) {}
+  }
+
+  media = document.querySelector('video, audio');
+  if (media) {
+    ['play','pause','loadedmetadata','ended','seeked','timeupdate'].forEach(function(evt) {
+      media.addEventListener(evt, tryBridge, {passive: true});
+    });
+  }
+
+  var obs = new MutationObserver(function() {
+    var m = document.querySelector('video, audio');
+    if (m && !m._makawBound) {
+      m._makawBound = true;
+      ['play','pause','loadedmetadata','ended','seeked','timeupdate'].forEach(function(evt) {
+        m.addEventListener(evt, tryBridge, {passive: true});
+      });
+      tryBridge();
+    }
+  });
+  if (document.body) obs.observe(document.body, {childList: true, subtree: true});
 })();
 ''').catchError((_) {});
   }

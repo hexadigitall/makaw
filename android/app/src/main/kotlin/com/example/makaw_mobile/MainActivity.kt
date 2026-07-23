@@ -7,8 +7,12 @@ import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.app.Activity
+import android.content.Context
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.provider.MediaStore
 import android.util.Log
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -175,6 +179,39 @@ class MainActivity : FlutterActivity() {
                 result.success(results)
             } else {
                 result.notImplemented()
+            }
+        }
+
+        // Video player control channel (volume, brightness, screenshot)
+        val videoChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.example.makaw_mobile/video_control")
+        videoChannel.setMethodCallHandler { call, result ->
+            val audioMgr = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            when (call.method) {
+                "getMaxVolume" -> {
+                    result.success(audioMgr.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
+                }
+                "getVolume" -> {
+                    result.success(audioMgr.getStreamVolume(AudioManager.STREAM_MUSIC))
+                }
+                "setVolume" -> {
+                    val vol = (call.argument<Number>("volume")?.toInt()) ?: 0
+                    val maxVol = audioMgr.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    audioMgr.setStreamVolume(AudioManager.STREAM_MUSIC, vol.coerceIn(0, maxVol), 0)
+                    result.success(true)
+                }
+                "getScreenBrightness" -> {
+                    val lp = window.attributes
+                    val brightness = if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
+                    result.success(brightness.toDouble())
+                }
+                "setScreenBrightness" -> {
+                    val brightness = (call.argument<Number>("brightness")?.toFloat()) ?: 0.5f
+                    val lp = window.attributes
+                    lp.screenBrightness = brightness.coerceIn(0.01f, 1.0f)
+                    window.attributes = lp
+                    result.success(true)
+                }
+                else -> result.notImplemented()
             }
         }
 

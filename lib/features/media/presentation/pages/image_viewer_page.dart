@@ -226,7 +226,7 @@ class _ImageViewerWidgetState extends ConsumerState<ImageViewerWidget> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(4),
-          child: Image.file(File(img.filePath), fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Color(0xFF666680))),
+          child: Image(image: ResizeImage(FileImage(File(img.filePath)), width: 300, height: 300), fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Color(0xFF666680))),
         ),
       ),
     );
@@ -253,7 +253,7 @@ class _ImageViewerWidgetState extends ConsumerState<ImageViewerWidget> {
               children: [
                 ClipRRect(
                   borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-                  child: Image.file(File(thumb.filePath), width: 72, height: 72, fit: BoxFit.cover,
+                  child: Image(image: ResizeImage(FileImage(File(thumb.filePath)), width: 144, height: 144), width: 72, height: 72, fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(width: 72, height: 72, color: _kDark, child: const Icon(Icons.folder, color: Color(0xFF818CF8)))),
                 ),
                 const SizedBox(width: 14),
@@ -370,7 +370,7 @@ class _ImageViewerWidgetState extends ConsumerState<ImageViewerWidget> {
                   // Thumbnail
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.file(File(img.filePath), width: 80, height: 80, fit: BoxFit.cover,
+                    child: Image(image: ResizeImage(FileImage(File(img.filePath)), width: 160, height: 160), width: 80, height: 80, fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Color(0xFF666680))),
                   ),
                   const SizedBox(height: 8),

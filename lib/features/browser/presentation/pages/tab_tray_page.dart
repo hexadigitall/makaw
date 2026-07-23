@@ -284,7 +284,7 @@ class _TabTrayPageState extends State<TabTrayPage> {
                   padding: EdgeInsets.fromLTRB(16, 4, 16, 24),
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
-                    childAspectRatio: 0.75,
+                    childAspectRatio: 0.65,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 12,
                   ),

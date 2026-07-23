@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class EpubReaderWidget extends StatefulWidget {
   final String filePath;
@@ -23,6 +25,38 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
   double _progress = 0;
   bool _isLoading = true;
   double _currentFontSize = 16;
+  bool _restoredPosition = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPosition();
+  }
+
+  Future<void> _loadPosition() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final data = prefs.getString('doc_pos_${widget.filePath.hashCode}');
+      if (data != null) {
+        final map = jsonDecode(data) as Map<String, dynamic>;
+        final cfi = map['cfi'] as String?;
+        if (cfi != null && cfi.isNotEmpty) {
+          // Restore to saved CFI position after epub loads
+          _restoredPosition = false;
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _savePosition() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('doc_pos_${widget.filePath.hashCode}', jsonEncode({
+        'progress': _progress,
+        'ts': DateTime.now().toIso8601String(),
+      }));
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,42 +64,40 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
     if (!file.existsSync()) {
       return Scaffold(
         appBar: AppBar(
-          title: Text(widget.title, style: TextStyle(fontSize: 14)),
+          title: Text(widget.title, style: const TextStyle(fontSize: 14)),
           backgroundColor: const Color(0xFF1E293B),
           actions: [
             if (widget.onClose != null)
-              IconButton(icon: Icon(Icons.close), onPressed: widget.onClose),
+              IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
           ],
         ),
         backgroundColor: const Color(0xFF0F172A),
-        body: Center(
-          child: Text('File not found', style: TextStyle(color: Colors.white54)),
-        ),
+        body: const Center(child: Text('File not found', style: TextStyle(color: Colors.white54))),
       );
     }
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        title: Text(widget.title, style: TextStyle(fontSize: 14)),
+        title: Text(widget.title, style: const TextStyle(fontSize: 14)),
         backgroundColor: const Color(0xFF1E293B),
         bottom: _isLoading
-            ? PreferredSize(
+            ? const PreferredSize(
                 preferredSize: Size.fromHeight(2),
-                child: LinearProgressIndicator(backgroundColor: Colors.white12, valueColor: AlwaysStoppedAnimation<Color>(const Color(0xFF818CF8))),
+                child: LinearProgressIndicator(backgroundColor: Colors.white12, valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF818CF8))),
               )
             : PreferredSize(
-                preferredSize: Size.fromHeight(2),
+                preferredSize: const Size.fromHeight(2),
                 child: LinearProgressIndicator(
                   value: _progress,
                   backgroundColor: Colors.white12,
-                  valueColor: AlwaysStoppedAnimation<Color>(const Color(0xFF818CF8)),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
                 ),
               ),
         actions: [
           PopupMenuButton<String>(
             color: const Color(0xFF1E293B),
-            icon: Icon(Icons.text_fields, color: Colors.white70, size: 20),
+            icon: const Icon(Icons.text_fields, color: Colors.white70, size: 20),
             onSelected: (v) {
               if (v == 'increase') {
                 _currentFontSize = (_currentFontSize + 2).clamp(10.0, 32.0);
@@ -76,22 +108,22 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
               }
             },
             itemBuilder: (ctx) => [
-              PopupMenuItem(value: 'increase', child: Row(children: [Icon(Icons.text_fields, color: Colors.white70, size: 18), SizedBox(width: 8), Text('Increase Font', style: TextStyle(color: Colors.white))])),
-              PopupMenuItem(value: 'decrease', child: Row(children: [Icon(Icons.text_fields, color: Colors.white70, size: 14), SizedBox(width: 8), Text('Decrease Font', style: TextStyle(color: Colors.white))])),
+              const PopupMenuItem(value: 'increase', child: Row(children: [Icon(Icons.text_fields, color: Colors.white70, size: 18), SizedBox(width: 8), Text('Increase Font', style: TextStyle(color: Colors.white))])),
+              const PopupMenuItem(value: 'decrease', child: Row(children: [Icon(Icons.text_fields, color: Colors.white70, size: 14), SizedBox(width: 8), Text('Decrease Font', style: TextStyle(color: Colors.white))])),
             ],
           ),
           IconButton(
-            icon: Icon(Icons.skip_previous, color: Colors.white70, size: 20),
+            icon: const Icon(Icons.skip_previous, color: Colors.white70, size: 20),
             onPressed: () => _epubController.prev(),
             tooltip: 'Previous page',
           ),
           IconButton(
-            icon: Icon(Icons.skip_next, color: Colors.white70, size: 20),
+            icon: const Icon(Icons.skip_next, color: Colors.white70, size: 20),
             onPressed: () => _epubController.next(),
             tooltip: 'Next page',
           ),
           if (widget.onClose != null)
-            IconButton(icon: Icon(Icons.close), onPressed: widget.onClose),
+            IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
         ],
       ),
       body: SafeArea(
@@ -112,7 +144,10 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
                 setState(() => _isLoading = false);
               },
               onRelocated: (value) {
-                setState(() => _progress = value?.progress ?? 0);
+                final p = value?.progress ?? 0;
+                setState(() => _progress = p);
+                // Save position periodically (every ~5% change)
+                if ((p * 100).round() % 5 == 0) _savePosition();
               },
               selectAnnotationRange: false,
             ),
