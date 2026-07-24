@@ -1,4 +1,4 @@
-package com.example.makaw_mobile
+package com.hexadigitall.makaw
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -15,7 +15,7 @@ import android.os.IBinder
 class MediaSessionService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "com.example.makaw_mobile.music"
+        const val CHANNEL_ID = "com.hexadigitall.makaw.music"
         const val NOTIFICATION_ID = 1001
         const val ACTION_SHOW = "SHOW_NOTIFICATION"
         const val ACTION_HIDE = "HIDE_NOTIFICATION"
@@ -125,9 +125,8 @@ class MediaSessionService : Service() {
             Notification.Builder(this)
         }
 
-        // Tap notification to open app to now-playing page
         val openIntent = Intent(this, MainActivity::class.java).apply {
-            action = "com.example.makaw_mobile.OPEN_PLAYER"
+            action = "com.hexadigitall.makaw.OPEN_PLAYER"
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val contentPendingIntent = PendingIntent.getActivity(

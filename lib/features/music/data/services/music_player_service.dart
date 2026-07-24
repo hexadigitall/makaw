@@ -143,7 +143,7 @@ class MusicPlayerService extends ChangeNotifier {
 
   Timer? _positionTimer;
 
-  static const _metadataChannel = MethodChannel('com.example.makaw_mobile/metadata');
+  static const _metadataChannel = MethodChannel('com.hexadigitall.makaw/metadata');
 
   Future<Map<String, dynamic>?> _extractFileMetadata(String filePath) async {
     try {

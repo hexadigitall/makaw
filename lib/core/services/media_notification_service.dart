@@ -1,7 +1,7 @@
 import 'package:flutter/services.dart';
 
 class MediaNotificationService {
-  static const _channel = MethodChannel('com.example.makaw_mobile/media');
+  static const _channel = MethodChannel('com.hexadigitall.makaw/media');
   static final MediaNotificationService _instance = MediaNotificationService._();
   static MediaNotificationService get instance => _instance;
   MediaNotificationService._();

@@ -154,7 +154,7 @@ class ContentBlockerService {
   ];
 
   static const _phishingPatterns = [
-    'login.', '.secure-login.', 'account-verify.', 'banking-secure.',
+    '.secure-login.', 'account-verify.', 'banking-secure.',
     'update-payment.', 'verify-account.', 'secure-signin.',
     'password-reset-confirm.', 'security-check.',
   ];
@@ -209,16 +209,12 @@ class ContentBlockerService {
     return '''
 (function(){
   const trackers = [
-    'iframe[src*="facebook"]','iframe[src*="twitter"]','iframe[src*="analytics"]',
     'script[src*="analytics"]','script[src*="tracking"]','script[src*="pixel"]',
     'img[src*="pixel"]','img[src*="analytics"]','img[src*="tracking"]',
     'script[src*="hotjar"]','script[src*="fullstory"]','script[src*="heap"]',
-    'script[src*="segment"]','script[src*="hubspot"]','script[src*="mouseflow"]',
+    'script[src*="segment"]','script[src*="mouseflow"]',
     'script[src*="crazyegg"]','script[src*="optimizely"]','script[src*="vwo"]',
     'noscript[src*="analytics"]','noscript[src*="pixel"]',
-    '.fb-custom-chat','.fb_dialog','.fb-page','.fb-like','.fb-share-button',
-    '.twitter-timeline','.twitter-follow-button','.twitter-share-button',
-    '#facebook','#twitter-widget','#twitter-follow',
   ];
   function kill(sel) {
     document.querySelectorAll(sel).forEach(el => el.remove());
@@ -236,20 +232,8 @@ class ContentBlockerService {
     '.cookie-banner','.cookie-notice','.cookie-consent','.cc-window','.cookies-popup',
     '#cookie-law','#cookie-notice','.eu-cookie','.gdpr-cookie','.cookie-bar',
     '.newsletter-popup','.subscribe-popup','.email-popup','.signup-popup',
-    '.overlay','.modal-backdrop','.popup-overlay','.popup-container',
-    '#newsletter-popup','#subscribe-popup','#email-popup',
-    '.push-notification','.notification-request','.notification-bar',
     '.app-download-banner','.app-promo','.mobile-app-banner',
     '.survey-popup','.feedback-popup','.rating-popup','.review-popup',
-    '.social-share-bar','.share-bar','.social-floating',
-    '.sticky-header','.sticky-footer','.sticky-banner',
-    '.floating-button','.chat-button','.live-chat',
-    'div[class*="cookie"]','div[id*="cookie"]',
-    'div[class*="newsletter"]','div[id*="newsletter"]',
-    'div[class*="popup"]','div[id*="popup"]',
-    // Google consent / cookie walls
-    '.FCPapb','div[data-snf]','div[jsname] button[data-idom]',
-    '# CXNHSc', '# L2AGLb',
     // OneTrust
     '#onetrust-consent-sdk','#onetrust-banner-sdk','.optanon-alert-box-wrapper',
     // Cookiebot
@@ -258,20 +242,18 @@ class ContentBlockerService {
     '.qc-cmp2-container','.qc-cmp-ui-container',
     // Didomi
     '#didomi-popup','#didomi-notice',
-    // TrustArc / TrustArc
+    // TrustArc
     '.truste_box_overlay','.truste_overlay','#truste-consent-track',
-    // Generic consent frameworks
+    // Generic consent frameworks (specific, not broad)
     '[class*="consent-banner"]','[id*="consent-banner"]',
-    '[class*="consent-popup"]','[id*="consent-popup"]',
     '[class*="gdpr-banner"]','[id*="gdpr-banner"]',
     '[class*="cookie-wall"]','[id*="cookie-wall"]',
-    'div[class*="interstitial"]','div[id*="interstitial"]',
   ];
   function hide(sel) {
     document.querySelectorAll(sel).forEach(el => { if(el && el.style) el.style.display = 'none'; });
   }
   annoy.forEach(hide);
-  // Also try to auto-click common "Accept" buttons
+  // Auto-click common "Accept" buttons
   const acceptSelectors = [
     '#onetrust-accept-btn-handler',
     '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
@@ -283,15 +265,11 @@ class ContentBlockerService {
   acceptSelectors.forEach(sel => {
     try { const b = document.querySelector(sel); if(b) b.click(); } catch(e) {}
   });
-  const interstitial = setInterval(() => {
-    const els = document.querySelectorAll('div[class*="interstitial"],div[id*="interstitial"]');
-    if(els.length) { els.forEach(el => el.remove()); clearInterval(interstitial); }
-    // Re-run accept clicks for dynamically loaded consent dialogs
+  setTimeout(() => {
     acceptSelectors.forEach(sel => {
       try { const b = document.querySelector(sel); if(b) b.click(); } catch(e) {}
     });
-  }, 500);
-  setTimeout(() => clearInterval(interstitial), 10000);
+  }, 2000);
 })();
 ''';
   }
@@ -312,17 +290,7 @@ class ContentBlockerService {
   } catch(e) {}
   try { Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] }); } catch(e) {}
   try { Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] }); } catch(e) {}
-  // Block 3rd-party cookies
-  document.__defineGetter__("cookie", function() { return ""; });
-  // Override navigator.sendBeacon
-  if(window.navigator.sendBeacon) window.navigator.sendBeacon = function(){};
-  // Block service workers for tracking
-  if(window.navigator.serviceWorker) {
-    const orig = window.navigator.serviceWorker.register;
-    window.navigator.serviceWorker.register = function(){ return Promise.reject(); };
-  }
-  // Disable battery API
-  if(navigator.getBattery) navigator.getBattery = function(){ return Promise.reject(); };
+  // NOTE: Do NOT kill cookies, service workers, or sendBeacon — they break logins, PWAs, and normal page behavior
 })();
 ''';
   }
@@ -378,9 +346,7 @@ div[class*="advert-"], div[class*="advert_"], div[id*="advert-"], div[id*="adver
 
   String _trackerCss() {
     return '''
-iframe[src*="facebook"], iframe[src*="twitter"], iframe[src*="analytics"],
-.fb-custom-chat, .fb_dialog, .fb-page, .fb-like, .fb-share-button,
-.twitter-timeline, .twitter-follow-button, .twitter-share-button,
+iframe[src*="analytics"],
 #facebook, #twitter-widget, #twitter-follow { display: none !important; }
 ''';
   }
@@ -390,25 +356,14 @@ iframe[src*="facebook"], iframe[src*="twitter"], iframe[src*="analytics"],
 .cookie-banner, .cookie-notice, .cookie-consent, .cc-window, .cookies-popup,
 #cookie-law, #cookie-notice, .eu-cookie, .gdpr-cookie, .cookie-bar,
 .newsletter-popup, .subscribe-popup, .email-popup, .signup-popup,
-.overlay, .modal-backdrop, .popup-overlay, .popup-container,
-#newsletter-popup, #subscribe-popup, #email-popup,
-.push-notification, .notification-request, .notification-bar,
 .app-download-banner, .app-promo, .mobile-app-banner,
-.survey-popup, .feedback-popup, .rating-popup, .review-popup,
-.sticky-header, .sticky-footer, .sticky-banner,
-.floating-button, .chat-button, .live-chat,
-div[class*="cookie"], div[id*="cookie"],
-div[class*="newsletter"], div[id*="newsletter"],
-div[class*="popup"], div[id*="popup"],
 #onetrust-consent-sdk, #onetrust-banner-sdk, .optanon-alert-box-wrapper,
 #CybotCookiebotDialog, .qc-cmp2-container, .qc-cmp-ui-container,
 #didomi-popup, #didomi-notice,
 .truste_box_overlay, .truste_overlay, #truste-consent-track,
 div[class*="consent-banner"], div[id*="consent-banner"],
-div[class*="consent-popup"], div[id*="consent-popup"],
 div[class*="gdpr-banner"], div[id*="gdpr-banner"],
-div[class*="cookie-wall"], div[id*="cookie-wall"],
-div[class*="interstitial"], div[id*="interstitial"] { display: none !important; }
+div[class*="cookie-wall"], div[id*="cookie-wall"] { display: none !important; }
 ''';
   }
 

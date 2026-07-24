@@ -120,7 +120,7 @@ void main() async {
 final MusicPlayerService globalMusicService = MusicPlayerService();
 String audioServiceStatus = 'unknown';
 
-const _systemChannel = MethodChannel('com.example.makaw_mobile/system');
+const _systemChannel = MethodChannel('com.hexadigitall.makaw/system');
 
 Future<void> _moveTaskToBack() async {
   try {
@@ -326,6 +326,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   final Map<int, Uint8List?> _tabSnapshots = {};
   List<(String, String)> _shortcuts = [];
   bool _shortcutsLoaded = false;
+  bool _homeInitialized = false;
   bool _typeViewFromHome = false;
   bool _isWebViewLoading = false;
   DateTime? _lastPopupToast;
@@ -662,6 +663,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _saveSession();
     }
+    if (state == AppLifecycleState.resumed) {
+      // Do NOT re-initialize shortcuts, feeds, or services — they persist in memory
+    }
     if (state == AppLifecycleState.detached) {
       _saveSession();
       MediaNotificationService.instance.hide();
@@ -683,6 +687,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
     // Defer heavy init to after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (_homeInitialized) return;
+      _homeInitialized = true;
       await _newsFeedService!.init();
       await _newsFeedService!.ensureLocationReady();
       _newsFeedService!.loadTaps();
@@ -743,7 +749,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   }
 
   void _setupIntentChannel() {
-    const channel = MethodChannel('com.example.makaw_mobile/intent');
+    const channel = MethodChannel('com.hexadigitall.makaw/intent');
     channel.setMethodCallHandler((call) async {
       if (call.method == 'onNewIntent') {
         final data = call.arguments as Map?;
@@ -4894,24 +4900,24 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       child: ListView(
         padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         children: [
-          if (bookmarkSuggestions.isNotEmpty) ...[
-            _sectionHeader('Shortcuts', textColor, subColor),
-            ...bookmarkSuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
+          if (searchSuggestions.isNotEmpty) ...[
+            _sectionHeader('Search', textColor, subColor),
+            ...searchSuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
           ],
           if (historySuggestions.isNotEmpty) ...[
-            if (bookmarkSuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
+            if (searchSuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
             _sectionHeader('History', textColor, subColor),
             ...historySuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
           ],
+          if (bookmarkSuggestions.isNotEmpty) ...[
+            if (searchSuggestions.isNotEmpty || historySuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
+            _sectionHeader('Shortcuts', textColor, subColor),
+            ...bookmarkSuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
+          ],
           if (tabSuggestions.isNotEmpty) ...[
-            if (bookmarkSuggestions.isNotEmpty || historySuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
+            if (searchSuggestions.isNotEmpty || historySuggestions.isNotEmpty || bookmarkSuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
             _sectionHeader('Open Tabs', textColor, subColor),
             ...tabSuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
-          ],
-          if (searchSuggestions.isNotEmpty) ...[
-            if (bookmarkSuggestions.isNotEmpty || historySuggestions.isNotEmpty || tabSuggestions.isNotEmpty) Divider(color: dividerColor, height: 1),
-            _sectionHeader('Search', textColor, subColor),
-            ...searchSuggestions.map((s) => _suggestionTile(s, textColor, subColor)),
           ],
         ],
       ),
@@ -5208,118 +5214,28 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 (function(){
   try {
     var loc = window.location.href.toLowerCase();
-    if (loc.indexOf('consent.google') >= 0 || loc.indexOf('accounts.google') >= 0 ||
-        loc.indexOf('play.google') >= 0 || loc.indexOf('myaccount.google') >= 0 ||
-        loc.indexOf('facebook.com/login') >= 0 || loc.indexOf('github.com/login') >= 0 ||
-        loc.indexOf('apple.com/signin') >= 0) { return; }
+    var whitelist = ['consent.google','accounts.google','play.google','myaccount.google',
+      'facebook.com/login','github.com','apple.com/signin','google.com'];
+    for (var i = 0; i < whitelist.length; i++) {
+      if (loc.indexOf(whitelist[i]) >= 0) return;
+    }
   } catch(e) {}
-  // 1. Override window.open — block ALL popups from page scripts
+
+  // 1. Anti-detection: hide automation flags (keep this - it's harmless)
+  try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch(e) {}
+  try { window.chrome = window.chrome || { runtime: {}, loadTimes: function(){}, csi: function(){} }; } catch(e) {}
   try {
-    window.open = function(u, n, f) {
-      if (u && u !== 'about:blank' && typeof flutter_inappwebview !== 'undefined') {
-        try { flutter_inappwebview.callHandler('popupBlocked', u); } catch(e) {}
-      }
-      return null;
+    var origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = function(p) {
+      return p.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        origQuery(p);
     };
   } catch(e) {}
+  try { Object.defineProperty(navigator, 'plugins', { get: function(){ return [1,2,3,4,5]; } }); } catch(e) {}
+  try { Object.defineProperty(navigator, 'languages', { get: function(){ return ['en-US','en']; } }); } catch(e) {}
 
-  // 2. Click handler: strip _blank from ad overlays, but NEVER touch download links
-  try {
-    document.addEventListener('click', function(e) {
-      var t = e.target;
-      for (var i = 0; i < 10 && t && t.tagName !== 'A'; i++) t = t.parentElement;
-      if (!t || t.tagName !== 'A') return;
-      if (t.hasAttribute('download') || t.classList.contains('download')) return;
-      var href = (t.getAttribute('href') || '').toLowerCase();
-      var dlExts = ['.mp4','.mp3','.zip','.rar','.apk','.exe','.pdf','.epub','.m4a','.flac','.ogg','.wav','.mkv','.avi','.mov','.doc','.docx','.odt','.rtf','.pages','.xls','.xlsx','.csv','.txt','.iso','.dmg','.deb','.rpm','.bin','.7z','.tar','.gz'];
-      for (var j = 0; j < dlExts.length; j++) { if (href.indexOf(dlExts[j]) >= 0) return; }
-      if (t.getAttribute('target') === '_blank') {
-        t.removeAttribute('target');
-      }
-    }, true);
-  } catch(e) {}
-
-  // 3. Aggressive overlay removal — MutationObserver (runs forever, no timer limit)
-  try {
-    var isScanning = false;
-    var _adIdCls = /ad[s]?[-_]|popup|overlay|interstitial|modal-backdrop|tap[-_]?jack|click[-_]?under|pop[-_]?under|outbrain|taboola|mgid|revcontent/i;
-    var _safeTags = {NAV:1,HEADER:1,FOOTER:1,MAIN:1,SECTION:1};
-
-    function removeTapjacks() {
-      var els = document.querySelectorAll('div,iframe,ins,section,a');
-      for (var i = els.length - 1; i >= 0; i--) {
-        var el = els[i];
-        var s = getComputedStyle(el);
-        if (!s) continue;
-        if (_safeTags[el.tagName]) continue;
-        // Rule A: fixed/absolute + low opacity + high z-index → remove
-        if ((s.position === 'fixed' || s.position === 'absolute') &&
-            (s.opacity < 0.1 || s.visibility === 'hidden' || s.pointerEvents === 'none') &&
-            parseInt(s.zIndex) > 900 &&
-            el.offsetWidth > window.innerWidth * 0.3) {
-          el.remove(); continue;
-        }
-        // Rule B: full-screen overlay (>80% viewport) with low opacity → remove
-        if ((s.position === 'fixed' || s.position === 'absolute') &&
-            s.opacity < 0.06 &&
-            el.offsetWidth > window.innerWidth * 0.8 &&
-            el.offsetHeight > window.innerHeight * 0.8) {
-          el.remove(); continue;
-        }
-        // Rule C: ad-named id/class that is positioned over content → remove
-        if ((s.position === 'fixed' || s.position === 'absolute') &&
-            el.id && el.id.match(_adIdCls) && parseInt(s.zIndex) > 100) {
-          el.remove(); continue;
-        }
-        if ((s.position === 'fixed' || s.position === 'absolute') &&
-            el.className && typeof el.className === 'string' && el.className.match(_adIdCls) &&
-            parseInt(s.zIndex) > 100 && el.offsetWidth > window.innerWidth * 0.3) {
-          el.remove(); continue;
-        }
-        // Rule D: iframes that are invisible overlays
-        if (el.tagName === 'IFRAME' &&
-            (s.opacity < 0.05 || s.visibility === 'hidden' || s.pointerEvents === 'none') &&
-            parseInt(s.zIndex) > 900) {
-          el.remove(); continue;
-        }
-        // Rule E: full-screen transparent div with z-index > 5000
-        if (el.tagName === 'DIV' && parseInt(s.zIndex) > 5000 &&
-            (s.opacity < 0.05 || s.backgroundColor === 'transparent' || s.backgroundColor === 'rgba(0, 0, 0, 0)') &&
-            el.offsetWidth > window.innerWidth * 0.9 &&
-            el.offsetHeight > window.innerHeight * 0.9) {
-          el.remove();
-        }
-      }
-    }
-
-    function runScan() {
-      if (isScanning) return;
-      isScanning = true;
-      window.requestAnimationFrame(function() {
-        removeTapjacks();
-        isScanning = false;
-      });
-    }
-
-    if (document.body) {
-      var obs = new MutationObserver(function(muts) {
-        for (var i = 0; i < muts.length; i++) {
-          var added = muts[i].addedNodes;
-          for (var j = 0; j < added.length; j++) {
-            var n = added[j];
-            if (n.nodeType === 1) runScan();
-          }
-        }
-      });
-      obs.observe(document.body, { childList: true, subtree: true });
-    }
-    // Also run once immediately and after small delay for pre-existing overlays
-    runScan();
-    setTimeout(runScan, 300);
-    setTimeout(runScan, 1000);
-  } catch(e) {}
-
-  // 4. Block location.replace / location.assign / location.href redirects to ad domains
+  // 2. Block location.replace / location.assign redirects to known bad domains only
   try {
     var _blockedKw = ['casino','betting','gambling','slots','poker','porn','xxx','sex','nude','nsfw','adult','popunder','clickunder','popads','malware','phishing'];
     function _isBadRedirect(url) {
@@ -5342,25 +5258,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     };
   } catch(e) {}
 
-  // 5. Block document.write injection attacks
-  try {
-    document.write = function(){};
-    document.writeln = function(){};
-  } catch(e) {}
-
-  // 6. Anti-detection: hide automation flags
-  try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch(e) {}
-  try { window.chrome = window.chrome || { runtime: {}, loadTimes: function(){}, csi: function(){} }; } catch(e) {}
-  try {
-    var origQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = function(p) {
-      return p.name === 'notifications' ?
-        Promise.resolve({ state: Notification.permission }) :
-        origQuery(p);
-    };
-  } catch(e) {}
-  try { Object.defineProperty(navigator, 'plugins', { get: function(){ return [1,2,3,4,5]; } }); } catch(e) {}
-  try { Object.defineProperty(navigator, 'languages', { get: function(){ return ['en-US','en']; } }); } catch(e) {}
+  // NOTE: Do NOT override window.open — breaks OAuth, Google sign-in, popups needed by sites
+  // NOTE: Do NOT strip target="_blank" — breaks GitHub, documentation sites, normal browsing
+  // NOTE: Do NOT kill document.write — breaks some page loads and video players
+  // NOTE: Do NOT aggressively remove overlays — breaks legitimate modals, consent dialogs, UI elements
 })();
 ''';
 
@@ -5368,7 +5269,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     final settings = InAppWebViewSettings(
       userAgent: _stealthUA,
       javaScriptEnabled: true,
-      javaScriptCanOpenWindowsAutomatically: false,
+      javaScriptCanOpenWindowsAutomatically: true,
       supportMultipleWindows: true,
       mediaPlaybackRequiresUserGesture: false,
       allowsInlineMediaPlayback: true,
@@ -5572,18 +5473,19 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         if (_isBlockedRedirect(url)) {
           return NavigationActionPolicy.CANCEL;
         }
-        // 5. Block ad redirect patterns (?url=, ?redirect=, ?go=, ?dest=, adurl=, clickid=)
+        // 5. Block ad redirect patterns (but allow legitimate tracking params like gclid/fbclid)
         final lowerUrl = url.toLowerCase();
-        if (lowerUrl.contains('adurl=') || lowerUrl.contains('clickid=') ||
-            lowerUrl.contains('fbclid=') || lowerUrl.contains('gclid=')) {
+        if (lowerUrl.contains('adurl=') || lowerUrl.contains('clickid=')) {
           return NavigationActionPolicy.CANCEL;
         }
-        // 6. Block suspicious redirect params (but allow OAuth: accounts.google.com, facebook.com, github.com login flows)
-        if (!lowerUrl.contains('accounts.google.com') &&
-            !lowerUrl.contains('facebook.com/login') &&
-            !lowerUrl.contains('github.com/login') &&
-            !lowerUrl.contains('apple.com/signin')) {
-          final redirectParams = ['?url=', '&url=', '?redirect=', '&redirect=', '?go=', '&go=', '?dest=', '&dest=', '?link=', '&link=', '?next=', '&next='];
+        // 6. Block suspicious redirect params (but allow common OAuth and site flows)
+        final _authWhitelist = ['accounts.google.com','facebook.com','github.com','apple.com','login.microsoftonline.com','auth0.com','okta.com','login.salesforce.com'];
+        bool isWhitelisted = false;
+        for (final w in _authWhitelist) {
+          if (lowerUrl.contains(w)) { isWhitelisted = true; break; }
+        }
+        if (!isWhitelisted) {
+          final redirectParams = ['?url=', '&url=', '?redirect=', '&redirect=', '?go=', '&go=', '?dest=', '&dest='];
           for (final p in redirectParams) {
             if (lowerUrl.contains(p)) {
               final idx = lowerUrl.indexOf(p);
@@ -5639,9 +5541,15 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             urlLower.contains('play.google') ||
             urlLower.contains('myaccount.google') ||
             urlLower.contains('youtube.com/embed') ||
-            urlLower.contains('github.com/login') ||
-            urlLower.contains('facebook.com/login') ||
-            urlLower.contains('apple.com/signin');
+            urlLower.contains('github.com') ||
+            urlLower.contains('facebook.com') ||
+            urlLower.contains('apple.com') ||
+            urlLower.contains('login.microsoftonline') ||
+            urlLower.contains('discord.com') ||
+            urlLower.contains('reddit.com') ||
+            urlLower.contains('twitter.com') ||
+            urlLower.contains('x.com') ||
+            urlLower.contains('linkedin.com');
         if (!skipBlocker && cbScript.isNotEmpty) {
           ctrl.evaluateJavascript(source: cbScript).catchError((_) {});
         }

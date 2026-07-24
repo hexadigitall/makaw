@@ -1,4 +1,4 @@
-package com.example.makaw_mobile
+package com.hexadigitall.makaw
 
 import android.content.BroadcastReceiver
 import android.content.Context

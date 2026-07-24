@@ -107,7 +107,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   Color _subOutlineColor = Colors.black87;
 
   // ─── Gesture / Volume / Brightness ──────────────────────────────────────
-  static const _videoChannel = MethodChannel('com.example.makaw_mobile/video_control');
+  static const _videoChannel = MethodChannel('com.hexadigitall.makaw/video_control');
   final GlobalKey _videoKey = GlobalKey();
   double _volume = 1.0;
   int _maxVolume = 15;

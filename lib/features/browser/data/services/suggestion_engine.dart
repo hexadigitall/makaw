@@ -2,7 +2,7 @@ import 'dart:math';
 import '../models/suggestion_item.dart';
 
 class SuggestionEngine {
-  static const int _maxResults = 10;
+  static const int _maxResults = 15;
   static const double _prefixBonus = 150.0;
   static const double _titleMatchBonus = 100.0;
   static const double _urlMatchBonus = 80.0;
@@ -100,7 +100,8 @@ class SuggestionEngine {
       if (!seenUrls.add(normalizedUrl)) continue;
 
       final prefixMatch = suggestion.toLowerCase().startsWith(lower);
-      final score = prefixMatch ? 200.0 : 120.0;
+      final exactMatch = suggestion.toLowerCase() == lower;
+      final score = exactMatch ? 300.0 : prefixMatch ? 250.0 : 180.0;
 
       results.add(SuggestionItem(
         url: searchUrl,

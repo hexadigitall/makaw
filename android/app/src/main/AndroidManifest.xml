@@ -93,14 +93,14 @@
                 <data android:scheme="content" />
             </intent-filter>
         </activity>
-        <service android:name="com.example.makaw_mobile.MediaSessionService"
+        <service android:name="com.hexadigitall.makaw.MediaSessionService"
             android:foregroundServiceType="mediaPlayback"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </service>
-        <receiver android:name="com.example.makaw_mobile.MediaSessionReceiver"
+        <receiver android:name="com.hexadigitall.makaw.MediaSessionReceiver"
             android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"

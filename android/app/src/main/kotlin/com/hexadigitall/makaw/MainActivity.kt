@@ -1,4 +1,4 @@
-package com.example.makaw_mobile
+package com.hexadigitall.makaw
 
 import android.content.Intent
 import android.net.Uri
@@ -19,15 +19,14 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.example.makaw_mobile/intent"
-    private val SYSTEM_CHANNEL = "com.example.makaw_mobile/system"
-    private val MEDIA_CHANNEL = "com.example.makaw_mobile/media"
+    private val CHANNEL = "com.hexadigitall.makaw/intent"
+    private val SYSTEM_CHANNEL = "com.hexadigitall.makaw/system"
+    private val MEDIA_CHANNEL = "com.hexadigitall.makaw/media"
     private var serviceStarted = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Forward media button events from the service to Flutter
         MediaSessionService.flutterCallback = { action, position ->
             val engine = flutterEngine
             if (engine != null) {
@@ -74,11 +73,10 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
-        val metadataChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.example.makaw_mobile/metadata")
+        val metadataChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.hexadigitall.makaw/metadata")
         metadataChannel.setMethodCallHandler { call, result ->
             if (call.method == "extractMetadataBatch") {
                 val paths = call.argument<List<String>>("paths") ?: emptyList()
-                // First, build a map from MediaStore (returns metadata without file access)
                 val mediaStoreMap = mutableMapOf<String, Map<String, Any?>>()
                 try {
                     val cursor = contentResolver.query(
@@ -115,17 +113,14 @@ class MainActivity : FlutterActivity() {
 
                 val results = mutableListOf<Map<String, Any?>>()
                 for (path in paths) {
-                    // Check MediaStore first
                     val fromStore = mediaStoreMap[path]
                     if (fromStore != null) {
                         val msArtist = fromStore["artist"] as? String ?: ""
                         val msAlbum = fromStore["album"] as? String ?: ""
-                        // If MediaStore has meaningful artist/album, use it
                         if (msArtist.isNotEmpty() && msArtist != "<unknown>" && msAlbum.isNotEmpty() && msAlbum != "<unknown>") {
                             results.add(fromStore)
                             continue
                         }
-                        // MediaStore metadata is incomplete; try retriever as fallback
                         try {
                             val retriever = android.media.MediaMetadataRetriever()
                             try {
@@ -146,12 +141,10 @@ class MainActivity : FlutterActivity() {
                             }
                             continue
                         } catch (_: Exception) {
-                            // Retriever failed, use MediaStore result
                             results.add(fromStore)
                             continue
                         }
                     }
-                    // Fallback: MediaMetadataRetriever
                     var retriever: android.media.MediaMetadataRetriever? = null
                     var success = false
                     try {
@@ -182,8 +175,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // Video player control channel (volume, brightness, screenshot)
-        val videoChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.example.makaw_mobile/video_control")
+        val videoChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.hexadigitall.makaw/video_control")
         videoChannel.setMethodCallHandler { call, result ->
             val audioMgr = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             when (call.method) {
@@ -316,7 +308,7 @@ class MainActivity : FlutterActivity() {
             result["action"] = ""
             return result
         }
-        if (intent.action == "com.example.makaw_mobile.OPEN_PLAYER") {
+        if (intent.action == "com.hexadigitall.makaw.OPEN_PLAYER") {
             result["action"] = "OPEN_PLAYER"
             return result
         }
