@@ -34,10 +34,12 @@ class MediaSessionService : Service() {
         private var currentService: MediaSessionService? = null
         private var lastTitle: String = "Unknown"
         private var lastArtist: String = ""
+        private var lastPositionMs: Long = 0
 
         fun updatePlaybackState(isPlaying: Boolean, positionMs: Long) {
             currentService?.let { service ->
                 val session = service.mediaSession ?: return@let
+                lastPositionMs = positionMs
                 val state = PlaybackState.Builder()
                     .setActions(
                         PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
@@ -50,8 +52,6 @@ class MediaSessionService : Service() {
                     )
                     .build()
                 session.setPlaybackState(state)
-                // Force notification update for MIUI compatibility
-                service.showNotification(lastTitle, lastArtist, isPlaying)
             }
         }
     }
@@ -68,10 +68,11 @@ class MediaSessionService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val mgr = getSystemService(NotificationManager::class.java)
-            mgr.deleteNotificationChannel(CHANNEL_ID)
-            val ch = NotificationChannel(CHANNEL_ID, "Music Playback", NotificationManager.IMPORTANCE_HIGH)
-            ch.description = "Shows currently playing music"
-            mgr.createNotificationChannel(ch)
+            if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
+                val ch = NotificationChannel(CHANNEL_ID, "Music Playback", NotificationManager.IMPORTANCE_LOW)
+                ch.description = "Shows currently playing music"
+                mgr.createNotificationChannel(ch)
+            }
         }
     }
 
@@ -140,6 +141,7 @@ class MediaSessionService : Service() {
             .setSmallIcon(playPauseIcon)
             .setOngoing(true)
             .setShowWhen(false)
+            .setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setContentIntent(contentPendingIntent)
             .setStyle(Notification.MediaStyle()
@@ -148,7 +150,7 @@ class MediaSessionService : Service() {
             .addAction(android.R.drawable.ic_media_previous, "Previous", mediaActionIntent(CALLBACK_PREV))
             .addAction(playPauseIcon, if (isPlaying) "Pause" else "Play", mediaActionIntent(playPauseAction))
             .addAction(android.R.drawable.ic_media_next, "Next", mediaActionIntent(CALLBACK_NEXT))
-            .setPriority(Notification.PRIORITY_HIGH)
+            .setPriority(Notification.PRIORITY_LOW)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)

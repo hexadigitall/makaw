@@ -728,7 +728,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       };
       _adBlocker.updateBlacklist(); // fire-and-forget: fetch EasyList + AdGuard filter lists
       _updateService = UpdateService(
-        updateUrl: 'https://your-org.github.io/makaw/update.json',
+        repoOwner: 'hexadigitall',
+        repoName: 'makaw',
         dio: Dio(),
       );
       _initDb();
@@ -1724,29 +1725,72 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   Future<void> _downloadAndInstallUpdate(UpdateInfo info) async {
     final scaffold = ScaffoldMessenger.of(context);
-    showDialog(
+    double progress = 0;
+    final progressController = StreamController<double>.broadcast();
+
+    final dialogCtx = showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Color(0xFF1E293B),
-        content: Row(
-          children: [
-            SizedBox(
-              width: 24, height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF818CF8)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          progressController.stream.listen((p) {
+            if (ctx.mounted) {
+              setDialogState(() => progress = p);
+            }
+          });
+          return AlertDialog(
+            backgroundColor: Color(0xFF1E293B),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 24, height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF818CF8),
+                        value: progress > 0 ? progress : null,
+                      ),
+                    ),
+                    SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        progress > 0
+                            ? 'Downloading ${(progress * 100).toInt()}%...'
+                            : 'Downloading update...',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+                if (progress > 0) ...[
+                  SizedBox(height: 12),
+                  LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: Colors.grey[800],
+                    color: Color(0xFF818CF8),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ],
+              ],
             ),
-            SizedBox(width: 16),
-            Expanded(child: Text('Downloading update...', style: TextStyle(fontSize: 14))),
-          ],
-        ),
+          );
+        },
       ),
     );
 
     final path = await _updateService.downloadApk(
       info,
-      onProgress: (received, total) {},
+      onProgress: (received, total) {
+        if (total > 0) {
+          final p = (received / total).clamp(0.0, 1.0);
+          progressController.add(p);
+        }
+      },
     );
 
+    await progressController.close();
     if (mounted) Navigator.of(context).pop();
 
     if (!mounted) return;
@@ -1758,7 +1802,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     scaffold.showSnackBar(SnackBar(content: Text('Installing...')));
     final installed = await _updateService.installApk(path);
     if (!installed) {
-      scaffold.showSnackBar(SnackBar(content: Text('Installation failed. Open the APK manually from downloads.')));
+      scaffold.showSnackBar(SnackBar(
+        content: Text('Tap the notification or open the APK from downloads to install.'),
+        duration: Duration(seconds: 5),
+      ));
     }
   }
 

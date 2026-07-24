@@ -21,14 +21,6 @@ class UpdateInfo {
     this.releaseNotes = '',
     this.mandatory = false,
   });
-
-  factory UpdateInfo.fromJson(Map<String, dynamic> json) => UpdateInfo(
-    versionCode: json['versionCode'] as int,
-    versionName: json['versionName'] as String? ?? '1.0.0',
-    apkUrl: json['apkUrl'] as String,
-    releaseNotes: json['releaseNotes'] as String? ?? '',
-    mandatory: json['mandatory'] as bool? ?? false,
-  );
 }
 
 enum UpdateCheckResult { upToDate, available, error }
@@ -42,12 +34,19 @@ class UpdateCheckResponse {
 }
 
 class UpdateService {
-  final String updateUrl;
+  final String repoOwner;
+  final String repoName;
   final Dio _dio;
   PackageInfo? _packageInfo;
 
-  UpdateService({required this.updateUrl, Dio? dio})
-      : _dio = dio ?? Dio();
+  UpdateService({
+    required this.repoOwner,
+    required this.repoName,
+    Dio? dio,
+  }) : _dio = dio ?? Dio();
+
+  String get _apiUrl =>
+      'https://api.github.com/repos/$repoOwner/$repoName/releases/latest';
 
   Future<PackageInfo> get packageInfo async {
     _packageInfo ??= await PackageInfo.fromPlatform();
@@ -57,14 +56,18 @@ class UpdateService {
   Future<UpdateCheckResponse> checkForUpdate() async {
     try {
       final info = await packageInfo;
+      final currentVersion = info.version;
       final currentBuild = int.tryParse(info.buildNumber) ?? 0;
 
       final response = await _dio.get(
-        updateUrl,
+        _apiUrl,
         options: Options(
           receiveTimeout: const Duration(seconds: 15),
           sendTimeout: const Duration(seconds: 10),
-          headers: {'Cache-Control': 'no-cache'},
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Accept': 'application/vnd.github+json',
+          },
         ),
       );
 
@@ -75,17 +78,8 @@ class UpdateService {
         );
       }
 
-      final data = jsonDecode(response.data.toString());
-      final remote = UpdateInfo.fromJson(data);
-
-      if (remote.versionCode > currentBuild) {
-        return UpdateCheckResponse(
-          result: UpdateCheckResult.available,
-          info: remote,
-        );
-      }
-
-      return UpdateCheckResponse(result: UpdateCheckResult.upToDate);
+      final data = response.data as Map<String, dynamic>;
+      return _parseGitHubRelease(data, currentVersion, currentBuild);
     } on DioException catch (e) {
       return UpdateCheckResponse(
         result: UpdateCheckResult.error,
@@ -97,6 +91,63 @@ class UpdateService {
         error: e.toString(),
       );
     }
+  }
+
+  UpdateCheckResponse _parseGitHubRelease(
+    Map<String, dynamic> data,
+    String currentVersion,
+    int currentBuild,
+  ) {
+    final tagName = data['tag_name'] as String? ?? '';
+    final body = data['body'] as String? ?? '';
+    final assets = data['assets'] as List<dynamic>? ?? [];
+
+    final remoteVersion = tagName.replaceFirst(RegExp(r'^v'), '');
+    final remoteParts = remoteVersion.split('.');
+    final remoteBuild = remoteParts.length >= 3
+        ? (int.tryParse(remoteParts[2]) ?? 0)
+        : 0;
+
+    if (remoteBuild <= currentBuild) {
+      return UpdateCheckResponse(result: UpdateCheckResult.upToDate);
+    }
+
+    String? apkUrl;
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
+      if (name.endsWith('.apk') &&
+          (name.contains('arm64') || name.contains('universal'))) {
+        apkUrl = asset['browser_download_url'] as String?;
+        if (name.contains('arm64')) break;
+      }
+    }
+
+    if (apkUrl == null && assets.isNotEmpty) {
+      for (final asset in assets) {
+        final name = asset['name'] as String? ?? '';
+        if (name.endsWith('.apk')) {
+          apkUrl = asset['browser_download_url'] as String?;
+          break;
+        }
+      }
+    }
+
+    if (apkUrl == null) {
+      return UpdateCheckResponse(
+        result: UpdateCheckResult.error,
+        error: 'No APK found in release',
+      );
+    }
+
+    return UpdateCheckResponse(
+      result: UpdateCheckResult.available,
+      info: UpdateInfo(
+        versionCode: remoteBuild > 0 ? remoteBuild : currentBuild + 1,
+        versionName: remoteVersion.isNotEmpty ? remoteVersion : currentVersion,
+        apkUrl: apkUrl,
+        releaseNotes: body,
+      ),
+    );
   }
 
   Future<String?> downloadApk(
@@ -112,7 +163,6 @@ class UpdateService {
       final filename = 'makaw-${info.versionName}.apk';
       final savePath = p.join(downloadDir.path, filename);
 
-      // Remove any partial download
       final existing = File(savePath);
       if (await existing.exists()) {
         await existing.delete();
@@ -125,7 +175,7 @@ class UpdateService {
         onReceiveProgress: onProgress,
         options: Options(
           followRedirects: true,
-          receiveTimeout: const Duration(seconds: 120),
+          receiveTimeout: const Duration(seconds: 300),
         ),
       );
 
@@ -142,17 +192,7 @@ class UpdateService {
       return result.type == ResultType.done;
     } catch (e) {
       debugPrint('Install APK error: $e');
-      // Fallback: try am start intent
-      try {
-        await Process.run('am', [
-          'start',
-          '-t', 'application/vnd.android.package-archive',
-          '-d', path,
-        ]);
-        return true;
-      } catch (_) {
-        return false;
-      }
+      return false;
     }
   }
 

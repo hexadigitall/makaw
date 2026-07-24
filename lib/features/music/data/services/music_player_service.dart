@@ -131,26 +131,16 @@ class MusicPlayerService extends ChangeNotifier {
 
   void _startPositionTimer() {
     if (_positionTimer != null) return;
-    _tickCount = 0;
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _positionTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (player.playing) {
-        _tickCount++;
         MediaNotificationService.instance.syncPlaybackState(
           isPlaying: true,
           position: _position,
         );
-        // Force notification refresh every 2s (every 4th tick) for MIUI
-        if (_tickCount % 4 == 0) {
-          final song = currentSong;
-          if (song != null) {
-            onNowPlaying?.call();
-          }
-        }
       }
     });
   }
 
-  int _tickCount = 0;
   Timer? _positionTimer;
 
   static const _metadataChannel = MethodChannel('com.example.makaw_mobile/metadata');

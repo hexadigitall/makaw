@@ -24,8 +24,6 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -33,7 +31,11 @@ android {
     applicationVariants.all {
         outputs.all {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            output.outputFileName = "makaw-${versionName}.apk"
+            val abi = if (outputFileName.contains("arm64")) "arm64"
+                      else if (outputFileName.contains("armeabi")) "arm"
+                      else if (outputFileName.contains("x86_64")) "x86_64"
+                      else "universal"
+            output.outputFileName = "makaw-${versionName}-${abi}.apk"
         }
     }
 }
