@@ -16,14 +16,12 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.4'
           channel: stable
           cache: true
 
       - name: Install dependencies
         run: flutter pub get
-
-      - name: Install msix for packaging
-        run: dart pub add dev:msix --no-example
 
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
@@ -34,6 +32,9 @@ jobs:
       - name: Zip Windows release
         working-directory: build/windows/x64/runner/Release
         run: Compress-Archive -Path * -DestinationPath ${{ github.workspace }}/makaw-windows-x64.zip
+
+      - name: Install msix for packaging
+        run: dart pub add dev:msix --no-example
 
       - name: Create MSIX certificate
         if: env.MSIX_CERT_B64 != ''
