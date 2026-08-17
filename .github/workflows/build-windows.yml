@@ -16,12 +16,8 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.x'
           channel: stable
           cache: true
-
-      - name: Ensure platform runners exist
-        run: flutter create . --org com.hexadigitall --project-name makaw
 
       - name: Install dependencies
         run: flutter pub get
