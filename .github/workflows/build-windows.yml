@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Install msix for packaging
+        run: dart pub add dev:msix --no-example
+
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
 
