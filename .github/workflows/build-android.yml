@@ -43,10 +43,10 @@ jobs:
 
       - name: Generate checksums
         run: |
-          cd build/app/outputs/flutter-apk
+          cd $GITHUB_WORKSPACE/build/app/outputs/flutter-apk
           find . -name "*.apk" -exec sha256sum {} \; > SHA256.txt
-          cd ../bundle/release
-          sha256sum app-release.aab >> ../flutter-apk/SHA256.txt
+          cd $GITHUB_WORKSPACE/build/app/outputs/bundle/release
+          sha256sum app-release.aab >> $GITHUB_WORKSPACE/build/app/outputs/flutter-apk/SHA256.txt
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
