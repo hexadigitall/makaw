@@ -27,7 +27,7 @@ import 'dart:convert';
 import 'dart:collection';
 import 'dart:typed_data';
 import 'package:xterm/xterm.dart';
-import 'package:flutter_pty/flutter_pty.dart';
+import 'core/platform/conditional_pty.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
@@ -1188,6 +1188,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   // ─── Terminal ───────────────────────────────────────────────────────────────
 
   void _startPty() {
+    if (kIsWeb) return;
     if (_pty != null) return;
     _pty = Pty.start(
       Platform.isAndroid ? 'sh' : 'bash',
@@ -6933,6 +6934,21 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
   // ─── Terminal Tab ───────────────────────────────────────────────────────────
 
   Widget _buildTerminalTab() {
+    if (kIsWeb) {
+      return Container(
+        decoration: BoxDecoration(color: Color(0xFF0F172A)),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.terminal, size: 48, color: Colors.grey),
+              SizedBox(height: 16),
+              Text('Terminal is not available on web', style: TextStyle(color: Colors.grey, fontSize: 14)),
+            ],
+          ),
+        ),
+      );
+    }
     _startPty();
     return Container(
       decoration: BoxDecoration(color: Color(0xFF0F172A)),
