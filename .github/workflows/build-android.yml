@@ -4,10 +4,6 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (e.g. v1.0.4)'
-        required: true
 
 permissions:
   contents: write
@@ -24,14 +20,23 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Ensure platform runners exist
+        run: flutter create . --org com.hexadigitall --project-name makaw
+
       - name: Install dependencies
         run: flutter pub get
 
       - name: Decode keystore
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/makaw-release.jks
+        if: env.KEYSTORE_B64 != ''
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > android/app/makaw-release.jks
 
       - name: Decode key.properties
-        run: echo "${{ secrets.ANDROID_KEY_PROPERTIES_BASE64 }}" | base64 -d > android/key.properties
+        if: env.KEYPROPS_B64 != ''
+        env:
+          KEYPROPS_B64: ${{ secrets.ANDROID_KEY_PROPERTIES_BASE64 }}
+        run: echo "$KEYPROPS_B64" | base64 -d > android/key.properties
 
       - name: Build split APKs (per-ABI)
         run: flutter build apk --release --split-per-abi
@@ -39,20 +44,30 @@ jobs:
       - name: Build App Bundle (AAB)
         run: flutter build appbundle --release
 
+      - name: Rename APKs with version
+        run: |
+          cd build/app/outputs/flutter-apk
+          for f in *.apk; do
+            if [[ "$f" != *"makaw-"* ]]; then
+              abi=$(echo "$f" | sed 's/app-//;s/-release.apk//')
+              mv "$f" "makaw-${GITHUB_REF_NAME#v}-${abi}.apk" 2>/dev/null || true
+            fi
+          done
+
       - name: Generate checksums
         run: |
           cd build/app/outputs/flutter-apk
-          sha256sum app-armeabi-v7a-release.apk > SHA256.txt
-          sha256sum app-arm64-v8a-release.apk >> SHA256.txt
-          sha256sum app-x86_64-release.apk >> SHA256.txt
+          find . -name "makaw-*.apk" -exec sha256sum {} \; > SHA256.txt
           cd ../../bundle/release
           sha256sum app-release.aab >> ../../flutter-apk/SHA256.txt
+          echo "---" >> ../../flutter-apk/SHA256.txt
+          cat ../../flutter-apk/SHA256.txt
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: makaw-apks
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/makaw-*.apk
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
@@ -64,10 +79,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: "Makaw ${{ github.ref_name }}"
           files: |
-            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            build/app/outputs/flutter-apk/app-x86_64-release.apk
+            build/app/outputs/flutter-apk/makaw-*.apk
             build/app/outputs/bundle/release/app-release.aab
             build/app/outputs/flutter-apk/SHA256.txt
           generate_release_notes: true

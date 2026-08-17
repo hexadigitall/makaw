@@ -4,10 +4,6 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (e.g. v1.0.4)'
-        required: true
 
 permissions:
   contents: write
@@ -29,6 +25,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libgtk-3-dev clang pkg-config
 
+      - name: Ensure platform runners exist
+        run: flutter create . --org com.hexadigitall --project-name makaw
+
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop
 
@@ -39,15 +38,14 @@ jobs:
         run: flutter build linux --release
 
       - name: Package Linux tarball
-        run: |
-          cd build/linux/x64/release/bundle
-          tar -czf ../../../makaw-linux-x64.tar.gz .
+        working-directory: build/linux/x64/release/bundle
+        run: tar -czf ${{ github.workspace }}/makaw-linux-x64.tar.gz .
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: makaw-linux
-          path: build/linux/x64/release/bundle/
+          path: makaw-linux-x64.tar.gz
 
       - name: Upload Linux tarball to release
         if: startsWith(github.ref, 'refs/tags/')
@@ -68,6 +66,9 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Ensure platform runners exist
+        run: flutter create . --org com.hexadigitall --project-name makaw
+
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
 
@@ -78,15 +79,14 @@ jobs:
         run: flutter build macos --release
 
       - name: Create macOS zip
-        run: |
-          cd build/macos/Build/Products/Release
-          zip -r ../../../makaw-macos.zip Makaw.app
+        working-directory: build/macos/Build/Products/Release
+        run: zip -r ${{ github.workspace }}/makaw-macos.zip Makaw.app
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: makaw-macos
-          path: build/macos/Build/Products/Release/Makaw.app
+          path: makaw-macos.zip
 
       - name: Upload macOS zip to release
         if: startsWith(github.ref, 'refs/tags/')

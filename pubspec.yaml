@@ -47,11 +47,23 @@ dependencies:
   universal_html: ^2.2.4
   web: ^1.0.0
 
+msix_config:
+  display_name: Makaw
+  publisher_display_name: Hexadigitall
+  identity_name: com.hexadigitall.makaw
+  publisher: CN=Hexadigitall
+  msix_version: 1.0.3.0
+  logo_path: assets/makaw_logo_64.png
+  capabilities:
+    - internetClient
+    - broadFileSystemAccess
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
   mocktail: ^1.0.5
+  msix: ^3.16.1
 
 flutter:
   uses-material-design: true

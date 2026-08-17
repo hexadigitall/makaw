@@ -4,10 +4,6 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (e.g. v1.0.4)'
-        required: true
 
 permissions:
   contents: write
@@ -26,11 +22,46 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Ensure platform runners exist
+        run: flutter create . --org com.hexadigitall --project-name makaw
+
+      - name: Restore custom web files
+        run: |
+          cat > web/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+            <meta name="description" content="Makaw — Full-featured hybrid browser, code studio & creative platform">
+            <meta name="theme-color" content="#1a1a2e">
+            <meta name="apple-mobile-web-app-capable" content="yes">
+            <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+            <meta name="apple-mobile-web-app-title" content="Makaw">
+            <link rel="manifest" href="manifest.json">
+            <link rel="icon" type="image/png" href="favicon.png">
+            <link rel="apple-touch-icon" href="icons/Icon-192.png">
+            <title>Makaw</title>
+            <style>
+              body { margin: 0; background: #1a1a2e; overflow: hidden; }
+              .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 16px; }
+              .loading img { width: 72px; height: 72px; border-radius: 18px; animation: pulse 1.5s ease-in-out infinite; }
+              .loading span { color: rgba(255,255,255,0.5); font-family: system-ui; font-size: 13px; letter-spacing: 2px; }
+              @keyframes pulse { 0%,100% { opacity: 0.5; transform: scale(0.95); } 50% { opacity: 1; transform: scale(1.05); } }
+            </style>
+          </head>
+          <body>
+            <div class="loading"><img src="favicon.png" alt="Makaw"><span>MAKAW</span></div>
+            <script src="flutter_bootstrap.js" async></script>
+          </body>
+          </html>
+          HTMLEOF
+
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build web (PWA)
-        run: flutter build web --release --web-renderer canvaskit --base-href "/makaw/"
+        run: flutter build web --release --web-renderer canvaskit
 
       - name: Upload web build artifact
         uses: actions/upload-artifact@v4
@@ -48,11 +79,8 @@ jobs:
 
       - name: Add web artifact to release
         if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          cd build/web
-          zip -r ../../makaw-web.zip .
-          cd ../..
-        working-directory: ${{ github.workspace }}
+        working-directory: build/web
+        run: zip -r ${{ github.workspace }}/makaw-web.zip .
 
       - name: Upload web zip to release
         if: startsWith(github.ref, 'refs/tags/')
