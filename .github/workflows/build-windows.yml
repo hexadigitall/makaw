@@ -1,0 +1,75 @@
+name: Build Windows (MSIX + Exe)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.4)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.x'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Build Windows exe
+        run: flutter build windows --release
+
+      - name: Create MSIX certificate
+        if: env.MSIX_CERT_BASE64 != ''
+        env:
+          MSIX_CERT_BASE64: ${{ secrets.MSIX_CERT_BASE64 }}
+          MSIX_CERT_PASSWORD: ${{ secrets.MSIX_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $certBytes = [Convert]::FromBase64String("$env:MSIX_CERT_BASE64")
+          [IO.File]::WriteAllBytes("$env:USERPROFILE\makaw-cert.pfx", $certBytes)
+
+      - name: Package MSIX
+        if: env.MSIX_CERT_BASE64 != ''
+        env:
+          MSIX_CERT_PASSWORD: ${{ secrets.MSIX_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $certPath = "$env:USERPROFILE\makaw-cert.pfx"
+          dart run msix:create `
+            --display-name "Makaw" `
+            --publisher "CN=Hexadigitall" `
+            --version "1.0.3.0" `
+            --capabilities "internetClient" `
+            --certificate-path "$certPath" `
+            --certificate-password "$env:MSIX_CERT_PASSWORD" `
+            --output "build/windows/x64/runner/Release/makaw.msix"
+
+      - name: Upload Windows exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: makaw-windows-exe
+          path: build/windows/x64/runner/Release/
+
+      - name: Upload MSIX to release
+        if: startsWith(github.ref, 'refs/tags/') && env.MSIX_CERT_BASE64 != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/windows/x64/runner/Release/makaw.msix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MSIX_CERT_BASE64: ${{ secrets.MSIX_CERT_BASE64 }}

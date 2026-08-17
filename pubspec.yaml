@@ -1,6 +1,7 @@
-name: makaw_mobile
-description: Makaw Code Studio + Hybrid Browser for mobile
+name: makaw
+description: Makaw — Full-featured hybrid browser, code studio & creative platform
 version: 1.0.3+4
+publish_to: 'none'
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -43,6 +44,9 @@ dependencies:
   flutter_riverpod: ^2.6.1
   go_router: ^14.6.2
   archive: ^4.0.9
+  universal_html: ^2.2.4
+  web: ^1.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

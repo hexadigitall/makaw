@@ -1,0 +1,63 @@
+name: Build Web (PWA)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.4)'
+        required: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.x'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build web (PWA)
+        run: flutter build web --release --web-renderer canvaskit --base-href "/makaw/"
+
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: makaw-web
+          path: build/web/
+
+      - name: Deploy to GitHub Pages
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/web
+          publish_branch: gh-pages
+
+      - name: Add web artifact to release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd build/web
+          zip -r ../../makaw-web.zip .
+          cd ../..
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload web zip to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: makaw-web.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

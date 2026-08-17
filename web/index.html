@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <meta name="description" content="Makaw — Full-featured hybrid browser, code studio & creative platform">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Makaw">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <title>Makaw</title>
+  <style>
+    body { margin: 0; background: #1a1a2e; }
+    .loading { display: flex; align-items: center; justify-content: center; height: 100vh; }
+    .loading img { width: 80px; height: 80px; animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 0.6; transform: scale(0.95); } 50% { opacity: 1; transform: scale(1.05); } }
+  </style>
+</head>
+<body>
+  <div class="loading">
+    <img src="icons/icon-192.png" alt="Makaw">
+  </div>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
