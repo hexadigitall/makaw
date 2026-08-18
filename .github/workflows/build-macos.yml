@@ -26,10 +26,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Install CocoaPods
-        working-directory: macos
-        run: pod install
-
       - name: Build macOS
         run: flutter build macos --release
 
