@@ -26,24 +26,33 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Patch BoringSSL-GRPC for Xcode 16+ compatibility
+      - name: Create BoringSSL CocoaPods hook
         run: |
-          mkdir -p ~/.cocoapods/hooks
-          cat > ~/.cocoapods/hooks/post_install.rb << 'RUBY'
+          python3 -c "
+          import os
+          hook_dir = os.path.expanduser('~/.cocoapods/hooks')
+          os.makedirs(hook_dir, exist_ok=True)
+          hook_path = os.path.join(hook_dir, 'post_install.rb')
+          code = '''
           Pod::HooksManager.register('post_install', :after) do |installer|
             installer.pods_project.targets.each do |target|
               if target.name == 'BoringSSL-GRPC'
                 target.source_build_phase.files.each do |file|
                   if file.settings && file.settings['COMPILER_FLAGS']
                     flags = file.settings['COMPILER_FLAGS'].split
-                    flags.reject! { |flag| flag == '-GCC_WARN_INHIBIT_ALL_WARNINGS' }
+                    flags.reject! { |f| f == '-GCC_WARN_INHIBIT_ALL_WARNINGS' }
                     file.settings['COMPILER_FLAGS'] = flags.join(' ')
                   end
                 end
               end
             end
           end
-          RUBY
+          '''
+          with open(hook_path, 'w') as f:
+              f.write(code.strip() + '\n')
+          print('Hook written to', hook_path)
+          "
+          cat ~/.cocoapods/hooks/post_install.rb
 
       - name: Build macOS
         run: flutter build macos --release
