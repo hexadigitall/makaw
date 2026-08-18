@@ -21,7 +21,9 @@ jobs:
           cache: true
 
       - name: Enable macOS desktop
-        run: flutter config --enable-macos-desktop
+        run: |
+          flutter config --enable-macos-desktop
+          flutter config --no-enable-swift-package-manager
 
       - name: Install dependencies
         run: flutter pub get
