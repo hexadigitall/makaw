@@ -113,8 +113,8 @@ void main() async {
     return true; // handled — prevents app process crash
   };
 
-  await globalMusicService.init();
-  await _initMediaNotification();
+  try { await globalMusicService.init(); } catch (_) {}
+  try { await _initMediaNotification(); } catch (_) {}
   runApp(ProviderScope(child: MakawApp()));
 }
 
@@ -690,62 +690,73 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_homeInitialized) return;
       _homeInitialized = true;
-      await _newsFeedService!.init();
-      await _newsFeedService!.ensureLocationReady();
-      _newsFeedService!.loadTaps();
-      await _loadSavedSession();
-      await _loadShortcuts();
-      setState(() => _ready = true);
-      _initDownloadDir();
-      _musicService.loadPlaylists();
-      _musicService.loadFavorites();
-      ref.read(musicPlayerServiceProvider.notifier).state = _musicService;
-      _requestNotificationPermission();
-      _imageService.loadFavorites();
-      _imageService.loadTrash();
-      ref.read(imageViewerServiceProvider.notifier).state = _imageService;
-      // _imageService.scanAllImages(); // disabled — hangs on this device
-      _videoService.loadFavorites();
-      _videoService.loadPlaylists();
-      _videoService.loadResumePositions();
-      _videoService.scanAllVideos();
-      ref.read(videoPlayerServiceProvider.notifier).state = _videoService;
-      _documentService.loadFavorites();
-      ref.read(documentServiceProvider.notifier).state = _documentService;
-      _documentService.scanAllDocuments(); // runs in background isolate — no UI freeze
-      _downloadManager = DownloadService(
-        dio: Dio(BaseOptions(
-          connectTimeout: Duration(seconds: 15),
-          receiveTimeout: Duration(seconds: 60),
-          sendTimeout: Duration(seconds: 30),
-        )),
-        getDownloadDir: _defaultDownloadDir,
-        showNotification: _showToast,
-        onComplete: null,
-      );
-      ref.read(downloadServiceProvider.notifier).state = _downloadManager;
-      _adBlocker.onBlacklistUpdated = () {
-        // Push new contentBlocker rules to all existing tabs
-        final rules = _adBlocker.getContentBlockerRules();
-        for (final entry in _tabControllers.entries) {
-          entry.value.setSettings(settings: InAppWebViewSettings(
-            contentBlockers: rules,
-          ));
-        }
-      };
-      _adBlocker.updateBlacklist(); // fire-and-forget: fetch EasyList + AdGuard filter lists
-      _updateService = UpdateService(
-        repoOwner: 'hexadigitall',
-        repoName: 'makaw',
-        dio: Dio(),
-      );
-      _initDb();
-      _initSnippets();
-      _checkUpdatesOnStartup();
-      _requestPermissions();
-      _loadAiKey();
-      _setupIntentChannel();
-      _loadProxySettings();
+      try {
+        await _newsFeedService!.init();
+      } catch (_) {}
+      try {
+        await _newsFeedService!.ensureLocationReady().timeout(Duration(seconds: 5));
+      } catch (_) {}
+      try {
+        _newsFeedService!.loadTaps();
+      } catch (_) {}
+      try {
+        await _loadSavedSession();
+      } catch (_) {}
+      try {
+        await _loadShortcuts();
+      } catch (_) {}
+      if (mounted) setState(() => _ready = true);
+      try {
+        _initDownloadDir();
+        _musicService.loadPlaylists();
+        _musicService.loadFavorites();
+        ref.read(musicPlayerServiceProvider.notifier).state = _musicService;
+        _requestNotificationPermission();
+        _imageService.loadFavorites();
+        _imageService.loadTrash();
+        ref.read(imageViewerServiceProvider.notifier).state = _imageService;
+        // _imageService.scanAllImages(); // disabled — hangs on this device
+        _videoService.loadFavorites();
+        _videoService.loadPlaylists();
+        _videoService.loadResumePositions();
+        _videoService.scanAllVideos();
+        ref.read(videoPlayerServiceProvider.notifier).state = _videoService;
+        _documentService.loadFavorites();
+        ref.read(documentServiceProvider.notifier).state = _documentService;
+        _documentService.scanAllDocuments();
+        _downloadManager = DownloadService(
+          dio: Dio(BaseOptions(
+            connectTimeout: Duration(seconds: 15),
+            receiveTimeout: Duration(seconds: 60),
+            sendTimeout: Duration(seconds: 30),
+          )),
+          getDownloadDir: _defaultDownloadDir,
+          showNotification: _showToast,
+          onComplete: null,
+        );
+        ref.read(downloadServiceProvider.notifier).state = _downloadManager;
+        _adBlocker.onBlacklistUpdated = () {
+          final rules = _adBlocker.getContentBlockerRules();
+          for (final entry in _tabControllers.entries) {
+            entry.value.setSettings(settings: InAppWebViewSettings(
+              contentBlockers: rules,
+            ));
+          }
+        };
+        _adBlocker.updateBlacklist();
+        _updateService = UpdateService(
+          repoOwner: 'hexadigitall',
+          repoName: 'makaw',
+          dio: Dio(),
+        );
+        _initDb();
+        _initSnippets();
+        _checkUpdatesOnStartup();
+        _requestPermissions();
+        _loadAiKey();
+        _setupIntentChannel();
+        _loadProxySettings();
+      } catch (_) {}
     });
   }
 
