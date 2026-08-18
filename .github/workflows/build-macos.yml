@@ -26,36 +26,26 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Create BoringSSL CocoaPods hook
+      - name: Run pod install + patch BoringSSL + build
+        working-directory: macos
         run: |
-          python3 -c "
-          import os
-          hook_dir = os.path.expanduser('~/.cocoapods/hooks')
-          os.makedirs(hook_dir, exist_ok=True)
-          hook_path = os.path.join(hook_dir, 'post_install.rb')
-          code = '''
-          Pod::HooksManager.register('post_install', :after) do |installer|
-            installer.pods_project.targets.each do |target|
-              if target.name == 'BoringSSL-GRPC'
-                target.source_build_phase.files.each do |file|
-                  if file.settings && file.settings['COMPILER_FLAGS']
-                    flags = file.settings['COMPILER_FLAGS'].split
-                    flags.reject! { |f| f == '-GCC_WARN_INHIBIT_ALL_WARNINGS' }
-                    file.settings['COMPILER_FLAGS'] = flags.join(' ')
-                  end
-                end
-              end
-            end
-          end
-          '''
-          with open(hook_path, 'w') as f:
-              f.write(code.strip() + '\n')
-          print('Hook written to', hook_path)
-          "
-          cat ~/.cocoapods/hooks/post_install.rb
+          # Run flutter build once to generate Podfile and pods, then fail at build
+          cd ..
+          flutter build macos --release 2>&1 || true
 
-      - name: Build macOS
-        run: flutter build macos --release
+          # Now patch the BoringSSL compiler flags in the Pods project
+          PROJ="macos/Pods/Pods.xcodeproj/project.pbxproj"
+          if [ -f "$PROJ" ]; then
+            echo "Patching BoringSSL-GRPC compiler flags..."
+            # Remove -GCC_WARN_INHIBIT_ALL_WARNINGS from COMPILER_FLAGS
+            sed -i '' 's/ -GCC_WARN_INHIBIT_ALL_WARNINGS//g' "$PROJ"
+            echo "Patch applied. Rebuilding..."
+          else
+            echo "Pods project not found, attempting direct build"
+          fi
+
+          # Rebuild (pod install already done, should just do xcodebuild)
+          flutter build macos --release
 
       - name: Create macOS zip
         working-directory: build/macos/Build/Products/Release
