@@ -1,0 +1,52 @@
+name: Build macOS
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods
+        working-directory: macos
+        run: pod install
+
+      - name: Build macOS
+        run: flutter build macos --release
+
+      - name: Create macOS zip
+        working-directory: build/macos/Build/Products/Release
+        run: zip -r ${{ github.workspace }}/makaw-macos.zip Makaw.app
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: makaw-macos
+          path: makaw-macos.zip
+
+      - name: Upload macOS zip to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: makaw-macos.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
