@@ -1,0 +1,72 @@
+platform :osx, '10.15'
+
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_macos_app_podfile
+
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_macos_pods File.dirname(File.realpath(__FILE__))
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
+      config.build_settings['CLANG_WARN_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
+
+      cflags = config.build_settings['OTHER_CFLAGS'] || '$(inherited)'
+      unless cflags.include?('-Wno-missing-template-arg-list-after-template-kw')
+        config.build_settings['OTHER_CFLAGS'] = "#{cflags} -Wno-missing-template-arg-list-after-template-kw"
+      end
+
+      cxxflags = config.build_settings['OTHER_CPLUSPLUSFLAGS'] || '$(inherited)'
+      unless cxxflags.include?('-Wno-missing-template-arg-list-after-template-kw')
+        config.build_settings['OTHER_CPLUSPLUSFLAGS'] = "#{cxxflags} -Wno-missing-template-arg-list-after-template-kw"
+      end
+    end
+
+    if target.name == 'BoringSSL-GRPC' || target.name == 'BoringSSL'
+      target.source_build_phase.files.each do |file|
+        if file.settings && file.settings['COMPILER_FLAGS']
+          file.settings['COMPILER_FLAGS'] = file.settings['COMPILER_FLAGS'].gsub(' -GCC_WARN_INHIBIT_ALL_WARNINGS', '')
+        end
+      end
+    end
+
+    if target.name == 'gRPC-C++'
+      grpc_hdr = File.join(installer.sandbox.root, 'gRPC-C++', 'src', 'core', 'lib', 'promise', 'detail', 'basic_seq.h')
+      if File.exist?(grpc_hdr)
+        content = File.read(grpc_hdr)
+        unless content.include?('CallSeqFactory<>')
+          content.gsub!('Traits::template CallSeqFactory(', 'Traits::template CallSeqFactory<>(')
+          File.write(grpc_hdr, content)
+          puts "Patched gRPC-C++ basic_seq.h template keyword"
+        end
+      end
+    end
+  end
+end

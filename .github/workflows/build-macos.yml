@@ -32,38 +32,12 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Phase 1 - build to install pods
-        run: flutter build macos --release || true
-
-      - name: Patch BoringSSL and gRPC
+      - name: Install pods and build
         run: |
-          PROJ="macos/Pods/Pods.xcodeproj/project.pbxproj"
-          if [ -f "$PROJ" ]; then
-            echo "=== Patching Pods project ==="
-            sed -i '' 's/ -GCC_WARN_INHIBIT_ALL_WARNINGS//g' "$PROJ"
-            sed -i '' 's/GCC_TREAT_WARNINGS_AS_ERRORS = YES;/GCC_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
-            sed -i '' 's/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = YES;/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
-          fi
-
-          echo "=== Fixing gRPC source template keyword warning ==="
-          find macos/Pods/gRPC-C++ -name "*.h" -o -name "*.cc" | while read f; do
-            if grep -q "template CallSeqFactory" "$f" 2>/dev/null; then
-              sed -i '' 's/Traits::template CallSeqFactory(/Traits::template CallSeqFactory<>(/g' "$f"
-              echo "Fixed template CallSeqFactory in $f"
-            fi
-          done
-
-          echo "=== Patching xcconfig files ==="
-          XCFLAGS="-Wno-missing-template-arg-list-after-template-kw"
-          find macos/Pods/Target\ Support Files -name "*.xcconfig" | while read f; do
-            echo "OTHER_CFLAGS = \$(inherited) $XCFLAGS" >> "$f"
-            echo "OTHER_CPLUSPLUSFLAGS = \$(inherited) $XCFLAGS" >> "$f"
-          done
-
-          echo "=== All patches applied ==="
-
-      - name: Phase 2 - rebuild
-        run: flutter build macos --release
+          cd macos
+          pod install --repo-update
+          cd ..
+          flutter build macos --release
 
       - name: Create macOS zip
         working-directory: build/macos/Build/Products/Release
