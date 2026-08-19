@@ -22,7 +22,7 @@ raise 'FLUTTER_ROOT not found. Set FLUTTER_ROOT env var or run flutter pub get f
 
 require File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper')
 
-flutter_macos_app_podfile
+flutter_macos_podfile_setup
 
 target 'Runner' do
   use_frameworks!
