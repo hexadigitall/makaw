@@ -45,22 +45,20 @@ jobs:
             sed -i '' 's/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = YES;/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
           fi
 
-          echo "=== Patching gRPC source directly ==="
-          GRPC_HDR="macos/Pods/gRPC-Core/src/core/lib/promise/detail/basic_seq.h"
-          if [ -f "$GRPC_HDR" ]; then
-            TMPFILE=$(mktemp)
-            echo '#pragma clang diagnostic push' > "$TMPFILE"
-            echo '#pragma clang diagnostic ignored "-Wmissing-template-arg-list-after-template-kw"' >> "$TMPFILE"
-            cat "$GRPC_HDR" >> "$TMPFILE"
-            echo '#pragma clang diagnostic pop' >> "$TMPFILE"
-            mv "$TMPFILE" "$GRPC_HDR"
-            echo "Patched $GRPC_HDR"
-          else
-            echo "gRPC header not found at expected path"
-          fi
+          echo "=== Fixing gRPC source template keyword warning ==="
+          find macos/Pods/gRPC-C++ -name "*.h" -o -name "*.cc" | while read f; do
+            if grep -q "template CallSeqFactory" "$f" 2>/dev/null; then
+              sed -i '' 's/Traits::template CallSeqFactory(/Traits::template CallSeqFactory<>(/g' "$f"
+              echo "Fixed template CallSeqFactory in $f"
+            fi
+          done
 
           echo "=== Patching xcconfig files ==="
-          find macos/Pods/Target\ Support Files -name "*.xcconfig" -exec sh -c 'echo "OTHER_CFLAGS = \$(inherited) -Wno-missing-template-arg-list-after-template-kw" >> "$1"' _ {} \; 2>/dev/null || true
+          XCFLAGS="-Wno-missing-template-arg-list-after-template-kw"
+          find macos/Pods/Target\ Support Files -name "*.xcconfig" | while read f; do
+            echo "OTHER_CFLAGS = \$(inherited) $XCFLAGS" >> "$f"
+            echo "OTHER_CPLUSPLUSFLAGS = \$(inherited) $XCFLAGS" >> "$f"
+          done
 
           echo "=== All patches applied ==="
 
