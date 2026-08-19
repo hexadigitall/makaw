@@ -2,7 +2,8 @@ name: Build macOS
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -16,17 +17,14 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.4'
+          flutter-version: "3.44.4"
           channel: stable
           cache: true
 
-      - name: Select Xcode 15.4
+      - name: Check available Xcode versions
         run: |
-          if [ -d "/Applications/Xcode_15.4.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
-          fi
+          ls /Applications/Xcode*.app 2>/dev/null || echo "No Xcode apps found"
           xcodebuild -version
-          clang --version
 
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
@@ -34,29 +32,28 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build macOS (phase 1: install pods + expect BoringSSL failure)
-        run: flutter build macos --release 2>&1 || true
+      - name: Phase 1 - build to install pods
+        run: flutter build macos --release || true
 
-      - name: Patch BoringSSL-GRPC compiler flags
+      - name: Patch BoringSSL and gRPC
         run: |
           PROJ="macos/Pods/Pods.xcodeproj/project.pbxproj"
           if [ -f "$PROJ" ]; then
-            echo "Patching BoringSSL-GRPC compiler flags..."
+            echo "Patching BoringSSL compiler flags..."
             sed -i '' 's/ -GCC_WARN_INHIBIT_ALL_WARNINGS//g' "$PROJ"
-            echo "Patch applied."
-          fi
-          # Also suppress gRPC template warning-as-error on newer clang
-          if [ -f "$PROJ" ]; then
             sed -i '' 's/GCC_TREAT_WARNINGS_AS_ERRORS = YES;/GCC_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
-            echo "Disabled treat-warnings-as-errors for Pods."
+            echo "Patches applied."
+          else
+            echo "Pods project not found!"
+            exit 1
           fi
 
-      - name: Build macOS (phase 2: rebuild after patch)
+      - name: Phase 2 - rebuild
         run: flutter build macos --release
 
       - name: Create macOS zip
         working-directory: build/macos/Build/Products/Release
-        run: zip -r ${{ github.workspace }}/makaw-macos.zip Makaw.app
+        run: zip -r "$GITHUB_WORKSPACE/makaw-macos.zip" Makaw.app
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -64,7 +61,7 @@ jobs:
           name: makaw-macos
           path: makaw-macos.zip
 
-      - name: Upload macOS zip to release
+      - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
