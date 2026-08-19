@@ -32,12 +32,26 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Install pods and build
+      - name: Install pods
         run: |
           cd macos
           pod install --repo-update
-          cd ..
-          flutter build macos --release
+
+      - name: Patch after pod install (safety net)
+        run: |
+          PROJ="macos/Pods/Pods.xcodeproj/project.pbxproj"
+          if [ -f "$PROJ" ]; then
+            sed -i '' 's/ -GCC_WARN_INHIBIT_ALL_WARNINGS//g' "$PROJ"
+            sed -i '' 's/GCC_TREAT_WARNINGS_AS_ERRORS = YES;/GCC_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
+            sed -i '' 's/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = YES;/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
+          fi
+          GRPC_HDR="macos/Pods/gRPC-C++/src/core/lib/promise/detail/basic_seq.h"
+          if [ -f "$GRPC_HDR" ]; then
+            sed -i '' 's/Traits::template CallSeqFactory(/Traits::template CallSeqFactory<>(/' "$GRPC_HDR"
+          fi
+
+      - name: Build macOS
+        run: flutter build macos --release
 
       - name: Create macOS zip
         working-directory: build/macos/Build/Products/Release
