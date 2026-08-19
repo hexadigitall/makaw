@@ -4611,6 +4611,7 @@ google_sign_in_android
 google_sign_in_ios
 google_sign_in_platform_interface
 google_sign_in_web
+palette_generator
 path_provider_windows
 plugin_platform_interface
 shared_preferences_linux
