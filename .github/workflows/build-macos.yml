@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -22,8 +22,11 @@ jobs:
 
       - name: Select Xcode 15.4
         run: |
-          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+          if [ -d "/Applications/Xcode_15.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+          fi
           xcodebuild -version
+          clang --version
 
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
@@ -41,6 +44,11 @@ jobs:
             echo "Patching BoringSSL-GRPC compiler flags..."
             sed -i '' 's/ -GCC_WARN_INHIBIT_ALL_WARNINGS//g' "$PROJ"
             echo "Patch applied."
+          fi
+          # Also suppress gRPC template warning-as-error on newer clang
+          if [ -f "$PROJ" ]; then
+            sed -i '' 's/GCC_TREAT_WARNINGS_AS_ERRORS = YES;/GCC_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
+            echo "Disabled treat-warnings-as-errors for Pods."
           fi
 
       - name: Build macOS (phase 2: rebuild after patch)
