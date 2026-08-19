@@ -61,17 +61,98 @@ import 'features/browser/presentation/providers/download_manager_provider.dart';
 import 'app/providers/service_providers.dart';
 import 'features/browser/presentation/pages/media_sniffer_page.dart';
 import 'features/browser/presentation/widgets/downloads_widget.dart' as feature;
+import 'core/widgets/responsive.dart';
+import 'core/widgets/adaptive_container.dart';
+import 'core/widgets/adaptive_modal.dart';
+import 'core/widgets/adaptive_action_button.dart';
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
-const kIconBgColor = Color(0xFF2B3845);
-const kAccentOrange = Color(0xFFD44D33);
-const kAccentTeal = Color(0xFF00A7C2);
 
+// ─── Colors ──────────────────────────────────────────────────────────────────
+// Primary / Accent
+const kAccentTeal = Color(0xFF00A7C2);
+const kAccentOrange = Color(0xFFD44D33);
+const kPrimaryBlue = Color(0xFF818CF8);
+const kPrimaryBlueDark = Color(0xFF6366F1);
+
+// Surfaces (Dark)
+const kSurfaceBase = Color(0xFF0F172A);      // Deepest background
+const kSurfaceCard = Color(0xFF1A1A2E);      // Card backgrounds
+const kSurfaceElevated = Color(0xFF1E293B);  // Elevated surfaces, dialogs
+const kSurfaceBorder = Color(0xFF334155);    // Borders, input outlines
+
+// Text
+const kTextPrimary = Color(0xFFFFFFFF);       // Primary text on dark
+const kTextSecondary = Color(0xFF94A3B8);     // Muted / secondary text
+const kTextTertiary = Color(0xFF666680);      // Tertiary / disabled text
+
+// Semantic
+const kDanger = Color(0xFFF87171);            // Errors, delete, video accent
+const kSuccess = Color(0xFF34D399);           // Success, gallery accent
+const kWarning = Color(0xFFFBBF24);           // Warning, document accent
+const kInfo = Color(0xFF60A5FA);              // Info, links
+
+// Feature Accents
+const kMusicAccent = kPrimaryBlue;
+const kVideoAccent = kDanger;
+const kImageAccent = Color(0xFF34D399);
+const kDocumentAccent = Color(0xFFFBBF24);
+const kStudioAccent = kPrimaryBlue;
+const kTerminalAccent = Color(0xFF22D3EE);
+const kSnippetAccent = Color(0xFFA78BFA);
+const kCloudAccent = Color(0xFF60A5FA);
+const kHistoryAccent = Color(0xFFF472B6);
+
+// Misc
+const kIconBgColor = Color(0xFF2B3845);
+
+// Incognito
 const kIncognitoBg = Color(0xFF202124);
 const kIncognitoSurface = Color(0xFF2B2C2F);
 const kIncognitoInput = Color(0xFF3C4043);
 const kIncognitoAccent = Color(0xFFA8C7FA);
 const kIncognitoPurple = Color(0xFF7C3AED);
+
+// ─── Typography Scale ────────────────────────────────────────────────────────
+// Font Families
+const kFontDisplay = 'Outfit';
+const kFontBody = '';  // System default
+
+// Font Sizes (4px grid)
+const kTextHero = 42.0;
+const kTextDisplay = 32.0;
+const kTextHeadline = 24.0;
+const kTextTitle = 20.0;
+const kTextSubtitle = 16.0;
+const kTextBody = 14.0;
+const kTextCaption = 12.0;
+const kTextMicro = 10.0;
+
+// Font Weights
+const kWeightLight = FontWeight.w300;
+const kWeightRegular = FontWeight.w400;
+const kWeightMedium = FontWeight.w500;
+const kWeightSemibold = FontWeight.w600;
+const kWeightBold = FontWeight.w700;
+
+// ─── Spacing (4px grid) ─────────────────────────────────────────────────────
+const kSpaceXXS = 2.0;
+const kSpaceXS = 4.0;
+const kSpaceSM = 8.0;
+const kSpaceMD = 12.0;
+const kSpaceBase = 16.0;
+const kSpaceLG = 20.0;
+const kSpaceXL = 24.0;
+const kSpaceXXL = 32.0;
+const kSpaceXXXL = 48.0;
+
+// ─── Border Radii ────────────────────────────────────────────────────────────
+const kRadiusXS = 4.0;
+const kRadiusSM = 8.0;
+const kRadiusMD = 12.0;
+const kRadiusLG = 16.0;
+const kRadiusXL = 24.0;
+const kRadiusFull = 999.0;
 
 
 // ─── Models ───────────────────────────────────────────────────────────────────
@@ -222,7 +303,7 @@ class _MakawAppState extends ConsumerState<MakawApp> with WidgetsBindingObserver
   }
 
   void _updateSystemUi(Brightness brightness) {
-    final navColor = brightness == Brightness.light ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A);
+    final navColor = brightness == Brightness.light ? const Color(0xFFF1F5F9) : kSurfaceBase;
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       systemNavigationBarColor: navColor,
       systemNavigationBarIconBrightness: brightness == Brightness.light ? Brightness.dark : Brightness.light,
@@ -252,23 +333,23 @@ class _MakawAppState extends ConsumerState<MakawApp> with WidgetsBindingObserver
         primaryColor: Color(0xFFE2E8F0),
         colorScheme: ColorScheme.light(
           primary: Color(0xFF6366F1),
-          secondary: Color(0xFF818CF8),
+          secondary: kPrimaryBlue,
           surface: Color(0xFFFFFFFF),
         ),
         cardColor: Color(0xFFF8FAFC),
-        appBarTheme: AppBarTheme(backgroundColor: Color(0xFFE2E8F0), foregroundColor: Color(0xFF0F172A)),
-        textTheme: TextTheme(bodyMedium: TextStyle(color: Color(0xFF1E293B))),
+        appBarTheme: AppBarTheme(backgroundColor: Color(0xFFE2E8F0), foregroundColor: kSurfaceBase),
+        textTheme: TextTheme(bodyMedium: TextStyle(color: kSurfaceElevated)),
       ),
       darkTheme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: Color(0xFF0F172A),
-        primaryColor: Color(0xFF1E293B),
+        scaffoldBackgroundColor: kSurfaceBase,
+        primaryColor: kSurfaceElevated,
         colorScheme: ColorScheme.dark(
-          primary: Color(0xFF818CF8),
+          primary: kPrimaryBlue,
           secondary: Color(0xFF6366F1),
-          surface: Color(0xFF1E293B),
+          surface: kSurfaceElevated,
         ),
-        cardColor: Color(0xFF334155),
-        appBarTheme: AppBarTheme(backgroundColor: Color(0xFF1E293B)),
+        cardColor: kSurfaceBorder,
+        appBarTheme: AppBarTheme(backgroundColor: kSurfaceElevated),
       ),
       home: MakawHome(themeMode: _themeMode, onThemeChanged: setThemeMode),
     );
@@ -547,7 +628,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              backgroundColor: const Color(0xFF1E293B),
+              backgroundColor: kSurfaceElevated,
               title: Row(
                 children: [
                   Icon(Icons.vpn_lock, color: _vpnEnabled ? Colors.greenAccent : Colors.white54, size: 26),
@@ -998,7 +1079,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Text('Add Bookmark', style: TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1007,8 +1088,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
               controller: titleCtl,
               style: TextStyle(color: Colors.white, fontSize: 14),
               decoration: InputDecoration(
-                labelText: 'Name', labelStyle: TextStyle(color: Color(0xFF94A3B8)),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF334155))),
+                labelText: 'Name', labelStyle: TextStyle(color: kTextSecondary),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
                 focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: kAccentTeal)),
               ),
             ),
@@ -1017,15 +1098,15 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
               controller: urlCtl,
               style: TextStyle(color: Colors.white, fontSize: 14),
               decoration: InputDecoration(
-                labelText: 'URL', labelStyle: TextStyle(color: Color(0xFF94A3B8)),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF334155))),
+                labelText: 'URL', labelStyle: TextStyle(color: kTextSecondary),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
                 focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: kAccentTeal)),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('Cancel', style: TextStyle(color: kTextSecondary))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kAccentTeal),
             onPressed: () {
@@ -1712,10 +1793,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       context: context,
       barrierDismissible: !info.mandatory,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Row(
           children: [
-            Icon(Icons.system_update, color: Color(0xFF818CF8)),
+            Icon(Icons.system_update, color: kPrimaryBlue),
             SizedBox(width: 8),
             Expanded(child: Text('Update Available', style: TextStyle(fontSize: 16))),
           ],
@@ -1763,7 +1844,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
               _downloadAndInstallUpdate(info);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Color(0xFF818CF8),
+              backgroundColor: kPrimaryBlue,
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             ),
           ),
@@ -1788,7 +1869,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
             }
           });
           return AlertDialog(
-            backgroundColor: Color(0xFF1E293B),
+            backgroundColor: kSurfaceElevated,
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1798,7 +1879,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
                       width: 24, height: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Color(0xFF818CF8),
+                        color: kPrimaryBlue,
                         value: progress > 0 ? progress : null,
                       ),
                     ),
@@ -1818,7 +1899,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
                   LinearProgressIndicator(
                     value: progress,
                     backgroundColor: Colors.grey[800],
-                    color: Color(0xFF818CF8),
+                    color: kPrimaryBlue,
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ],
@@ -2210,7 +2291,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       children: [
         Container(
           padding: EdgeInsets.all(8),
-          color: Color(0xFF1E293B),
+          color: kSurfaceElevated,
           child: Text(side, style: TextStyle(fontWeight: FontWeight.bold)),
         ),
         Expanded(
@@ -2416,7 +2497,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Text('Find in Page', style: TextStyle(color: Colors.white)),
         content: TextField(
           controller: _findController,
@@ -2715,7 +2796,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             children: [
-              Icon(Icons.videocam, color: Color(0xFF818CF8), size: 20),
+              Icon(Icons.videocam, color: kPrimaryBlue, size: 20),
               SizedBox(width: 8),
               Expanded(
                 child: GestureDetector(
@@ -2730,7 +2811,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               SizedBox(width: 4),
               if (_videoBrowserPath != _getStorageRoot())
                 IconButton(
-                  icon: Icon(Icons.arrow_upward, color: Color(0xFF818CF8), size: 20),
+                  icon: Icon(Icons.arrow_upward, color: kPrimaryBlue, size: 20),
                   onPressed: () {
                     final parent = p.dirname(_videoBrowserPath);
                     if (parent != _videoBrowserPath) _loadVideoBrowserDir(parent);
@@ -2748,7 +2829,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         Divider(height: 1, color: Theme.of(context).cardColor),
         Expanded(
           child: _videoBrowserLoading
-              ? Center(child: CircularProgressIndicator(color: Color(0xFF818CF8)))
+              ? Center(child: CircularProgressIndicator(color: kPrimaryBlue))
               : _videoBrowserItems.isEmpty
                   ? Center(
                       child: Column(
@@ -2774,7 +2855,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                         return ListTile(
                           leading: Icon(
                             isDir ? Icons.folder : Icons.videocam,
-                            color: isDir ? Color(0xFFFBBF24) : Color(0xFF818CF8),
+                            color: isDir ? Color(0xFFFBBF24) : kPrimaryBlue,
                             size: 20,
                           ),
                           title: Text(name, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13)),
@@ -2879,7 +2960,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               if (hasVideoUrl)
                 _buildMediaCard(
                   icon: Icons.videocam,
-                  iconColor: Color(0xFF818CF8),
+                  iconColor: kPrimaryBlue,
                   title: _playVideoTitle ?? 'Video',
                   subtitle: 'Video Player',
                   onTap: () {
@@ -2900,7 +2981,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             ),
             SizedBox(height: 8),
             _buildMediaCard(
-              icon: Icons.videocam, iconColor: Color(0xFF818CF8),
+              icon: Icons.videocam, iconColor: kPrimaryBlue,
               title: 'Video Player', subtitle: 'Browse and watch video files',
               onTap: () => _switchToView('player'),
             ),
@@ -2912,7 +2993,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             ),
             SizedBox(height: 8),
             _buildMediaCard(
-              icon: Icons.description, iconColor: Color(0xFFF87171),
+              icon: Icons.description, iconColor: kDanger,
               title: 'Documents', subtitle: 'PDF, EPUB, DOCX, TXT and more',
               onTap: () => _switchToView('documents'),
             ),
@@ -3563,7 +3644,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                       child: Container(
                         padding: EdgeInsets.symmetric(horizontal: 10),
                         decoration: BoxDecoration(
-                          border: Border(bottom: BorderSide(color: active ? Color(0xFF818CF8) : Colors.transparent, width: 2)),
+                          border: Border(bottom: BorderSide(color: active ? kPrimaryBlue : Colors.transparent, width: 2)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -3584,7 +3665,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ),
         // Toolbar
         Container(
-          color: Color(0xFF1E293B),
+          color: kSurfaceElevated,
           padding: EdgeInsets.all(6),
           child: Row(
             children: [
@@ -3599,12 +3680,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 6),
                 decoration: BoxDecoration(
-                  color: Color(0xFF334155),
+                  color: kSurfaceBorder,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: DropdownButton<String>(
                   value: _currentLang,
-                  dropdownColor: Color(0xFF1E293B),
+                  dropdownColor: kSurfaceElevated,
                   underline: SizedBox(),
                   style: TextStyle(fontSize: 12, color: Colors.white),
                   items: LANG_OPTIONS.map((l) => DropdownMenuItem(value: l, child: Text(l, style: TextStyle(fontSize: 12)))).toList(),
@@ -4035,7 +4116,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         return StatefulBuilder(
           builder: (ctx, setDlgState) {
             return AlertDialog(
-              backgroundColor: Color(0xFF1E293B),
+              backgroundColor: kSurfaceElevated,
               title: Text('Clear Browsing Data', style: TextStyle(color: Colors.white, fontSize: 18)),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -4069,7 +4150,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+                  child: Text('Cancel', style: TextStyle(color: kTextSecondary)),
                 ),
                 TextButton(
                   onPressed: () async {
@@ -4086,7 +4167,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     }
                     _showToast('Browsing data cleared');
                   },
-                  child: Text('Clear', style: TextStyle(color: Color(0xFFF87171))),
+                  child: Text('Clear', style: TextStyle(color: kDanger)),
                 ),
               ],
             );
@@ -4100,23 +4181,23 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     showDialog(
       context: context,
       builder: (ctx2) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Text('Bookmarks', style: TextStyle(color: Colors.white)),
         content: _shortcuts.isEmpty
-            ? Text('No bookmarks', style: TextStyle(color: Color(0xFF94A3B8)))
+            ? Text('No bookmarks', style: TextStyle(color: kTextSecondary))
             : SizedBox(
                 width: double.minPositive,
                 child: ListView(
                   shrinkWrap: true,
                   children: _shortcuts.map((s) => ListTile(
                     title: Text(s.$1, style: TextStyle(color: Colors.white)),
-                    subtitle: Text(s.$2, style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                    subtitle: Text(s.$2, style: TextStyle(color: kTextSecondary, fontSize: 11)),
                     onTap: () { Navigator.of(ctx2).pop(); _navigateOrOpenNewTab(s.$2); },
                   )).toList(),
                 ),
               ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx2).pop(), child: Text('Close', style: TextStyle(color: Color(0xFF94A3B8)))),
+          TextButton(onPressed: () => Navigator.of(ctx2).pop(), child: Text('Close', style: TextStyle(color: kTextSecondary))),
         ],
       ),
     );
@@ -4188,57 +4269,56 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildWebHomeContent() {
-    final isDesktop = MediaQuery.of(context).size.width >= 900;
-    final isWide = MediaQuery.of(context).size.width >= 1200;
+    final isWide = Responsive.isDesktop(context);
     return RefreshIndicator(
       onRefresh: _refreshNewsFeed,
       child: SingleChildScrollView(
         physics: AlwaysScrollableScrollPhysics(),
         child: Center(
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: isWide ? 1100 : 800),
+            constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
             child: Column(
               children: [
-                SizedBox(height: 32),
+                SizedBox(height: kSpaceXXL),
                 Image.asset('assets/makaw_logo_64.png', width: 64, height: 64, fit: BoxFit.contain),
-                SizedBox(height: 12),
+                SizedBox(height: kSpaceMD),
                 Text('Makaw',
-                  style: TextStyle(fontFamily: 'Outfit', fontSize: 38, fontWeight: FontWeight.w500, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
-                SizedBox(height: 6),
+                  style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextHero, fontWeight: kWeightMedium, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
+                SizedBox(height: kSpaceXS),
                 Text('Code Studio · Creative Platform',
-                  style: TextStyle(fontSize: 15, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-                SizedBox(height: 28),
+                  style: TextStyle(fontSize: kTextSubtitle, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+                SizedBox(height: kSpaceXL),
                 // ─── Feature Grid ─────────────────────────────────────
                 Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: _buildWebFeatureGrid(isDesktop),
+                  padding: EdgeInsets.symmetric(horizontal: kSpaceBase),
+                  child: _buildWebFeatureGrid(isWide),
                 ),
-                SizedBox(height: 20),
+                SizedBox(height: kSpaceLG),
                 // ─── AI Assistant ─────────────────────────────────────
                 Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: InkWell(
+                  padding: EdgeInsets.symmetric(horizontal: kSpaceBase),
+                    child: InkWell(
                     onTap: _showAIChat,
-                    borderRadius: BorderRadius.circular(24),
+                    borderRadius: BorderRadius.circular(kRadiusXL),
                     child: Container(
                       width: double.infinity,
-                      padding: EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                      padding: EdgeInsets.symmetric(vertical: 14, horizontal: kSpaceBase),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [Color(0xFF4285F4), Color(0xFF9B59B6)],
                           begin: Alignment.topLeft, end: Alignment.bottomRight,
                         ),
-                        borderRadius: BorderRadius.circular(24),
+                        borderRadius: BorderRadius.circular(kRadiusXL),
                       ),
                       child: Row(
                         children: [
                           Icon(Icons.auto_awesome, color: Colors.white, size: 22),
-                          SizedBox(width: 12),
+                          SizedBox(width: kSpaceMD),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('AI Assistant', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                              Text('Powered by Gemini', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                              Text('AI Assistant', style: TextStyle(color: Colors.white, fontSize: kTextBody, fontWeight: kWeightSemibold)),
+                              Text('Powered by Gemini', style: TextStyle(color: Colors.white70, fontSize: kTextCaption)),
                             ],
                           ),
                           Spacer(),
@@ -4267,7 +4347,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(children: [
-                                  Icon(Icons.music_note, color: Color(0xFF818CF8), size: 22),
+                                  Icon(Icons.music_note, color: kPrimaryBlue, size: 22),
                                   SizedBox(width: 8),
                                   Text('Music', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
                                 ]),
@@ -4276,25 +4356,25 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                                   Text(_musicService.currentSong!.displayTitle,
                                     style: TextStyle(color: Colors.white70, fontSize: 12), overflow: TextOverflow.ellipsis, maxLines: 1),
                                   Text(_musicService.currentSong!.displayArtist,
-                                    style: TextStyle(color: Color(0xFF666680), fontSize: 11), overflow: TextOverflow.ellipsis, maxLines: 1),
+                                    style: TextStyle(color: kTextTertiary, fontSize: 11), overflow: TextOverflow.ellipsis, maxLines: 1),
                                   SizedBox(height: 8),
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                     children: [
-                                      IconButton(icon: Icon(Icons.skip_previous, color: Color(0xFF818CF8), size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.previousSong()),
-                                      IconButton(icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: Color(0xFF818CF8), size: 24), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.togglePlayPause()),
-                                      IconButton(icon: Icon(Icons.skip_next, color: Color(0xFF818CF8), size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.nextSong()),
+                                      IconButton(icon: Icon(Icons.skip_previous, color: kPrimaryBlue, size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.previousSong()),
+                                      IconButton(icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: kPrimaryBlue, size: 24), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.togglePlayPause()),
+                                      IconButton(icon: Icon(Icons.skip_next, color: kPrimaryBlue, size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.nextSong()),
                                     ],
                                   ),
                                 ] else ...[
-                                  Text('No music playing', style: TextStyle(color: Color(0xFF666680), fontSize: 12)),
+                                  Text('No music playing', style: TextStyle(color: kTextTertiary, fontSize: 12)),
                                   SizedBox(height: 4),
-                                  Text('${_musicService.allSongs.length} songs', style: TextStyle(color: Color(0xFF666680), fontSize: 11)),
+                                  Text('${_musicService.allSongs.length} songs', style: TextStyle(color: kTextTertiary, fontSize: 11)),
                                   SizedBox(height: 8),
                                   Container(
                                     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(color: Color(0xFF818CF8).withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                                    child: Text('Open Player', style: TextStyle(color: Color(0xFF818CF8), fontSize: 11, fontWeight: FontWeight.w600)),
+                                    decoration: BoxDecoration(color: kPrimaryBlue.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                                    child: Text('Open Player', style: TextStyle(color: kPrimaryBlue, fontSize: 11, fontWeight: FontWeight.w600)),
                                   ),
                                 ],
                               ],
@@ -4316,19 +4396,19 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(children: [
-                                  Icon(Icons.videocam, color: Color(0xFFF87171), size: 22),
+                                  Icon(Icons.videocam, color: kDanger, size: 22),
                                   SizedBox(width: 8),
                                   Text('Videos', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
                                 ]),
                                 SizedBox(height: 10),
-                                Text('${_videoService.allVideos.length} videos', style: TextStyle(color: Color(0xFF666680), fontSize: 12)),
+                                Text('${_videoService.allVideos.length} videos', style: TextStyle(color: kTextTertiary, fontSize: 12)),
                                 SizedBox(height: 4),
-                                Text('${_videoService.folders.length} folders', style: TextStyle(color: Color(0xFF666680), fontSize: 11)),
+                                Text('${_videoService.folders.length} folders', style: TextStyle(color: kTextTertiary, fontSize: 11)),
                                 SizedBox(height: 8),
                                 Container(
                                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(color: Color(0xFFF87171).withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                                  child: Text('Open Player', style: TextStyle(color: Color(0xFFF87171), fontSize: 11, fontWeight: FontWeight.w600)),
+                                  decoration: BoxDecoration(color: kDanger.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                                  child: Text('Open Player', style: TextStyle(color: kDanger, fontSize: 11, fontWeight: FontWeight.w600)),
                                 ),
                               ],
                             ),
@@ -4390,48 +4470,48 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   Widget _buildWebFeatureGrid(bool isDesktop) {
     final features = [
-      (Icons.code, 'Code Studio', 'studio', Color(0xFF818CF8)),
-      (Icons.terminal, 'Terminal', 'terminal', Color(0xFF22D3EE)),
-      (Icons.music_note, 'Music Player', 'music', Color(0xFF818CF8)),
-      (Icons.videocam, 'Video Player', 'player', Color(0xFFF87171)),
-      (Icons.photo_library, 'Gallery', 'images', Color(0xFF34D399)),
-      (Icons.description, 'Documents', 'documents', Color(0xFFFBBF24)),
-      (Icons.content_paste, 'Snippets', 'snippets', Color(0xFFA78BFA)),
-      (Icons.cloud, 'Cloud Sync', 'cloud', Color(0xFF60A5FA)),
-      (Icons.history, 'History', 'history', Color(0xFFF472B6)),
+      (Icons.code, 'Code Studio', 'studio', kStudioAccent),
+      (Icons.terminal, 'Terminal', 'terminal', kTerminalAccent),
+      (Icons.music_note, 'Music Player', 'music', kMusicAccent),
+      (Icons.videocam, 'Video Player', 'player', kVideoAccent),
+      (Icons.photo_library, 'Gallery', 'images', kImageAccent),
+      (Icons.description, 'Documents', 'documents', kDocumentAccent),
+      (Icons.content_paste, 'Snippets', 'snippets', kSnippetAccent),
+      (Icons.cloud, 'Cloud Sync', 'cloud', kCloudAccent),
+      (Icons.history, 'History', 'history', kHistoryAccent),
     ];
-    final crossAxisCount = isDesktop ? 3 : 2;
-    final childAspectRatio = isDesktop ? 2.2 : 2.6;
+    final crossAxisCount = Responsive.gridColumns(context);
+    final childAspectRatio = crossAxisCount <= 2 ? 2.6 : 2.2;
     return GridView.builder(
       shrinkWrap: true,
       physics: NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
         childAspectRatio: childAspectRatio,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
+        crossAxisSpacing: kSpaceMD,
+        mainAxisSpacing: kSpaceMD,
       ),
       itemCount: features.length,
       itemBuilder: (ctx, i) {
         final f = features[i];
         return InkWell(
           onTap: () => _switchToView(f.$3),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(kRadiusLG),
           child: Container(
-            padding: EdgeInsets.all(14),
+            padding: EdgeInsets.all(kSpaceBase),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(kRadiusLG),
             ),
             child: Row(
               children: [
                 Container(
                   width: 40, height: 40,
-                  decoration: BoxDecoration(color: f.$4.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(color: f.$4.withOpacity(0.15), borderRadius: BorderRadius.circular(kRadiusMD)),
                   child: Icon(f.$1, color: f.$4, size: 22),
                 ),
-                SizedBox(width: 12),
-                Expanded(child: Text(f.$2, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface))),
+                SizedBox(width: kSpaceMD),
+                Expanded(child: Text(f.$2, style: TextStyle(fontSize: kTextBody, fontWeight: kWeightSemibold, color: Theme.of(context).colorScheme.onSurface))),
                 Icon(Icons.arrow_forward_ios, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3), size: 14),
               ],
             ),
@@ -4465,7 +4545,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     final activeTab = activeIndex >= 0 ? _browserTabs[activeIndex] : null;
     final isLoading = activeTab != null && (_tabProgress[activeTab.id] ?? 0) < 100;
     return Container(
-      color: Color(0xFF0F172A),
+      color: kSurfaceBase,
       child: Stack(
         children: [
           if (_browserTabs.isNotEmpty && activeIndex >= 0)
@@ -4475,7 +4555,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             ),
           if (isLoading)
             Container(
-              color: Color(0xFF0F172A),
+              color: kSurfaceBase,
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -4722,7 +4802,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.music_note, color: Color(0xFF818CF8), size: 22),
+                              Icon(Icons.music_note, color: kPrimaryBlue, size: 22),
                               SizedBox(width: 8),
                               Text('Music', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
                             ],
@@ -4733,14 +4813,14 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                               style: TextStyle(color: Colors.white70, fontSize: 12),
                               overflow: TextOverflow.ellipsis, maxLines: 1),
                             Text(_musicService.currentSong!.displayArtist,
-                              style: TextStyle(color: Color(0xFF666680), fontSize: 11),
+                              style: TextStyle(color: kTextTertiary, fontSize: 11),
                               overflow: TextOverflow.ellipsis, maxLines: 1),
                             SizedBox(height: 8),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               children: [
                                 IconButton(
-                                  icon: Icon(Icons.skip_previous, color: Color(0xFF818CF8), size: 18),
+                                  icon: Icon(Icons.skip_previous, color: kPrimaryBlue, size: 18),
                                   constraints: BoxConstraints(minWidth: 28, minHeight: 28),
                                   padding: EdgeInsets.zero,
                                   onPressed: () => _musicService.previousSong(),
@@ -4748,14 +4828,14 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                                 IconButton(
                                   icon: Icon(
                                     _musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                    color: Color(0xFF818CF8), size: 24,
+                                    color: kPrimaryBlue, size: 24,
                                   ),
                                   constraints: BoxConstraints(minWidth: 28, minHeight: 28),
                                   padding: EdgeInsets.zero,
                                   onPressed: () => _musicService.togglePlayPause(),
                                 ),
                                 IconButton(
-                                  icon: Icon(Icons.skip_next, color: Color(0xFF818CF8), size: 18),
+                                  icon: Icon(Icons.skip_next, color: kPrimaryBlue, size: 18),
                                   constraints: BoxConstraints(minWidth: 28, minHeight: 28),
                                   padding: EdgeInsets.zero,
                                   onPressed: () => _musicService.nextSong(),
@@ -4764,18 +4844,18 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                             ),
                           ] else ...[
                             Text('No music playing',
-                              style: TextStyle(color: Color(0xFF666680), fontSize: 12)),
+                              style: TextStyle(color: kTextTertiary, fontSize: 12)),
                             SizedBox(height: 4),
                             Text('${_musicService.allSongs.length} songs',
-                              style: TextStyle(color: Color(0xFF666680), fontSize: 11)),
+                              style: TextStyle(color: kTextTertiary, fontSize: 11)),
                             SizedBox(height: 8),
                             Container(
                               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                               decoration: BoxDecoration(
-                                color: Color(0xFF818CF8).withOpacity(0.2),
+                                color: kPrimaryBlue.withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: Text('Open Player', style: TextStyle(color: Color(0xFF818CF8), fontSize: 11, fontWeight: FontWeight.w600)),
+                              child: Text('Open Player', style: TextStyle(color: kPrimaryBlue, fontSize: 11, fontWeight: FontWeight.w600)),
                             ),
                           ],
                         ],
@@ -4798,25 +4878,25 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.videocam, color: Color(0xFFF87171), size: 22),
+                              Icon(Icons.videocam, color: kDanger, size: 22),
                               SizedBox(width: 8),
                               Text('Videos', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
                             ],
                           ),
                           SizedBox(height: 10),
                           Text('${_videoService.allVideos.length} videos',
-                            style: TextStyle(color: Color(0xFF666680), fontSize: 12)),
+                            style: TextStyle(color: kTextTertiary, fontSize: 12)),
                           SizedBox(height: 4),
                           Text('${_videoService.folders.length} folders',
-                            style: TextStyle(color: Color(0xFF666680), fontSize: 11)),
+                            style: TextStyle(color: kTextTertiary, fontSize: 11)),
                           SizedBox(height: 8),
                           Container(
                             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
-                              color: Color(0xFFF87171).withOpacity(0.2),
+                              color: kDanger.withOpacity(0.2),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: Text('Open Player', style: TextStyle(color: Color(0xFFF87171), fontSize: 11, fontWeight: FontWeight.w600)),
+                            child: Text('Open Player', style: TextStyle(color: kDanger, fontSize: 11, fontWeight: FontWeight.w600)),
                           ),
                         ],
                       ),
@@ -5034,12 +5114,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         return StatefulBuilder(
           builder: (_, setDialogState) {
             return AlertDialog(
-              backgroundColor: const Color(0xFF1E293B),
+              backgroundColor: kSurfaceElevated,
               title: Text('Edit Shortcuts', style: TextStyle(color: Colors.white)),
               content: SizedBox(
                 width: double.maxFinite,
                 child: list.isEmpty
-                    ? Text('No shortcuts. Tap + to add one.', style: TextStyle(color: Color(0xFF94A3B8)))
+                    ? Text('No shortcuts. Tap + to add one.', style: TextStyle(color: kTextSecondary))
                     : ListView.builder(
                         shrinkWrap: true,
                         itemCount: list.length,
@@ -5048,7 +5128,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                           return ListTile(
                             dense: true,
                             title: Text(item.$1, style: TextStyle(color: Colors.white, fontSize: 14)),
-                            subtitle: Text(item.$2, style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                            subtitle: Text(item.$2, style: TextStyle(color: kTextSecondary, fontSize: 12)),
                             trailing: IconButton(
                               icon: Icon(Icons.delete_outline, color: Color(0xFFEF4444), size: 18),
                               onPressed: () {
@@ -5074,7 +5154,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 ),
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+                  child: Text('Cancel', style: TextStyle(color: kTextSecondary)),
                 ),
               ],
             );
@@ -5100,7 +5180,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     final added = await showDialog<bool>(
       context: parentCtx,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Text('Add Shortcut', style: TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -5110,8 +5190,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               style: TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 labelText: 'Name',
-                labelStyle: TextStyle(color: Color(0xFF94A3B8)),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF334155))),
+                labelStyle: TextStyle(color: kTextSecondary),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
                 focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: kAccentTeal)),
               ),
             ),
@@ -5121,8 +5201,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               style: TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 labelText: 'URL',
-                labelStyle: TextStyle(color: Color(0xFF94A3B8)),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF334155))),
+                labelStyle: TextStyle(color: kTextSecondary),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
                 focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: kAccentTeal)),
               ),
             ),
@@ -5131,7 +5211,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+            child: Text('Cancel', style: TextStyle(color: kTextSecondary)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kAccentTeal),
@@ -5233,7 +5313,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       builder: (ctx) => StatefulBuilder(
         builder: (ctx2, setDlgState) {
           return AlertDialog(
-            backgroundColor: const Color(0xFF1E293B),
+            backgroundColor: kSurfaceElevated,
             title: Text('Browser Settings', style: TextStyle(color: Colors.white, fontSize: 18)),
             content: SingleChildScrollView(
               child: Column(
@@ -5322,7 +5402,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Row(mainAxisSize: MainAxisSize.min, children: [
           Image.asset('assets/makaw_logo_28.png', width: 28, height: 28),
           SizedBox(width: 8),
@@ -5332,28 +5412,28 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Code Studio + Hybrid Browser', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+            Text('Code Studio + Hybrid Browser', style: TextStyle(color: kTextSecondary, fontSize: 13)),
             SizedBox(height: 12),
-            Text('Version 1.0.0', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+            Text('Version 1.0.0', style: TextStyle(color: kTextSecondary, fontSize: 12)),
             SizedBox(height: 4),
-            Text('Powered by Flutter, InAppWebView, Gemini', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+            Text('Powered by Flutter, InAppWebView, Gemini', style: TextStyle(color: kTextSecondary, fontSize: 12)),
             SizedBox(height: 12),
             GestureDetector(
               onTap: () => launchUrl(Uri.parse('https://hexadigitall.com')),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Developed by ', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
-                  Text('Hexadigitall', style: TextStyle(color: Color(0xFF818CF8), fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text('Developed by ', style: TextStyle(color: kTextSecondary, fontSize: 12)),
+                  Text('Hexadigitall', style: TextStyle(color: kPrimaryBlue, fontSize: 12, fontWeight: FontWeight.w600)),
                   SizedBox(width: 4),
-                  Icon(Icons.open_in_new, size: 12, color: Color(0xFF818CF8)),
+                  Icon(Icons.open_in_new, size: 12, color: kPrimaryBlue),
                 ],
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('Close', style: TextStyle(color: Color(0xFF94A3B8)))),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('Close', style: TextStyle(color: kTextSecondary))),
         ],
       ),
     );
@@ -6789,9 +6869,9 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Text('Save Password?', style: TextStyle(color: Colors.white)),
-        content: Text('Save login for $domain?', style: TextStyle(color: Color(0xFF94A3B8))),
+        content: Text('Save login for $domain?', style: TextStyle(color: kTextSecondary)),
         actions: [
           TextButton(
             onPressed: () {
@@ -6800,7 +6880,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
               _pendingPasswordUsername = '';
               _pendingPasswordPassword = '';
             },
-            child: Text('Never', style: TextStyle(color: Color(0xFF64748B))),
+            child: Text('Never', style: TextStyle(color: kTextSecondary)),
           ),
           TextButton(
             onPressed: () {
@@ -6809,7 +6889,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
               _pendingPasswordUsername = '';
               _pendingPasswordPassword = '';
             },
-            child: Text('Not now', style: TextStyle(color: Color(0xFF94A3B8))),
+            child: Text('Not now', style: TextStyle(color: kTextSecondary)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF14B8A6)),
@@ -6838,7 +6918,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     if (!context.mounted) return;
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E293B),
+      backgroundColor: kSurfaceElevated,
       isScrollControlled: true,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) {
@@ -6877,7 +6957,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                     if (fixedEntries.isEmpty)
                       Expanded(
                         child: Center(
-                          child: Text('No saved passwords', style: TextStyle(color: Color(0xFF64748B))),
+                          child: Text('No saved passwords', style: TextStyle(color: kTextSecondary)),
                         ),
                       )
                     else
@@ -6889,12 +6969,12 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                             final entry = fixedEntries[i];
                             return ListTile(
                               title: Text(entry.domain, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-                              subtitle: Text(entry.username, style: TextStyle(color: Color(0xFF94A3B8))),
+                              subtitle: Text(entry.username, style: TextStyle(color: kTextSecondary)),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   IconButton(
-                                    icon: Icon(Icons.copy, color: Color(0xFF94A3B8), size: 18),
+                                    icon: Icon(Icons.copy, color: kTextSecondary, size: 18),
                                     onPressed: () {
                                       Navigator.of(ctx).pop();
                                       _showToast('Password copied');
@@ -6932,7 +7012,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Text('Import Data', style: TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -6953,7 +7033,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+            child: Text('Cancel', style: TextStyle(color: kTextSecondary)),
           ),
         ],
       ),
@@ -6966,7 +7046,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
       child: OutlinedButton.icon(
         style: OutlinedButton.styleFrom(
           foregroundColor: Colors.white,
-          side: BorderSide(color: Color(0xFF334155)),
+          side: BorderSide(color: kSurfaceBorder),
           padding: EdgeInsets.symmetric(vertical: 14),
         ),
         icon: Icon(icon, size: 20),
@@ -6991,22 +7071,22 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: kSurfaceElevated,
         title: Text('AI Settings', style: TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('Enter your Gemini API key to enable AI features.',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                style: TextStyle(color: kTextSecondary, fontSize: 13)),
             SizedBox(height: 12),
             TextField(
               controller: ctrl,
               style: TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 labelText: 'Gemini API Key',
-                labelStyle: TextStyle(color: Color(0xFF94A3B8)),
-                border: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF334155))),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF334155))),
+                labelStyle: TextStyle(color: kTextSecondary),
+                border: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
                 isDense: true,
               ),
               obscureText: true,
@@ -7016,7 +7096,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+            child: Text('Cancel', style: TextStyle(color: kTextSecondary)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF14B8A6)),
@@ -7219,10 +7299,10 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
       children: [
         Container(
           padding: EdgeInsets.all(12),
-          color: Color(0xFF1E293B),
+          color: kSurfaceElevated,
           child: Row(
             children: [
-              Icon(Icons.wifi_tethering, color: Color(0xFF818CF8)),
+              Icon(Icons.wifi_tethering, color: kPrimaryBlue),
               SizedBox(width: 8),
               Text('Media Detector', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               Spacer(),
@@ -7260,7 +7340,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                   itemBuilder: (ctx, i) {
                     final item = _pendingMedia[i];
                     return Card(
-                      color: Color(0xFF1E293B),
+                      color: kSurfaceElevated,
                       margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       child: Padding(
                         padding: EdgeInsets.all(8),
@@ -7269,7 +7349,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                           children: [
                             Row(
                               children: [
-                                Icon(item.type == 'video' ? Icons.movie : item.type == 'audio' ? Icons.music_note : Icons.image, color: Color(0xFF818CF8), size: 18),
+                                Icon(item.type == 'video' ? Icons.movie : item.type == 'audio' ? Icons.music_note : Icons.image, color: kPrimaryBlue, size: 18),
                                 SizedBox(width: 6),
                                 Expanded(
                                   child: Column(
@@ -7361,7 +7441,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
       children: [
         Container(
           padding: EdgeInsets.all(8),
-          color: Color(0xFF1E293B),
+          color: kSurfaceElevated,
           child: TextField(
             decoration: InputDecoration(
               hintText: 'Search snippets...',
@@ -7382,7 +7462,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                     return ListTile(
                       dense: true,
                       title: Text(s['name']!, style: TextStyle(fontSize: 13)),
-                      trailing: Icon(Icons.content_paste, size: 16, color: Color(0xFF818CF8)),
+                      trailing: Icon(Icons.content_paste, size: 16, color: kPrimaryBlue),
                       onTap: () {
                         _openFileInEditor('snippet.dart', s['code'] ?? '');
                         _switchToView('studio');
@@ -7420,13 +7500,13 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
               final lang = p['language'] ?? 'javascript';
               final updated = p['updated_at'] ?? '';
               return Card(
-                color: Color(0xFF1E293B),
+                color: kSurfaceElevated,
                 margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: ListTile(
-                  leading: Icon(Icons.insert_drive_file, color: Color(0xFF818CF8)),
+                  leading: Icon(Icons.insert_drive_file, color: kPrimaryBlue),
                   title: Text(name, style: TextStyle(fontSize: 14)),
                   subtitle: Text('$lang  •  ${updated.toString().substring(0, 10)}', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                  trailing: Icon(Icons.open_in_new, size: 16, color: Color(0xFF818CF8)),
+                  trailing: Icon(Icons.open_in_new, size: 16, color: kPrimaryBlue),
                   onTap: () async {
                     setState(() {
                       _currentProject = name;
@@ -7485,7 +7565,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
               hint: Text('Branch', style: TextStyle(fontSize: 13)),
               isExpanded: true,
               style: TextStyle(fontSize: 13, color: Colors.white),
-              dropdownColor: Color(0xFF1E293B),
+              dropdownColor: kSurfaceElevated,
               items: _branches.map((b) => DropdownMenuItem(value: b, child: Text(b, style: TextStyle(fontSize: 13)))).toList(),
               onChanged: (b) => _gitCheckout(b!),
             )),
@@ -7515,7 +7595,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
           Expanded(
             child: Container(
               padding: EdgeInsets.all(6),
-              decoration: BoxDecoration(color: Color(0xFF0F172A), border: Border.all(color: Color(0xFF334155))),
+              decoration: BoxDecoration(color: kSurfaceBase, border: Border.all(color: kSurfaceBorder)),
               child: SingleChildScrollView(
                 child: SelectableText(_gitOutput, style: TextStyle(fontFamily: 'monospace', fontSize: 10, color: Color(0xFFE2E8F0))),
               ),
@@ -7542,11 +7622,11 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(Icons.cloud, size: 48, color: Color(0xFF818CF8)),
+          Icon(Icons.cloud, size: 48, color: kPrimaryBlue),
           SizedBox(height: 12),
           Text('iCloud / Google Drive Sync', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
           SizedBox(height: 24),
-          _cloudBtn(Icons.cloud_upload, 'Backup to Google Drive', _backupToDrive, Color(0xFF818CF8)),
+          _cloudBtn(Icons.cloud_upload, 'Backup to Google Drive', _backupToDrive, kPrimaryBlue),
           SizedBox(height: 12),
           _cloudBtn(Icons.cloud_download, 'Restore from Google Drive', _restoreFromDrive, Color(0xFF6366F1)),
           SizedBox(height: 24),
@@ -7577,7 +7657,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
   Widget _buildTerminalTab() {
     if (kIsWeb) {
       return Container(
-        decoration: BoxDecoration(color: Color(0xFF0F172A)),
+        decoration: BoxDecoration(color: kSurfaceBase),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -7592,7 +7672,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     }
     _startPty();
     return Container(
-      decoration: BoxDecoration(color: Color(0xFF0F172A)),
+      decoration: BoxDecoration(color: kSurfaceBase),
       child: Column(
         children: [
           Expanded(
@@ -7604,7 +7684,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
             ),
           ),
           Container(
-            color: Color(0xFF1E293B),
+            color: kSurfaceElevated,
             padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
               children: [

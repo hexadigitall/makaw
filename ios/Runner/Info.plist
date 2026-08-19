@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>makaw_mobile</string>
+	<string>Makaw</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -70,5 +70,11 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Makaw needs camera access to scan QR codes and take photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Makaw needs photo library access to browse, share, and save images.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Makaw uses your location to provide localized news feeds.</string>
 </dict>
 </plist>
