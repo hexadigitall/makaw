@@ -433,29 +433,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   }
 
   Widget? _buildFeaturePage(String view) {
-    if (kIsWeb && !['history', 'studio', 'snippets', 'cloud'].contains(view)) {
-      return _buildFeatureScaffold(view[0].toUpperCase() + view.substring(1), Icons.phone_android,
-        Center(
-          child: Padding(
-            padding: EdgeInsets.all(32),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.phone_android, size: 48, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
-              SizedBox(height: 16),
-              Text('Desktop Only', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-              SizedBox(height: 8),
-              Text('This feature requires the native Makaw app.\nDownload it for the full experience.', textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-              SizedBox(height: 20),
-              ElevatedButton.icon(
-                onPressed: () => launchUrl(Uri.parse('https://github.com/hexadigitall/makaw/releases/latest'), mode: LaunchMode.externalApplication),
-                icon: Icon(Icons.download),
-                label: Text('Download Makaw'),
-                style: ElevatedButton.styleFrom(backgroundColor: kAccentTeal, foregroundColor: Colors.white, padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-              ),
-            ]),
-          ),
-        ));
-    }
     switch (view) {
       case 'history': return MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url));
       case 'studio': return _buildFeatureScaffold('Code Studio', Icons.code, _buildStudioTab());
@@ -3074,7 +3051,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               if (context.mounted) Navigator.of(context).pop();
             },
             child: SafeArea(
-              child: kIsWeb ? _buildWebLandingPage() : (_currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink()),
+              child: kIsWeb ? _buildWebContent() : (_currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink()),
             ),
           ),
         ],
@@ -3363,6 +3340,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   Widget _buildDrawer(BuildContext context) {
     final items = kIsWeb ? [
       ('Code Studio', Icons.code, 'studio'),
+      ('Terminal', Icons.terminal, 'terminal'),
+      ('Music Player', Icons.music_note, 'music'),
+      ('Video Player', Icons.videocam, 'player'),
+      ('Image Viewer', Icons.photo_library, 'images'),
+      ('Documents', Icons.description, 'documents'),
       ('Snippets', Icons.content_paste, 'snippets'),
       ('Cloud Sync', Icons.cloud, 'cloud'),
       ('History', Icons.history, 'history'),
@@ -3809,7 +3791,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           else
             IconButton(icon: Icon(Icons.visibility_off, color: iconColor), onPressed: _goHome),
           Spacer(),
-          _buildOverflowMenu(),
+        IconButton(
+          icon: Icon(Icons.more_horiz, color: Theme.of(context).colorScheme.onSurface),
+          onPressed: _showEllipsisMenu,
+        ),
         ]),
       );
     }
@@ -4168,6 +4153,310 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ),
         if (!showHome && !isTypeView && _musicService.currentSong != null) _buildMiniMusicPlayer(),
       ],
+    );
+  }
+
+  // ─── Web Content ────────────────────────────────────────────────────────
+  Widget _buildWebContent() {
+    return Column(
+      children: [
+        _buildWebHeader(),
+        Expanded(
+          child: _buildWebHomeContent(),
+        ),
+        if (_musicService.currentSong != null) _buildMiniMusicPlayer(),
+      ],
+    );
+  }
+
+  Widget _buildWebHeader() {
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(children: [
+        IconButton(
+          icon: Icon(Icons.menu, color: Theme.of(context).colorScheme.onSurface),
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
+        Spacer(),
+        IconButton(
+          icon: Icon(Icons.more_horiz, color: Theme.of(context).colorScheme.onSurface),
+          onPressed: _showEllipsisMenu,
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildWebHomeContent() {
+    final isDesktop = MediaQuery.of(context).size.width >= 900;
+    final isWide = MediaQuery.of(context).size.width >= 1200;
+    return RefreshIndicator(
+      onRefresh: _refreshNewsFeed,
+      child: SingleChildScrollView(
+        physics: AlwaysScrollableScrollPhysics(),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: isWide ? 1100 : 800),
+            child: Column(
+              children: [
+                SizedBox(height: 32),
+                Image.asset('assets/makaw_logo_64.png', width: 64, height: 64, fit: BoxFit.contain),
+                SizedBox(height: 12),
+                Text('Makaw',
+                  style: TextStyle(fontFamily: 'Outfit', fontSize: 38, fontWeight: FontWeight.w500, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
+                SizedBox(height: 6),
+                Text('Code Studio · Creative Platform',
+                  style: TextStyle(fontSize: 15, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+                SizedBox(height: 28),
+                // ─── Feature Grid ─────────────────────────────────────
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: _buildWebFeatureGrid(isDesktop),
+                ),
+                SizedBox(height: 20),
+                // ─── AI Assistant ─────────────────────────────────────
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: InkWell(
+                    onTap: _showAIChat,
+                    borderRadius: BorderRadius.circular(24),
+                    child: Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF4285F4), Color(0xFF9B59B6)],
+                          begin: Alignment.topLeft, end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.auto_awesome, color: Colors.white, size: 22),
+                          SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('AI Assistant', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                              Text('Powered by Gemini', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                            ],
+                          ),
+                          Spacer(),
+                          Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 14),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 20),
+                // ─── Media Players ────────────────────────────────────
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => _switchToView('music'),
+                          child: Container(
+                            padding: EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(children: [
+                                  Icon(Icons.music_note, color: Color(0xFF818CF8), size: 22),
+                                  SizedBox(width: 8),
+                                  Text('Music', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                                ]),
+                                SizedBox(height: 10),
+                                if (_musicService.currentSong != null) ...[
+                                  Text(_musicService.currentSong!.displayTitle,
+                                    style: TextStyle(color: Colors.white70, fontSize: 12), overflow: TextOverflow.ellipsis, maxLines: 1),
+                                  Text(_musicService.currentSong!.displayArtist,
+                                    style: TextStyle(color: Color(0xFF666680), fontSize: 11), overflow: TextOverflow.ellipsis, maxLines: 1),
+                                  SizedBox(height: 8),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                    children: [
+                                      IconButton(icon: Icon(Icons.skip_previous, color: Color(0xFF818CF8), size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.previousSong()),
+                                      IconButton(icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: Color(0xFF818CF8), size: 24), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.togglePlayPause()),
+                                      IconButton(icon: Icon(Icons.skip_next, color: Color(0xFF818CF8), size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.nextSong()),
+                                    ],
+                                  ),
+                                ] else ...[
+                                  Text('No music playing', style: TextStyle(color: Color(0xFF666680), fontSize: 12)),
+                                  SizedBox(height: 4),
+                                  Text('${_musicService.allSongs.length} songs', style: TextStyle(color: Color(0xFF666680), fontSize: 11)),
+                                  SizedBox(height: 8),
+                                  Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(color: Color(0xFF818CF8).withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                                    child: Text('Open Player', style: TextStyle(color: Color(0xFF818CF8), fontSize: 11, fontWeight: FontWeight.w600)),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => _switchToView('player'),
+                          child: Container(
+                            padding: EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(children: [
+                                  Icon(Icons.videocam, color: Color(0xFFF87171), size: 22),
+                                  SizedBox(width: 8),
+                                  Text('Videos', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                                ]),
+                                SizedBox(height: 10),
+                                Text('${_videoService.allVideos.length} videos', style: TextStyle(color: Color(0xFF666680), fontSize: 12)),
+                                SizedBox(height: 4),
+                                Text('${_videoService.folders.length} folders', style: TextStyle(color: Color(0xFF666680), fontSize: 11)),
+                                SizedBox(height: 8),
+                                Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(color: Color(0xFFF87171).withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                                  child: Text('Open Player', style: TextStyle(color: Color(0xFFF87171), fontSize: 11, fontWeight: FontWeight.w600)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 20),
+                // ─── Download Cards ───────────────────────────────────
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      children: [
+                        Text('Download Makaw', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+                        SizedBox(height: 4),
+                        Text('Get the full native experience with all features',
+                          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+                        SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12, runSpacing: 12,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            _buildDownloadChip('Android', Icons.android),
+                            _buildDownloadChip('Windows', Icons.desktop_windows),
+                            _buildDownloadChip('macOS', Icons.laptop_mac),
+                            _buildDownloadChip('Linux', Icons.computer),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SizedBox(height: 20),
+                // ─── News Feed ────────────────────────────────────────
+                if (_newsFeedService != null)
+                  NewsFeedWidget(
+                    key: _newsFeedKey,
+                    service: _newsFeedService!,
+                    onNavigate: (url) => _navigateOrOpenNewTab(url),
+                    scrollController: _newsFeedScrollController,
+                  ),
+                SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebFeatureGrid(bool isDesktop) {
+    final features = [
+      (Icons.code, 'Code Studio', 'studio', Color(0xFF818CF8)),
+      (Icons.terminal, 'Terminal', 'terminal', Color(0xFF22D3EE)),
+      (Icons.music_note, 'Music Player', 'music', Color(0xFF818CF8)),
+      (Icons.videocam, 'Video Player', 'player', Color(0xFFF87171)),
+      (Icons.photo_library, 'Gallery', 'images', Color(0xFF34D399)),
+      (Icons.description, 'Documents', 'documents', Color(0xFFFBBF24)),
+      (Icons.content_paste, 'Snippets', 'snippets', Color(0xFFA78BFA)),
+      (Icons.cloud, 'Cloud Sync', 'cloud', Color(0xFF60A5FA)),
+      (Icons.history, 'History', 'history', Color(0xFFF472B6)),
+    ];
+    final crossAxisCount = isDesktop ? 3 : 2;
+    final childAspectRatio = isDesktop ? 2.2 : 2.6;
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        childAspectRatio: childAspectRatio,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
+      itemCount: features.length,
+      itemBuilder: (ctx, i) {
+        final f = features[i];
+        return InkWell(
+          onTap: () => _switchToView(f.$3),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(color: f.$4.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                  child: Icon(f.$1, color: f.$4, size: 22),
+                ),
+                SizedBox(width: 12),
+                Expanded(child: Text(f.$2, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface))),
+                Icon(Icons.arrow_forward_ios, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3), size: 14),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDownloadChip(String platform, IconData icon) {
+    return InkWell(
+      onTap: () => launchUrl(Uri.parse('https://github.com/hexadigitall/makaw/releases/latest'), mode: LaunchMode.externalApplication),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 18, color: kAccentTeal),
+          SizedBox(width: 8),
+          Text(platform, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+        ]),
+      ),
     );
   }
 
