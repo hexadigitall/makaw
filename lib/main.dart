@@ -3069,10 +3069,15 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ),
       );
     }
+    final isDesktop = Responsive.isDesktop(context) && !kIsWeb;
+    if (isDesktop) {
+      return _buildDesktopScaffold();
+    }
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       drawer: _viewMode == ViewMode.home ? _buildDrawer(context) : null,
+      bottomNavigationBar: (!kIsWeb && Responsive.isMobile(context)) ? _buildBottomNavBar() : null,
       body: Stack(
         children: [
           PopScope(
@@ -3137,6 +3142,165 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           ),
         ],
       ),
+    );
+  }
+
+  // ─── Mobile Bottom Navigation Bar ──────────────────────────────────────────
+  int _bottomNavIndex = 0;
+  static const _bottomNavItems = [
+    (Icons.language, 'Browser'),
+    (Icons.code, 'Studio'),
+    (Icons.music_note, 'Music'),
+    (Icons.videocam, 'Videos'),
+    (Icons.menu, 'More'),
+  ];
+
+  Widget _buildBottomNavBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(top: BorderSide(color: Theme.of(context).cardColor, width: 1)),
+      ),
+      child: SafeArea(
+        child: SizedBox(
+          height: 56,
+          child: Row(
+            children: List.generate(_bottomNavItems.length, (i) {
+              final item = _bottomNavItems[i];
+              final isActive = _bottomNavIndex == i;
+              return Expanded(
+                child: InkWell(
+                  onTap: () => _onBottomNavTap(i),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(item.$1, size: 22, color: isActive ? kAccentTeal : Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
+                      SizedBox(height: 2),
+                      Text(item.$2, style: TextStyle(
+                        fontSize: kTextMicro,
+                        fontWeight: isActive ? kWeightSemibold : kWeightRegular,
+                        color: isActive ? kAccentTeal : Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                      )),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _onBottomNavTap(int index) {
+    setState(() => _bottomNavIndex = index);
+    switch (index) {
+      case 0: _switchToView('browser'); break;
+      case 1: _switchToView('studio'); break;
+      case 2: _switchToView('music'); break;
+      case 3: _switchToView('player'); break;
+      case 4: _scaffoldKey.currentState?.openDrawer(); break;
+    }
+  }
+
+  // ─── Desktop NavigationRail Scaffold ───────────────────────────────────────
+  Widget _buildDesktopScaffold() {
+    final navItems = [
+      (Icons.language, 'Browser'),
+      (Icons.code, 'Code Studio'),
+      (Icons.terminal, 'Terminal'),
+      (Icons.music_note, 'Music'),
+      (Icons.videocam, 'Videos'),
+      (Icons.photo_library, 'Gallery'),
+      (Icons.description, 'Documents'),
+      (Icons.content_paste, 'Snippets'),
+      (Icons.cloud, 'Cloud Sync'),
+      (Icons.history, 'History'),
+    ];
+    final navKeys = ['browser', 'studio', 'terminal', 'music', 'player', 'images', 'documents', 'snippets', 'cloud', 'history'];
+    final currentIndex = navKeys.indexOf(_currentView);
+    final effectiveIndex = currentIndex >= 0 ? currentIndex : 0;
+
+    return Row(
+      children: [
+        NavigationRail(
+          selectedIndex: effectiveIndex,
+          onDestinationSelected: (i) => _switchToView(navKeys[i]),
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          indicatorColor: kAccentTeal.withOpacity(0.15),
+          selectedIconTheme: IconThemeData(color: kAccentTeal, size: 24),
+          unselectedIconTheme: IconThemeData(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), size: 22),
+          selectedLabelTextStyle: TextStyle(color: kAccentTeal, fontSize: kTextMicro, fontWeight: kWeightSemibold),
+          unselectedLabelTextStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: kTextMicro),
+          labelType: NavigationRailLabelType.all,
+          leading: Padding(
+            padding: EdgeInsets.symmetric(vertical: kSpaceSM),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset('assets/makaw_logo_28.png', width: 28, height: 28),
+                SizedBox(width: kSpaceSM),
+                Text('Makaw', style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextBody, fontWeight: kWeightBold, color: Theme.of(context).colorScheme.onSurface)),
+              ],
+            ),
+          ),
+          trailing: Expanded(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: EdgeInsets.only(bottom: kSpaceBase),
+                child: IconButton(
+                  icon: Icon(widget.themeMode == 'dark' ? Icons.light_mode : Icons.dark_mode, size: 22),
+                  onPressed: _cycleTheme,
+                  tooltip: 'Theme: ${widget.themeMode}',
+                ),
+              ),
+            ),
+          ),
+          destinations: navItems.map((item) => NavigationRailDestination(
+            icon: Icon(item.$1),
+            selectedIcon: Icon(item.$1),
+            label: Text(item.$2),
+          )).toList(),
+        ),
+        VerticalDivider(width: 1, thickness: 1, color: Theme.of(context).cardColor),
+        Expanded(
+          child: Scaffold(
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            body: PopScope(
+              canPop: false,
+              onPopInvokedWithResult: (didPop, _) async {
+                if (didPop) return;
+                if (_currentView == 'browser') {
+                  if (_viewMode == ViewMode.typeView) {
+                    _urlFocusNode.unfocus();
+                    _suggestDebounce?.cancel();
+                    if (_browserTabs.isEmpty) {
+                      setState(() { _viewMode = ViewMode.home; });
+                      return;
+                    }
+                    final lastUrl = _browserTabs.isNotEmpty ? _browserTabs.last.url : '';
+                    setState(() { _viewMode = lastUrl.isEmpty ? ViewMode.home : ViewMode.browsing; });
+                    return;
+                  }
+                  if (_viewMode == ViewMode.browsing) {
+                    final controller = _tabControllers[_activeBrowserTabId];
+                    if (controller != null && await controller.canGoBack()) {
+                      controller.goBack();
+                      return;
+                    }
+                    setState(() { _viewMode = _urlController.text.isNotEmpty ? ViewMode.browsing : ViewMode.home; });
+                    return;
+                  }
+                }
+              },
+              child: SafeArea(
+                child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
