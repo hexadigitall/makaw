@@ -443,8 +443,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   // Content blocker & download manager
   final ContentBlockerService _contentBlocker = ContentBlockerService();
   final AdBlockerService _adBlocker = AdBlockerService();
-  late final DownloadService _downloadManager;
-  late final UpdateService _updateService;
+  DownloadService? _downloadManager;
+  UpdateService? _updateService;
   String? _playVideoUrl;
   String? _playVideoTitle;
   VideoPlayerService _videoService = VideoPlayerService();
@@ -2562,8 +2562,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     WidgetsBinding.instance.removeObserver(this);
     _urlFocusNode.removeListener(_onUrlFocusChanged);
     _musicService.removeListener(_onMusicChanged);
-    _downloadManager.dispose();
-    _updateService.cleanOldApks();
+    _downloadManager?.dispose();
+    _updateService?.cleanOldApks();
     _pty?.kill();
     _urlController.dispose();
     _searchController.dispose();
