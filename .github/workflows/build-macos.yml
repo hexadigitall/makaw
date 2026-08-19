@@ -21,7 +21,7 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Check available Xcode versions
+      - name: Check Xcode versions
         run: |
           ls /Applications/Xcode*.app 2>/dev/null || echo "No Xcode apps found"
           xcodebuild -version
