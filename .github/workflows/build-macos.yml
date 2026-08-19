@@ -27,9 +27,7 @@ jobs:
           xcodebuild -version
 
       - name: Enable macOS desktop
-        run: |
-          flutter config --enable-macos-desktop
-          flutter config --no-enable-swift-package-manager
+        run: flutter config --enable-macos-desktop
 
       - name: Install dependencies
         run: flutter pub get
