@@ -52,11 +52,21 @@ post_install do |installer|
       end
     end
 
-    if target.name == 'gRPC-C++' || target.name == 'gRPC-C++-grpcpp'
+    if target.name.include?('gRPC')
       target.build_configurations.each do |config|
         config.build_settings['OTHER_CFLAGS'] = '$(inherited) -Wno-missing-template-arg-list-after-template-kw'
         config.build_settings['OTHER_CPLUSPLUSFLAGS'] = '$(inherited) -Wno-missing-template-arg-list-after-template-kw'
       end
     end
+  end
+
+  basic_seq_path = File.join(installer.sandbox.root, 'gRPC-Core', 'src', 'core', 'lib', 'promise', 'detail', 'basic_seq.h')
+  if File.exist?(basic_seq_path)
+    content = File.read(basic_seq_path)
+    fixed = content.gsub(
+      'Traits::template CallSeqFactory(',
+      'Traits::template CallSeqFactory<>('
+    )
+    File.write(basic_seq_path, fixed) if fixed != content
   end
 end
