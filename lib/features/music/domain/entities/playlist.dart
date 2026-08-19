@@ -1,5 +1,5 @@
 class Playlist {
-  final String name;
+  String name;
   final List<int> songIds;
 
   Playlist({required this.name, required this.songIds});

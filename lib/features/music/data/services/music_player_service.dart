@@ -60,6 +60,7 @@ class MusicPlayerService extends ChangeNotifier {
 
   int _currentIndex = -1;
   int get currentIndex => _currentIndex;
+  set currentIndex(int v) { _currentIndex = v; notifyListeners(); }
   SongInfo? get currentSong => _currentIndex >= 0 && _currentIndex < _queue.length ? _queue[_currentIndex] : null;
 
   bool _isShuffled = false;
@@ -466,6 +467,16 @@ class MusicPlayerService extends ChangeNotifier {
 
   void deletePlaylist(String name) { _playlists.removeWhere((p) => p.name == name); _savePlaylists(); notifyListeners(); }
 
+  bool renamePlaylist(String oldName, String newName) {
+    if (oldName == newName || newName.trim().isEmpty) return false;
+    if (_playlists.any((p) => p.name == newName)) return false;
+    final pl = _playlists.where((p) => p.name == oldName).firstOrNull;
+    if (pl == null) return false;
+    pl.name = newName;
+    _savePlaylists(); notifyListeners();
+    return true;
+  }
+
   void removeSongsFromPlaylist(String name, List<int> songIds) {
     final pl = _playlists.where((p) => p.name == name).firstOrNull;
     if (pl == null) return;
@@ -527,6 +538,20 @@ class MusicPlayerService extends ChangeNotifier {
   }
 
   void clearQueue() { _queue.clear(); _currentIndex = -1; player.stop(); notifyListeners(); }
+
+  void reorderQueue(int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex--;
+    final item = _queue.removeAt(oldIndex);
+    _queue.insert(newIndex, item);
+    if (oldIndex == _currentIndex) {
+      _currentIndex = newIndex;
+    } else if (oldIndex < _currentIndex && newIndex >= _currentIndex) {
+      _currentIndex--;
+    } else if (oldIndex > _currentIndex && newIndex <= _currentIndex) {
+      _currentIndex++;
+    }
+    notifyListeners();
+  }
 
   void playFromQueue(int index) {
     if (index >= 0 && index < _queue.length) {

@@ -294,6 +294,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool get _isNewTabView => _viewMode == ViewMode.newTab;
   bool _showMediaHub = false;
   bool _ready = false;
+  bool _miniPlayerDismissed = false;
   InAppWebViewController? _monacoController;
   Database? _db;
   String _currentProject = 'untitled';
@@ -390,28 +391,71 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     if (view == 'browser') {
       setState(() => _currentView = view);
     } else {
+      final mediaViews = {'music', 'player', 'images', 'documents'};
       final page = _buildFeaturePage(view);
       if (page != null) {
         final wasBrowsing = !_showHomeScreen;
-        Navigator.of(context).push(PageRouteBuilder(
-          pageBuilder: (_, __, ___) => page,
-          transitionDuration: Duration(milliseconds: 200),
-          reverseTransitionDuration: Duration(milliseconds: 150),
-          transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-        )).then((_) {
-          if (mounted) {
-            _urlController.clear();
-            setState(() {
-              _viewMode = wasBrowsing ? ViewMode.browsing : ViewMode.home;
-            });
-            if (wasBrowsing) _syncUrlController();
-          }
-        });
+        if (mediaViews.contains(view)) {
+          Navigator.of(context).push(PageRouteBuilder(
+            pageBuilder: (_, __, ___) => _buildMediaHubPage(),
+            transitionDuration: Duration(milliseconds: 200),
+            reverseTransitionDuration: Duration(milliseconds: 150),
+            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+          )).then((_) {
+            if (mounted) {
+              _urlController.clear();
+              setState(() { _viewMode = wasBrowsing ? ViewMode.browsing : ViewMode.newTab; });
+              if (wasBrowsing) _syncUrlController();
+            }
+          });
+          Navigator.of(context).push(PageRouteBuilder(
+            pageBuilder: (_, __, ___) => page,
+            transitionDuration: Duration(milliseconds: 200),
+            reverseTransitionDuration: Duration(milliseconds: 150),
+            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+          ));
+        } else {
+          Navigator.of(context).push(PageRouteBuilder(
+            pageBuilder: (_, __, ___) => page,
+            transitionDuration: Duration(milliseconds: 200),
+            reverseTransitionDuration: Duration(milliseconds: 150),
+            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+          )).then((_) {
+            if (mounted) {
+              _urlController.clear();
+              setState(() { _viewMode = wasBrowsing ? ViewMode.browsing : ViewMode.newTab; });
+              if (wasBrowsing) _syncUrlController();
+            }
+          });
+        }
       }
     }
   }
 
   Widget? _buildFeaturePage(String view) {
+    if (kIsWeb && !['history', 'studio', 'snippets', 'cloud'].contains(view)) {
+      return _buildFeatureScaffold(view[0].toUpperCase() + view.substring(1), Icons.phone_android,
+        Center(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.phone_android, size: 48, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
+              SizedBox(height: 16),
+              Text('Desktop Only', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+              SizedBox(height: 8),
+              Text('This feature requires the native Makaw app.\nDownload it for the full experience.', textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+              SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: () => launchUrl(Uri.parse('https://github.com/hexadigitall/makaw/releases/latest'), mode: LaunchMode.externalApplication),
+                icon: Icon(Icons.download),
+                label: Text('Download Makaw'),
+                style: ElevatedButton.styleFrom(backgroundColor: kAccentTeal, foregroundColor: Colors.white, padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+              ),
+            ]),
+          ),
+        ));
+    }
     switch (view) {
       case 'history': return MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url));
       case 'studio': return _buildFeatureScaffold('Code Studio', Icons.code, _buildStudioTab());
@@ -445,6 +489,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   final AdBlockerService _adBlocker = AdBlockerService();
   DownloadService? _downloadManager;
   UpdateService? _updateService;
+  String? _pendingNavigationUrl;
   String? _playVideoUrl;
   String? _playVideoTitle;
   VideoPlayerService _videoService = VideoPlayerService();
@@ -690,6 +735,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_homeInitialized) return;
       _homeInitialized = true;
+      if (!kIsWeb) {
       try {
         await _newsFeedService!.init();
       } catch (_) {}
@@ -699,6 +745,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       try {
         _newsFeedService!.loadTaps();
       } catch (_) {}
+      }
       try {
         await _loadSavedSession();
       } catch (_) {}
@@ -706,6 +753,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         await _loadShortcuts();
       } catch (_) {}
       if (mounted) setState(() => _ready = true);
+      if (!kIsWeb) {
       try {
         _initDownloadDir();
         _musicService.loadPlaylists();
@@ -757,6 +805,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _setupIntentChannel();
         _loadProxySettings();
       } catch (_) {}
+      } // end !kIsWeb
     });
   }
 
@@ -826,8 +875,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   Future<void> _checkUpdatesOnStartup() async {
     await Future.delayed(const Duration(seconds: 3));
     if (!mounted) return;
-    final result = await _updateService.checkForUpdate();
-    if (!mounted) return;
+    final result = await _updateService?.checkForUpdate();
+    if (!mounted || result == null) return;
     if (result.result == UpdateCheckResult.available && result.info != null) {
       _showUpdateDialog(result.info!);
     }
@@ -1048,6 +1097,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   // ─── DB ─────────────────────────────────────────────────────────────────────
 
   Future<void> _initDb() async {
+    if (kIsWeb) return;
     final dir = await getApplicationDocumentsDirectory();
     _projectPath = p.join(dir.path, 'makaw_projects');
     await Directory(_projectPath).create(recursive: true);
@@ -1228,6 +1278,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           : BrowserTab(id: 0, url: '');
 
   void _warmUpDns(String url) {
+    if (kIsWeb) return;
     try {
       final uri = Uri.parse(url);
       if (uri.host.isNotEmpty) {
@@ -1483,6 +1534,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     final c = _activeWebview;
     if (c != null) {
       c.loadUrl(urlRequest: URLRequest(url: WebUri(url))).catchError((_) {});
+    } else {
+      _pendingNavigationUrl = url;
     }
   }
 
@@ -1624,12 +1677,12 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         items: items,
         showToast: _showToast,
         onDownload: (item) {
-          _downloadManager.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
+          _downloadManager?.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
           setState(() {});
         },
         onDownloadAll: (items) {
           for (final item in items) {
-            _downloadManager.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
+            _downloadManager?.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
             _pendingMedia.removeWhere((m) => m.url == item.url);
           }
           _showToast('Downloading ${items.length} item(s)');
@@ -1665,8 +1718,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   Future<void> _checkForUpdatesManual() async {
     _showToast('Checking for updates...');
-    final result = await _updateService.checkForUpdate();
-    if (!mounted) return;
+    final result = await _updateService?.checkForUpdate();
+    if (!mounted || result == null) return;
     switch (result.result) {
       case UpdateCheckResult.available:
         _showUpdateDialog(result.info!);
@@ -1799,7 +1852,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       ),
     );
 
-    final path = await _updateService.downloadApk(
+    final path = await _updateService?.downloadApk(
       info,
       onProgress: (received, total) {
         if (total > 0) {
@@ -1819,7 +1872,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     }
 
     scaffold.showSnackBar(SnackBar(content: Text('Installing...')));
-    final installed = await _updateService.installApk(path);
+    final installed = await _updateService?.installApk(path) ?? false;
     if (!installed) {
       scaffold.showSnackBar(SnackBar(
         content: Text('Tap the notification or open the APK from downloads to install.'),
@@ -2664,7 +2717,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               onDownload: _playVideoUrl != null ? () {
                 final url = _playVideoUrl!;
                 final filename = url.split('/').last.split('?').first;
-                _downloadManager.enqueue(url, filename: filename.isNotEmpty ? filename : 'video_${DateTime.now().millisecondsSinceEpoch}.mp4');
+                _downloadManager?.enqueue(url, filename: filename.isNotEmpty ? filename : 'video_${DateTime.now().millisecondsSinceEpoch}.mp4');
                 _showToast('Downloading: $filename');
               } : null,
             ),
@@ -2820,7 +2873,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       appBar: AppBar(
         title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.movie, size: 20, color: kAccentTeal), SizedBox(width: 8), Text('Media Hub')]),
         backgroundColor: Theme.of(context).colorScheme.surface,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: _goToMakawHome),
+        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: () => Navigator.of(context).pop()),
         actions: [
           IconButton(
             icon: Icon(Icons.system_update, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
@@ -2988,7 +3041,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   }
                   _ignoreUrlChanges = false;
                   setState(() {
-                    _viewMode = _typeViewFromHome ? ViewMode.home : ViewMode.browsing;
+                    _viewMode = _typeViewFromHome ? ViewMode.newTab : ViewMode.browsing;
                     _urlSuggestions = [];
                     _searchSuggestions = [];
                   });
@@ -3002,18 +3055,26 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     return;
                   }
                 }
-                // No back history
-                if (_showHomeScreen) {
-                  _moveTaskToBack();
+                // No back history: if browsing, go to NTP. If on NTP with no tabs, minimize.
+                if (_viewMode == ViewMode.browsing) {
+                  _goToNtp();
                   return;
                 }
-                _goHome();
+                if (_viewMode == ViewMode.newTab) {
+                  if (_browserTabs.length > 1) {
+                    _closeBrowserTab(_activeBrowserTabId);
+                  } else {
+                    _moveTaskToBack();
+                  }
+                  return;
+                }
+                _moveTaskToBack();
                 return;
               }
               if (context.mounted) Navigator.of(context).pop();
             },
             child: SafeArea(
-              child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
+              child: kIsWeb ? _buildWebLandingPage() : (_currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink()),
             ),
           ),
         ],
@@ -3021,42 +3082,277 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
+  Widget _buildWebLandingPage() {
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          SizedBox(height: 48),
+          Image.asset('assets/makaw_logo_64.png', width: 80, height: 80, fit: BoxFit.contain),
+          SizedBox(height: 16),
+          Text('Makaw',
+            style: TextStyle(fontFamily: 'Outfit', fontSize: 42, fontWeight: FontWeight.w500, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
+          SizedBox(height: 8),
+          Text('Browser · Code Studio · Creative Platform',
+            style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
+          SizedBox(height: 32),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24),
+            child: Text('Download Makaw for the full experience — browsing, code editing, media playback, and more.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), height: 1.5)),
+          ),
+          SizedBox(height: 32),
+          _buildDownloadCard('Android', Icons.android, 'APK + AAB', 'https://github.com/hexadigitall/makaw/releases/latest'),
+          _buildDownloadCard('Windows', Icons.desktop_windows, 'MSIX + Exe', 'https://github.com/hexadigitall/makaw/releases/latest'),
+          _buildDownloadCard('macOS', Icons.laptop_mac, 'App Bundle', 'https://github.com/hexadigitall/makaw/releases/latest'),
+          _buildDownloadCard('Linux', Icons.computer, 'Tarball', 'https://github.com/hexadigitall/makaw/releases/latest'),
+          SizedBox(height: 32),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24),
+            child: Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                children: [
+                  Text('Features', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+                  SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12, runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      _buildFeatureChip(Icons.language, 'Browser'),
+                      _buildFeatureChip(Icons.code, 'Code Studio'),
+                      _buildFeatureChip(Icons.terminal, 'Terminal'),
+                      _buildFeatureChip(Icons.music_note, 'Music Player'),
+                      _buildFeatureChip(Icons.videocam, 'Video Player'),
+                      _buildFeatureChip(Icons.photo_library, 'Gallery'),
+                      _buildFeatureChip(Icons.description, 'Documents'),
+                      _buildFeatureChip(Icons.download, 'Downloads'),
+                      _buildFeatureChip(Icons.auto_awesome, 'AI Assistant'),
+                      _buildFeatureChip(Icons.newspaper, 'News Feed'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(height: 24),
+          Text('Open Source · Built with Flutter', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3))),
+          SizedBox(height: 48),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDownloadCard(String platform, IconData icon, String format, String url) {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+      child: InkWell(
+        onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: double.infinity,
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Theme.of(context).colorScheme.surface, width: 1),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(color: kAccentTeal.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                child: Icon(icon, color: kAccentTeal, size: 24),
+              ),
+              SizedBox(width: 16),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(platform, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+                  Text(format, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+                ])),
+              Icon(Icons.download, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4), size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFeatureChip(IconData icon, String label) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 16, color: kAccentTeal),
+        SizedBox(width: 6),
+        Text(label, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))),
+      ]),
+    );
+  }
+
   Widget _buildMiniMusicPlayer() {
     final song = _musicService.currentSong;
     if (song == null) return SizedBox.shrink();
-    return GestureDetector(
+    if (_miniPlayerDismissed) return SizedBox.shrink();
+    final progress = _musicService.duration.inMilliseconds > 0
+        ? (_musicService.position.inMilliseconds / _musicService.duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    final player = GestureDetector(
       onTap: () => _switchToView('music'),
+      onLongPress: () => _showMiniPlayerQueue(),
+      onHorizontalDragEnd: (details) {
+        if (details.primaryVelocity == null) return;
+        if (details.primaryVelocity! < -100) {
+          _musicService.nextSong();
+        } else if (details.primaryVelocity! > 100) {
+          _musicService.previousSong();
+        }
+      },
+      onVerticalDragEnd: (details) {
+        if (details.primaryVelocity != null && details.primaryVelocity! < -200) {
+          _switchToView('music');
+        }
+      },
       child: Container(
-        height: 56,
+        height: 68,
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           border: Border(top: BorderSide(color: Theme.of(context).cardColor, width: 1)),
         ),
-        padding: EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
+        child: Column(
           children: [
-            Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(
-                color: kAccentTeal.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
+            // Ultra-thin 2px progress indicator
+            SizedBox(
+              height: 2,
+              child: LinearProgressIndicator(
+                value: progress,
+                backgroundColor: Theme.of(context).cardColor,
+                valueColor: AlwaysStoppedAnimation(kAccentTeal),
+                minHeight: 2,
               ),
-              child: Icon(Icons.music_note, color: kAccentTeal, size: 22),
             ),
-            SizedBox(width: 10),
             Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(song.displayTitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  Text(song.displayArtist, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-                ],
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(
+                        color: kAccentTeal.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(Icons.music_note, color: kAccentTeal, size: 22),
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(song.displayTitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          Text(song.displayArtist, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.skip_previous, color: Theme.of(context).colorScheme.onSurface, size: 22),
+                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => _musicService.previousSong(),
+                    ),
+                    IconButton(
+                      icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: kAccentTeal, size: 32),
+                      constraints: BoxConstraints(minWidth: 36, minHeight: 36),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => _musicService.togglePlayPause(),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.skip_next, color: Theme.of(context).colorScheme.onSurface, size: 22),
+                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => _musicService.nextSong(),
+                    ),
+                  ],
+                ),
               ),
             ),
-            IconButton(
-              icon: Icon(_musicService.isPlaying ? Icons.pause : Icons.play_arrow, color: kAccentTeal, size: 26),
-              onPressed: () => _musicService.togglePlayPause(),
+          ],
+        ),
+      ),
+    );
+    // On web: allow swipe to dismiss (without stopping playback)
+    if (kIsWeb) {
+      return Dismissible(
+        key: ValueKey('mini_player_${_musicService.currentSong?.id}'),
+        direction: DismissDirection.horizontal,
+        onDismissed: (_) {
+          setState(() { _miniPlayerDismissed = true; });
+        },
+        background: Container(
+          height: 68,
+          color: Colors.red.shade400,
+          alignment: Alignment.centerRight,
+          padding: EdgeInsets.only(right: 16),
+          child: Icon(Icons.close, color: Colors.white),
+        ),
+        child: player,
+      );
+    }
+    return player;
+  }
+
+  void _showMiniPlayerQueue() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, margin: EdgeInsets.symmetric(vertical: 12), decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2), borderRadius: BorderRadius.circular(2))),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Row(children: [
+                Text('Queue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+                Spacer(),
+                Text('${_musicService.queueLength} tracks', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+              ]),
+            ),
+            SizedBox(height: 8),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _musicService.queueLength,
+                itemBuilder: (ctx, i) {
+                  final track = _musicService.queue[i];
+                  if (track == null) return SizedBox.shrink();
+                  final isCurrent = i == _musicService.currentIndex;
+                  return ListTile(
+                    leading: Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(color: isCurrent ? kAccentTeal.withOpacity(0.2) : Theme.of(context).cardColor, borderRadius: BorderRadius.circular(8)),
+                      child: Center(child: isCurrent
+                          ? Icon(Icons.equalizer, color: kAccentTeal, size: 20)
+                          : Text('${i + 1}', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: 13))),
+                    ),
+                    title: Text(track.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400)),
+                    subtitle: Text(track.displayArtist, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: 12)),
+                    onTap: () { Navigator.pop(ctx); _musicService.playFromQueue(i); },
+                  );
+                },
+              ),
             ),
           ],
         ),
@@ -3065,7 +3361,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildDrawer(BuildContext context) {
-    final items = [
+    final items = kIsWeb ? [
+      ('Code Studio', Icons.code, 'studio'),
+      ('Snippets', Icons.content_paste, 'snippets'),
+      ('Cloud Sync', Icons.cloud, 'cloud'),
+      ('History', Icons.history, 'history'),
+    ] : [
       ('Browser', Icons.language, 'browser'),
       ('Code Studio', Icons.code, 'studio'),
       ('Terminal', Icons.terminal, 'terminal'),
@@ -3409,9 +3710,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   // ─── Browser Header ──────────────────────────────────────────────────────────
 
   Widget _buildBrowserHeader() {
-    final tabCount = _currentModeTabCount;
     final inc = _isIncognitoActive;
-    final isHome = _isMakawHome;
 
     if (_viewMode == ViewMode.typeView) {
       return _buildTypeViewHeader();
@@ -3423,107 +3722,112 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     final urlTextColor = inc ? Colors.white70 : Theme.of(context).colorScheme.onSurface;
     final urlHintColor = inc ? Colors.white38 : Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
 
+    Widget _buildUrlPill() {
+      return Expanded(
+        child: GestureDetector(
+          onTap: () {
+            final clean = _cleanDisplayUrl(_urlController.text);
+            _typeViewFromHome = false;
+            _ignoreUrlChanges = true;
+            if (clean.isNotEmpty) _urlController.text = clean;
+            _ignoreUrlChanges = false;
+            setState(() { _viewMode = ViewMode.typeView; });
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _urlFocusNode.requestFocus();
+              _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
+            });
+          },
+          child: Container(
+            margin: EdgeInsets.symmetric(horizontal: 8),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: urlBarBg,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                if (inc) ...[
+                  Icon(Icons.visibility_off, size: 16, color: kIncognitoAccent),
+                  SizedBox(width: 8),
+                ],
+                if (!inc && _urlController.text.isNotEmpty && _urlController.text.startsWith('https'))
+                  Icon(Icons.lock_outline, size: 14, color: Colors.green),
+                Expanded(
+                  child: Text(
+                    _urlController.text.isNotEmpty ? _cleanDisplayUrl(_urlController.text) : (inc ? 'Search privately' : 'Search or enter address'),
+                    style: TextStyle(
+                      color: _urlController.text.isNotEmpty ? urlTextColor : urlHintColor,
+                      fontSize: 14,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget _buildTabCounter() {
+      final tabCount = _currentModeTabCount;
+      return GestureDetector(
+        onTap: _showTabSwitcher,
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: inc ? kIncognitoPurple.withValues(alpha: 0.15) : Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: inc ? kIncognitoPurple.withValues(alpha: 0.5) : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(inc ? Icons.visibility_off : Icons.tab, size: 18, color: inc ? kIncognitoPurple : iconColor),
+              SizedBox(width: 4),
+              Text('$tabCount', style: TextStyle(color: inc ? kIncognitoPurple : iconColor, fontSize: 14, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Widget _buildOverflowMenu() {
+      return IconButton(icon: Icon(Icons.more_horiz, color: iconColor), onPressed: _showEllipsisMenu);
+    }
+
+    // Makaw Home: hamburger menu (left) | spacer | overflow (right). NO tab counter, NO omnibox pill.
+    if (_isMakawHome) {
+      return Container(
+        color: headerBg,
+        padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: Row(children: [
+          if (!inc)
+            IconButton(icon: Icon(Icons.menu, color: iconColor), onPressed: () => _scaffoldKey.currentState?.openDrawer())
+          else
+            IconButton(icon: Icon(Icons.visibility_off, color: iconColor), onPressed: _goHome),
+          Spacer(),
+          _buildOverflowMenu(),
+        ]),
+      );
+    }
+
+    // NTP & Browsing: home button (left) | omnibox pill (center) | tab counter | overflow (right)
     return Container(
       color: headerBg,
       padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(
-        children: [
-          if (isHome && !inc)
-            IconButton(
-              icon: Icon(Icons.menu, color: iconColor),
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-            )
-          else
-            IconButton(
-              icon: Icon(inc ? Icons.visibility_off : Icons.home_outlined, color: iconColor),
-              onPressed: _goHome,
-            ),
-          if (_viewMode == ViewMode.browsing)
-            Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  final clean = _cleanDisplayUrl(_urlController.text);
-                  _typeViewFromHome = false;
-                  _ignoreUrlChanges = true;
-                  if (clean.isNotEmpty) _urlController.text = clean;
-                  _ignoreUrlChanges = false;
-                  setState(() { _viewMode = ViewMode.typeView; });
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _urlFocusNode.requestFocus();
-                    _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
-                  });
-                },
-                child: Container(
-                  margin: EdgeInsets.symmetric(horizontal: 8),
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: urlBarBg,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    children: [
-                      if (inc) ...[
-                        Icon(Icons.visibility_off, size: 16, color: kIncognitoAccent),
-                        SizedBox(width: 8),
-                      ],
-                      if (!inc && _urlController.text.isNotEmpty && _urlController.text.startsWith('https'))
-                        Icon(Icons.lock_outline, size: 14, color: Colors.green),
-                      Expanded(
-                        child: Text(
-                          _urlController.text.isNotEmpty ? _cleanDisplayUrl(_urlController.text) : (inc ? 'Search privately' : 'Search or enter address'),
-                          style: TextStyle(
-                            color: _urlController.text.isNotEmpty ? urlTextColor : urlHintColor,
-                            fontSize: 14,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            )
-          else
-            Spacer(),
-          GestureDetector(
-            onTap: _showTabSwitcher,
-            child: Container(
-              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: inc ? kIncognitoPurple.withValues(alpha: 0.15) : Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: inc ? kIncognitoPurple.withValues(alpha: 0.5) : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    inc ? Icons.visibility_off : Icons.tab,
-                    size: 18,
-                    color: inc ? kIncognitoPurple : iconColor,
-                  ),
-                  SizedBox(width: 4),
-                  Text(
-                    '$tabCount',
-                    style: TextStyle(
-                      color: inc ? kIncognitoPurple : iconColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SizedBox(width: 4),
-          IconButton(
-            icon: Icon(Icons.more_horiz, color: iconColor),
-            onPressed: _showEllipsisMenu,
-          ),
-        ],
-      ),
+      child: Row(children: [
+        IconButton(
+          icon: Icon(inc ? Icons.visibility_off : Icons.home_outlined, color: iconColor),
+          onPressed: _goHome,
+        ),
+        _buildUrlPill(),
+        _buildTabCounter(),
+        SizedBox(width: 4),
+        _buildOverflowMenu(),
+      ]),
     );
   }
 
@@ -3957,6 +4261,18 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     setState(() { _viewMode = ViewMode.home; });
   }
 
+  void _goToNtp() {
+    _homeScreenKey++;
+    _urlController.clear();
+    setState(() { _viewMode = ViewMode.newTab; });
+  }
+
+  void _goIncognitoNtp() {
+    _homeScreenKey++;
+    _urlController.clear();
+    setState(() { _viewMode = ViewMode.newTab; });
+  }
+
   void _goToMakawHome() {
     Navigator.of(context).popUntil((r) => r.isFirst);
     _switchToView('browser');
@@ -3968,6 +4284,81 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   Widget _buildHomeContent() {
     if (_isIncognitoActive) return _buildIncognitoLandingPage();
     if (_showHomeScreen) _urlController.clear();
+    // Shared omnibox widget used by both Makaw Home and Browser NTP
+    final omnibox = Padding(
+      padding: EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(32),
+        ),
+        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        child: Row(
+          children: [
+            Container(
+              width: 32, height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [Color(0xFF4285F4), Color(0xFF34A853), Color(0xFFFBBC05), Color(0xFFEA4335)],
+                ),
+              ),
+              child: Center(child: Text('G', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
+            ),
+            SizedBox(width: 14),
+            Expanded(
+                child: TextField(
+                  controller: _urlController,
+                  focusNode: _urlFocusNode,
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 17),
+                  decoration: InputDecoration(
+                    hintText: 'Search or enter address',
+                    hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 17),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.go,
+                  onSubmitted: _navigateOrOpenNewTab,
+                ),
+            ),
+            SizedBox(width: 14),
+            GestureDetector(
+              onTap: _scanQRCode,
+              child: Icon(Icons.qr_code_scanner, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 26),
+            ),
+            SizedBox(width: 12),
+            Icon(Icons.shield_outlined, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 26),
+          ],
+        ),
+      ),
+    );
+    // Shared shortcuts widget
+    final shortcuts = Padding(
+      padding: EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        child: _buildShortcutsGrid(),
+      ),
+    );
+    // ─── Browser NTP: omnibox + shortcuts only (no branding/media/news) ─────
+    if (_isNewTabView) {
+      return SingleChildScrollView(
+        physics: AlwaysScrollableScrollPhysics(),
+        child: Column(children: [
+          SizedBox(height: 40),
+          omnibox,
+          SizedBox(height: 24),
+          shortcuts,
+          SizedBox(height: 24),
+        ]),
+      );
+    }
+    // ─── Makaw Home: full landing with branding, omnibox, shortcuts, AI, media, news ─────
     return RefreshIndicator(
       onRefresh: _refreshNewsFeed,
       child: SingleChildScrollView(
@@ -3984,68 +4375,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               letterSpacing: -0.5,
             )),
           SizedBox(height: 24),
-          // Omnibox
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(32),
-              ),
-              padding: EdgeInsets.symmetric(horizontal: 18, vertical: 4),
-              child: Row(
-                children: [
-                  Container(
-                    width: 32, height: 32,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: [Color(0xFF4285F4), Color(0xFF34A853), Color(0xFFFBBC05), Color(0xFFEA4335)],
-                      ),
-                    ),
-                    child: Center(child: Text('G', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
-                  ),
-                  SizedBox(width: 14),
-                  Expanded(
-                      child: TextField(
-                        controller: _urlController,
-                        focusNode: _urlFocusNode,
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 17),
-                        decoration: InputDecoration(
-                          hintText: 'Search or enter address',
-                          hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 17),
-                          border: InputBorder.none,
-                          isDense: true,
-                        ),
-                        keyboardType: TextInputType.url,
-                        textInputAction: TextInputAction.go,
-                        onSubmitted: _navigateOrOpenNewTab,
-                      ),
-                  ),
-                  SizedBox(width: 14),
-                  GestureDetector(
-                    onTap: _scanQRCode,
-                    child: Icon(Icons.qr_code_scanner, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 26),
-                  ),
-                  SizedBox(width: 12),
-                  Icon(Icons.shield_outlined, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 26),
-                ],
-              ),
-            ),
-          ),
+          omnibox,
           SizedBox(height: 20),
-          // Shortcuts Grid
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              padding: EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-              child: _buildShortcutsGrid(),
-            ),
-          ),
+          shortcuts,
           SizedBox(height: 20),
           // AI assistant
           Padding(
@@ -5337,6 +5669,14 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       onWebViewCreated: (ctrl) {
         _tabControllers[tab.id] = ctrl;
 
+        if (_pendingNavigationUrl != null) {
+          final pending = _pendingNavigationUrl!;
+          _pendingNavigationUrl = null;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            ctrl.loadUrl(urlRequest: URLRequest(url: WebUri(pending))).catchError((_) {});
+          });
+        }
+
         ctrl.addJavaScriptHandler(handlerName: 'PasswordSaveChannel', callback: (args) {
           try {
             final data = args.isNotEmpty ? jsonDecode(args[0] as String) as Map : {};
@@ -5582,7 +5922,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         if (!filename.contains('.')) {
           filename = '$filename.bin';
         }
-        _downloadManager.enqueue(fileUrl, filename: filename);
+        _downloadManager?.enqueue(fileUrl, filename: filename);
         _showToast('Downloading: $filename');
       },
       onProgressChanged: (ctrl, progress) {
@@ -6151,7 +6491,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
   }
 
   void _handleDownload(String url) {
-    _downloadManager.enqueue(url);
+    _downloadManager?.enqueue(url);
     _showToast('Download added: ${url.split('/').last.length > 40 ? '...' : url.split('/').last}');
   }
 
@@ -6671,7 +7011,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                                     IconButton(
                                       icon: Icon(Icons.download, size: 16, color: Colors.cyan),
                                       onPressed: () {
-                                        _downloadManager.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
+                                        _downloadManager?.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
                                         _showToast('Added to downloads');
                                       },
                                       tooltip: 'Download original',
@@ -6695,7 +7035,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                                 children: item.formats.map((f) {
                                   return InkWell(
                                     onTap: () {
-                                      _downloadManager.enqueue(f.url, filename: f.url.split('/').last.split('?').first);
+                                      _downloadManager?.enqueue(f.url, filename: f.url.split('/').last.split('?').first);
                                       _showToast('Downloading ${f.label}');
                                     },
                                     child: Container(
