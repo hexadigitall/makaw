@@ -39,17 +39,42 @@ jobs:
         run: |
           PROJ="macos/Pods/Pods.xcodeproj/project.pbxproj"
           if [ -f "$PROJ" ]; then
-            echo "Patching BoringSSL compiler flags..."
+            echo "=== Patching Pods project ==="
+            # Remove BoringSSL -GCC_WARN_INHIBIT_ALL_WARNINGS (causes -G unsupported)
             sed -i '' 's/ -GCC_WARN_INHIBIT_ALL_WARNINGS//g' "$PROJ"
+            # Disable treat-warnings-as-errors at project level
             sed -i '' 's/GCC_TREAT_WARNINGS_AS_ERRORS = YES;/GCC_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
             sed -i '' 's/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = YES;/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
-            # Add warning suppression for gRPC template issue
+            # Suppress gRPC template warning in WARNING_CFLAGS
+            sed -i '' 's/WARNING_CFLAGS = "/WARNING_CFLAGS = "-Wno-missing-template-arg-list-after-template-kw /g' "$PROJ"
+            # Also patch OTHER_CFLAGS (both quoted and unquoted patterns)
             sed -i '' 's/OTHER_CFLAGS = "/OTHER_CFLAGS = "-Wno-missing-template-arg-list-after-template-kw /g' "$PROJ"
-            echo "Patches applied."
-          else
-            echo "Pods project not found!"
-            exit 1
+            sed -i '' 's/OTHER_CFLAGS = (/OTHER_CFLAGS = (-Wno-missing-template-arg-list-after-template-kw /g' "$PROJ"
           fi
+
+          echo "=== Patching gRPC source directly ==="
+          GRPC_HDR="macos/Pods/gRPC-Core/src/core/lib/promise/detail/basic_seq.h"
+          if [ -f "$GRPC_HDR" ]; then
+            # Add pragma at top to suppress the clang 16+ template warning
+            sed -i '' '1i\
+#pragma clang diagnostic push\
+#pragma clang diagnostic ignored "-Wmissing-template-arg-list-after-template-kw"\
+' "$GRPC_HDR"
+            echo "#pragma clang diagnostic pop" >> "$GRPC_HDR"
+            echo "Patched $GRPC_HDR"
+          else
+            echo "gRPC header not found at expected path"
+          fi
+
+          echo "=== Patching all xcconfig files ==="
+          find macos/Pods/Target\ Support Files -name "*.xcconfig" -exec sh -c '
+            if ! grep -q "Wno-missing-template-arg-list-after-template-kw" "$1" 2>/dev/null; then
+              echo "OTHER_CFLAGS = \$(inherited) -Wno-missing-template-arg-list-after-template-kw" >> "$1"
+              echo "Patched: $1"
+            fi
+          ' _ {} \; 2>/dev/null || true
+
+          echo "=== All patches applied ==="
 
       - name: Phase 2 - rebuild
         run: flutter build macos --release
