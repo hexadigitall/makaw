@@ -42,6 +42,9 @@ jobs:
             echo "Patching BoringSSL compiler flags..."
             sed -i '' 's/ -GCC_WARN_INHIBIT_ALL_WARNINGS//g' "$PROJ"
             sed -i '' 's/GCC_TREAT_WARNINGS_AS_ERRORS = YES;/GCC_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
+            sed -i '' 's/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = YES;/CLANG_WARN_TREAT_WARNINGS_AS_ERRORS = NO;/g' "$PROJ"
+            # Add warning suppression for gRPC template issue
+            sed -i '' 's/OTHER_CFLAGS = "/OTHER_CFLAGS = "-Wno-missing-template-arg-list-after-template-kw /g' "$PROJ"
             echo "Patches applied."
           else
             echo "Pods project not found!"
