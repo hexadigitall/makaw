@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-15
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -20,32 +20,31 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Select Xcode 15.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+          xcodebuild -version
+
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Run pod install + patch BoringSSL + build
-        working-directory: macos
-        run: |
-          # Run flutter build once to generate Podfile and pods, then fail at build
-          cd ..
-          flutter build macos --release 2>&1 || true
+      - name: Build macOS (phase 1: install pods + expect BoringSSL failure)
+        run: flutter build macos --release 2>&1 || true
 
-          # Now patch the BoringSSL compiler flags in the Pods project
+      - name: Patch BoringSSL-GRPC compiler flags
+        run: |
           PROJ="macos/Pods/Pods.xcodeproj/project.pbxproj"
           if [ -f "$PROJ" ]; then
             echo "Patching BoringSSL-GRPC compiler flags..."
-            # Remove -GCC_WARN_INHIBIT_ALL_WARNINGS from COMPILER_FLAGS
             sed -i '' 's/ -GCC_WARN_INHIBIT_ALL_WARNINGS//g' "$PROJ"
-            echo "Patch applied. Rebuilding..."
-          else
-            echo "Pods project not found, attempting direct build"
+            echo "Patch applied."
           fi
 
-          # Rebuild (pod install already done, should just do xcodebuild)
-          flutter build macos --release
+      - name: Build macOS (phase 2: rebuild after patch)
+        run: flutter build macos --release
 
       - name: Create macOS zip
         working-directory: build/macos/Build/Products/Release
