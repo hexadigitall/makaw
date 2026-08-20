@@ -49,7 +49,7 @@ jobs:
           $certBytes = [Convert]::FromBase64String("$env:MSIX_CERT_B64")
           [IO.File]::WriteAllBytes("$env:USERPROFILE\makaw-cert.pfx", $certBytes)
 
-      - name: Package MSIX
+      - name: Package MSIX (signed)
         if: env.MSIX_CERT_B64 != ''
         env:
           MSIX_CERT_PASSWORD: ${{ secrets.MSIX_CERT_PASSWORD }}
@@ -59,9 +59,19 @@ jobs:
           dart run msix:create `
             --display-name "Makaw" `
             --publisher "CN=Hexadigitall" `
-            --capabilities "internetClient" `
+            --capabilities "internetClient,broadFileSystemAccess" `
             --certificate-path "$env:USERPROFILE\makaw-cert.pfx" `
             --certificate-password "$env:MSIX_CERT_PASSWORD" `
+            --output "makaw.msix"
+
+      - name: Package MSIX (self-signed fallback)
+        if: env.MSIX_CERT_B64 == ''
+        shell: pwsh
+        run: |
+          dart run msix:create `
+            --display-name "Makaw" `
+            --publisher "CN=Hexadigitall" `
+            --capabilities "internetClient,broadFileSystemAccess" `
             --output "makaw.msix"
 
       - name: Upload Windows artifacts
@@ -79,5 +89,6 @@ jobs:
           files: |
             makaw-windows-x64.zip
             makaw.msix
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

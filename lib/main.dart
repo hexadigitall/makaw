@@ -210,7 +210,9 @@ void main() async {
         androidNotificationIcon: 'drawable/ic_makaw_logo',
       ),
     );
-    globalMusicService.attachAudioHandler(globalAudioHandler);
+    if (globalAudioHandler != null) {
+      globalMusicService.attachAudioHandler(globalAudioHandler!);
+    }
   } catch (e) {
     print('AudioService init failed: $e');
   }
@@ -218,7 +220,7 @@ void main() async {
 }
 
 final MusicPlayerService globalMusicService = MusicPlayerService();
-late MakawAudioHandler globalAudioHandler;
+MakawAudioHandler? globalAudioHandler;
 String audioServiceStatus = 'unknown';
 
 const _systemChannel = MethodChannel('com.hexadigitall.makaw/system');
@@ -1351,17 +1353,36 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   void _startPty() {
     if (kIsWeb) return;
     if (_pty != null) return;
-    _pty = Pty.start(
-      Platform.isAndroid ? 'sh' : 'bash',
-      arguments: Platform.isAndroid ? ['-c', 'cd /storage/emulated/0 && sh'] : [],
-      environment: {'TERM': 'xterm-256color'},
-      workingDirectory: _projectPath,
-    );
-    _pty!.output.cast<List<int>>().transform(const Utf8Decoder()).listen(_terminal.write);
-    _pty!.exitCode.then((code) => _terminal.write('Process exited: $code\n'));
-    _terminal.onOutput = (data) {
-      _pty!.write(const Utf8Encoder().convert(data));
-    };
+    try {
+      String shell;
+      List<String> args;
+      if (Platform.isAndroid) {
+        shell = 'sh';
+        args = ['-c', 'cd /storage/emulated/0 && sh'];
+      } else if (Platform.isWindows) {
+        shell = 'powershell.exe';
+        args = [];
+      } else if (Platform.isMacOS) {
+        shell = '/bin/zsh';
+        args = [];
+      } else {
+        shell = 'bash';
+        args = [];
+      }
+      _pty = Pty.start(
+        shell,
+        arguments: args,
+        environment: {'TERM': 'xterm-256color'},
+        workingDirectory: _projectPath,
+      );
+      _pty!.output.cast<List<int>>().transform(const Utf8Decoder()).listen(_terminal.write);
+      _pty!.exitCode.then((code) => _terminal.write('Process exited: $code\n'));
+      _terminal.onOutput = (data) {
+        _pty!.write(const Utf8Encoder().convert(data));
+      };
+    } catch (e) {
+      _terminal.write('Failed to start terminal: $e\n');
+    }
   }
 
   // ─── Browser Tabs ───────────────────────────────────────────────────────────
@@ -3529,7 +3550,13 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
       child: InkWell(
-        onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+        onTap: () {
+          if (kIsWeb) {
+            launchUrl(Uri.parse(url), mode: LaunchMode.platformDefault);
+          } else {
+            _navigateInCurrentTab(url);
+          }
+        },
         borderRadius: BorderRadius.circular(16),
         child: Container(
           width: double.infinity,
@@ -4173,7 +4200,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       return IconButton(icon: Icon(Icons.more_horiz, color: iconColor), onPressed: _showEllipsisMenu);
     }
 
-    // Makaw Home: hamburger menu (left) | spacer | overflow (right). NO tab counter, NO omnibox pill.
+    // Makaw Home: hamburger menu (left) | spacer | settings (right). NO tab counter, NO omnibox pill, NO overflow menu.
     if (_isMakawHome) {
       return Container(
         color: headerBg,
@@ -4185,8 +4212,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             IconButton(icon: Icon(Icons.visibility_off, color: iconColor), onPressed: _goHome),
           Spacer(),
         IconButton(
-          icon: Icon(Icons.more_horiz, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: _showEllipsisMenu,
+          icon: Icon(Icons.settings, color: Theme.of(context).colorScheme.onSurface),
+          onPressed: () => _switchToView('settings'),
         ),
         ]),
       );
@@ -4562,7 +4589,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             ],
           ),
         ),
-        if (!showHome && !isTypeView && _musicService.currentSong != null) _buildMiniMusicPlayer(),
       ],
     );
   }
@@ -4575,7 +4601,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         Expanded(
           child: _buildWebHomeContent(),
         ),
-        if (_musicService.currentSong != null) _buildMiniMusicPlayer(),
       ],
     );
   }
@@ -4591,8 +4616,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ),
         Spacer(),
         IconButton(
-          icon: Icon(Icons.more_horiz, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: _showEllipsisMenu,
+          icon: Icon(Icons.settings, color: Theme.of(context).colorScheme.onSurface),
+          onPressed: () => _switchToView('settings'),
         ),
       ]),
     );
@@ -4875,7 +4900,13 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   Widget _buildDownloadChip(String platform, IconData icon) {
     return InkWell(
-      onTap: () => launchUrl(Uri.parse('https://github.com/hexadigitall/makaw/releases/latest'), mode: LaunchMode.externalApplication),
+      onTap: () {
+        if (kIsWeb) {
+          launchUrl(Uri.parse('https://github.com/hexadigitall/makaw/releases/latest'), mode: LaunchMode.platformDefault);
+        } else {
+          _navigateInCurrentTab('https://github.com/hexadigitall/makaw/releases/latest');
+        }
+      },
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -6995,129 +7026,44 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
   void _injectDownloadInterceptorScript(InAppWebViewController c) {
     c.evaluateJavascript(source: '''
 (function() {
-  if (window._makawDownloadIntervalIds) {
-    window._makawDownloadIntervalIds.forEach(clearInterval);
-  }
-  window._makawDownloadIntervalIds = [];
   if (window._makawDownloadInit) return;
   window._makawDownloadInit = true;
 
-  var binaryExts = ['zip','rar','7z','tar','gz','apk','exe','msi','iso','img','dmg','deb','rpm'];
-
   function sendDownload(url, filename) {
-    if (!url || url.startsWith('javascript:') || url.startsWith('about:')) return;
+    if (!url || url.startsWith('javascript:') || url.startsWith('about:') || url.startsWith('blob:')) return;
     flutter_inappwebview.callHandler('MakawDownloadChannel', JSON.stringify({url: url, filename: filename || ''}));
   }
 
-  // Intercept <a download> and binary file links only
+  // Only intercept clicks on <a download> — the site explicitly wants to download
   document.addEventListener('click', function(e) {
     var a = e.target.closest('a[download]');
-    if (a && a.href) {
+    if (a && a.href && a.href.startsWith('http')) {
       e.preventDefault();
       e.stopPropagation();
-      sendDownload(a.href, a.download);
-      return;
-    }
-    a = e.target.closest('a');
-    if (!a || !a.href) return;
-    var ext = a.href.split('?')[0].split('#')[0].split('.').pop().toLowerCase();
-    if (binaryExts.indexOf(ext) >= 0 && a.href.startsWith('http')) {
-      e.preventDefault();
-      e.stopPropagation();
-      sendDownload(a.href, a.href.split('/').pop().split('?')[0].split('#')[0]);
+      sendDownload(a.href, a.download || a.href.split('/').pop().split('?')[0]);
     }
   }, true);
 
-  // Intercept blob URL downloads
-  var origCreateObjectURL = window.URL.createObjectURL;
-  window.URL.createObjectURL = function(obj) {
-    var url = origCreateObjectURL.apply(this, arguments);
-    _makawBlobUrls = _makawBlobUrls || [];
-    _makawBlobUrls.push(url);
-    return url;
-  };
-
-  // Intercept window.open only for binary files
-  var origOpen = window.open;
-  window.open = function(url, name, features) {
-    var ext = (url || '').split('?')[0].split('.').pop().toLowerCase();
-    if (binaryExts.indexOf(ext) >= 0 && url && url.startsWith('http')) {
-      sendDownload(url, url.split('/').pop().split('?')[0]);
-      return null;
-    }
-    return origOpen ? origOpen.apply(this, arguments) : null;
-  };
-
-  // Intercept fetch() for binary attachment downloads
+  // Intercept fetch() only when Content-Disposition: attachment is present
   var origFetch = window.fetch;
   if (origFetch) {
     window.fetch = function(input, init) {
       return origFetch.apply(this, arguments).then(function(response) {
-        var url = typeof input === 'string' ? input : (input.url || '');
-        var ctype = response.headers && response.headers.get ? response.headers.get('content-type') || '' : '';
-        var cd = response.headers && response.headers.get ? response.headers.get('content-disposition') || '' : '';
-        var isBinary = cd.indexOf('attachment') >= 0 || ctype.indexOf('octet-stream') >= 0;
-        if (isBinary && url.startsWith('http')) {
-          var fn = '';
-          var match = cd.match(/filename="?([^"]+)"?/);
-          if (match) fn = match[1];
-          if (!fn) fn = url.split('/').pop().split('?')[0];
-          sendDownload(url, fn);
-        }
+        try {
+          var url = typeof input === 'string' ? input : (input.url || '');
+          var cd = response.headers && response.headers.get ? response.headers.get('content-disposition') || '' : '';
+          if (cd.indexOf('attachment') >= 0 && url.startsWith('http')) {
+            var fn = '';
+            var match = cd.match(/filename="?([^";]+)"?/);
+            if (match) fn = match[1].trim();
+            if (!fn) fn = url.split('/').pop().split('?')[0];
+            sendDownload(url, fn);
+          }
+        } catch(_) {}
         return response;
       }).catch(function(e) { return origFetch.apply(this, arguments); });
     };
   }
-
-  // Intercept XHR for binary downloads
-  var origSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.send = function(body) {
-    var xhr = this;
-    xhr.addEventListener('load', function() {
-      var url = xhr.responseURL || '';
-      var ctype = xhr.getResponseHeader('content-type') || '';
-      var cd = xhr.getResponseHeader('content-disposition') || '';
-      var isBinary = cd.indexOf('attachment') >= 0 || ctype.indexOf('octet-stream') >= 0;
-      if (isBinary && url.startsWith('http')) {
-        var fn = '';
-        var match = cd.match(/filename="?([^"]+)"?/);
-        if (match) fn = match[1];
-        if (!fn) fn = url.split('/').pop().split('?')[0];
-        sendDownload(url, fn);
-      }
-    });
-    return origSend.apply(this, arguments);
-  };
-
-  // Monitor for blob downloads
-  window._makawDownloadIntervalIds.push(setInterval(function() {
-    if (!_makawBlobUrls || !_makawBlobUrls.length) return;
-    var anchors = document.querySelectorAll('a');
-    for (var i = 0; i < anchors.length; i++) {
-      var a = anchors[i];
-      if (a.href && a.href.startsWith('blob:') && a.getAttribute('download')) {
-        sendDownload(a.href, a.download || 'download');
-        a.removeAttribute('download');
-      }
-    }
-  }, 1000));
-
-  // MutationObserver for dynamically created download links
-  var observer = new MutationObserver(function(mutations) {
-    mutations.forEach(function(mut) {
-      mut.addedNodes.forEach(function(node) {
-        if (node.nodeType === 1) {
-          if (node.tagName === 'A' && node.href && node.hasAttribute('download')) {
-            sendDownload(node.href, node.getAttribute('download') || '');
-          }
-          node.querySelectorAll && node.querySelectorAll('a[download]').forEach(function(a) {
-            if (a.href) sendDownload(a.href, a.download || '');
-          });
-        }
-      });
-    });
-  });
-  if (document.body) observer.observe(document.body, {childList: true, subtree: true});
 })();
 ''').catchError((_) {});
   }

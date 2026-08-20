@@ -51,24 +51,45 @@ jobs:
       - name: Build App Bundle (AAB)
         run: flutter build appbundle --release --android-skip-build-dependency-validation
 
+      - name: Rename APKs with proper branding
+        run: |
+          cd build/app/outputs/flutter-apk
+          VERSION=$(grep 'version:' ../../../pubspec.yaml | head -1 | sed 's/.*: //' | sed 's/+.*//')
+          for f in app-*-release.apk; do
+            if [ -f "$f" ]; then
+              ABI=$(echo "$f" | sed 's/app-//' | sed 's/-release.apk//')
+              NEWNAME="makaw-${ABI}-v${VERSION}.apk"
+              mv "$f" "$NEWNAME"
+              echo "Renamed $f -> $NEWNAME"
+            fi
+          done
+          # Rename AAB too
+          cd ../../bundle/release
+          if [ -f "app-release.aab" ]; then
+            mv "app-release.aab" "makaw-v${VERSION}.aab"
+            echo "Renamed app-release.aab -> makaw-v${VERSION}.aab"
+          fi
+
       - name: Generate checksums
         run: |
           cd $GITHUB_WORKSPACE/build/app/outputs/flutter-apk
-          find . -name "*.apk" -exec sha256sum {} \; > SHA256.txt
+          find . -name "makaw-*.apk" -exec sha256sum {} \; > SHA256.txt
           cd $GITHUB_WORKSPACE/build/app/outputs/bundle/release
-          sha256sum app-release.aab >> $GITHUB_WORKSPACE/build/app/outputs/flutter-apk/SHA256.txt
+          if [ -f "makaw-*.aab" ]; then
+            sha256sum makaw-*.aab >> $GITHUB_WORKSPACE/build/app/outputs/flutter-apk/SHA256.txt
+          fi
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: makaw-apks
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/makaw-*.apk
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: makaw-aab
-          path: build/app/outputs/bundle/release/app-release.aab
+          path: build/app/outputs/bundle/release/makaw-*.aab
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -77,8 +98,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: "Makaw ${{ github.ref_name }}"
           files: |
-            build/app/outputs/flutter-apk/*.apk
-            build/app/outputs/bundle/release/app-release.aab
+            build/app/outputs/flutter-apk/makaw-*.apk
+            build/app/outputs/bundle/release/makaw-*.aab
             build/app/outputs/flutter-apk/SHA256.txt
           generate_release_notes: true
           draft: false
