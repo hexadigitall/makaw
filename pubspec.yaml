@@ -1,6 +1,6 @@
 name: makaw
 description: Makaw — Full-featured hybrid browser, code studio & creative platform
-version: 1.0.4+5
+version: 1.0.28+28
 publish_to: 'none'
 
 environment:
@@ -36,9 +36,14 @@ dependencies:
   mobile_scanner: ^7.2.1
   video_player: ^2.9.0
   just_audio: ^0.9.39
+  audio_service: ^0.18.19
+  on_audio_query: ^2.9.0
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
   pdfrx: ^1.0.83
   flutter_epub_viewer: ^1.2.1
-  webfeed: ^0.7.0
+  rss_dart: ^1.0.14
   flutter_video_thumbnail: ^0.0.2
   geolocator: ^11.0.0
   flutter_riverpod: ^2.6.1

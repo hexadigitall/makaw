@@ -40,6 +40,8 @@ import 'features/browser/data/services/content_blocker_service.dart';
 import 'features/browser/presentation/providers/download_service.dart';
 import 'core/services/update_service.dart';
 import 'core/services/media_notification_service.dart';
+import 'package:audio_service/audio_service.dart' as audio_svc;
+import 'features/music/data/services/makaw_audio_handler.dart';
 import 'features/news/presentation/pages/news_feed_page.dart';
 import 'features/media/presentation/pages/video_player_page.dart';
 import 'features/pdf/presentation/pages/pdf_viewer_page.dart';
@@ -196,10 +198,25 @@ void main() async {
 
   try { await globalMusicService.init(); } catch (_) {}
   try { await _initMediaNotification(); } catch (_) {}
+  try {
+    globalAudioHandler = await audio_svc.AudioService.init(
+      builder: () => MakawAudioHandler(),
+      config: const audio_svc.AudioServiceConfig(
+        androidNotificationChannelId: 'com.hexadigitall.makaw.audio',
+        androidNotificationChannelName: 'Makaw Music Playback',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+        androidNotificationIcon: 'drawable/ic_makaw_logo',
+      ),
+    );
+  } catch (e) {
+    print('AudioService init failed: $e');
+  }
   runApp(ProviderScope(child: MakawApp()));
 }
 
 final MusicPlayerService globalMusicService = MusicPlayerService();
+late MakawAudioHandler globalAudioHandler;
 String audioServiceStatus = 'unknown';
 
 const _systemChannel = MethodChannel('com.hexadigitall.makaw/system');
@@ -373,6 +390,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool get _showHomeScreen => _viewMode == ViewMode.home || _viewMode == ViewMode.newTab;
   bool get _isMakawHome => _viewMode == ViewMode.home;
   bool get _isNewTabView => _viewMode == ViewMode.newTab;
+  bool _typeViewKeyboardDismissed = false;
   bool _showMediaHub = false;
   bool _ready = false;
   bool _miniPlayerDismissed = false;
@@ -933,12 +951,36 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   }
 
   Future<void> _checkUpdatesOnStartup() async {
-    await Future.delayed(const Duration(seconds: 3));
+    await Future.delayed(const Duration(seconds: 5));
     if (!mounted) return;
-    final result = await _updateService?.checkForUpdate();
-    if (!mounted || result == null) return;
-    if (result.result == UpdateCheckResult.available && result.info != null) {
-      _showUpdateDialog(result.info!);
+    await _performUpdateCheck();
+    // Periodic check every 6 hours
+    Timer.periodic(const Duration(hours: 6), (timer) {
+      if (!mounted) { timer.cancel(); return; }
+      _performUpdateCheck();
+    });
+  }
+
+  bool _updateDialogShowing = false;
+
+  Future<void> _performUpdateCheck() async {
+    if (!mounted || _updateService == null) return;
+    try {
+      final result = await _updateService!.checkForUpdate();
+      if (!mounted || result == null) return;
+      switch (result.result) {
+        case UpdateCheckResult.available:
+          if (result.info != null && !_updateDialogShowing) {
+            _updateDialogShowing = true;
+            _showUpdateDialog(result.info!);
+          }
+        case UpdateCheckResult.upToDate:
+          debugPrint('[Update] App is up to date');
+        case UpdateCheckResult.error:
+          debugPrint('[Update] Check failed: ${result.error}');
+      }
+    } catch (e) {
+      debugPrint('[Update] Unexpected error: $e');
     }
   }
 
@@ -1782,15 +1824,22 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _showToast('Update service not available');
       return;
     }
-    final result = await _updateService!.checkForUpdate();
-    if (!mounted || result == null) return;
-    switch (result.result) {
-      case UpdateCheckResult.available:
-        _showUpdateDialog(result.info!);
-      case UpdateCheckResult.upToDate:
-        _showToast('Already up to date');
-      case UpdateCheckResult.error:
-        _showToast('Update check failed: ${result.error}');
+    try {
+      final result = await _updateService!.checkForUpdate();
+      if (!mounted || result == null) return;
+      switch (result.result) {
+        case UpdateCheckResult.available:
+          if (result.info != null) {
+            _updateDialogShowing = false;
+            _showUpdateDialog(result.info!);
+          }
+        case UpdateCheckResult.upToDate:
+          _showToast('Already up to date');
+        case UpdateCheckResult.error:
+          _showToast('Update check failed: ${result.error}');
+      }
+    } catch (e) {
+      _showToast('Update check error: $e');
     }
   }
 
@@ -1839,13 +1888,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         actions: [
           if (!info.mandatory)
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: () { _updateDialogShowing = false; Navigator.pop(ctx); },
               child: Text('Later', style: TextStyle(color: Colors.grey)),
             ),
           ElevatedButton.icon(
             icon: Icon(Icons.download, size: 16),
             label: Text('Update'),
             onPressed: () {
+              _updateDialogShowing = false;
               Navigator.pop(ctx);
               _downloadAndInstallUpdate(info);
             },
@@ -3102,8 +3152,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               if (didPop) return;
               if (_currentView == 'browser') {
                 if (_viewMode == ViewMode.typeView) {
-                  _urlFocusNode.unfocus();
                   _suggestDebounce?.cancel();
+                  if (_urlFocusNode.hasFocus) {
+                    _urlFocusNode.unfocus();
+                    return;
+                  }
                   if (_browserTabs.isEmpty) {
                     setState(() {
                       _viewMode = ViewMode.home;
@@ -3617,25 +3670,22 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ),
       ),
     );
-    // On web: allow swipe to dismiss (without stopping playback)
-    if (kIsWeb) {
-      return Dismissible(
-        key: ValueKey('mini_player_${_musicService.currentSong?.id}'),
-        direction: DismissDirection.horizontal,
-        onDismissed: (_) {
-          setState(() { _miniPlayerDismissed = true; });
-        },
-        background: Container(
-          height: 68,
-          color: Colors.red.shade400,
-          alignment: Alignment.centerRight,
-          padding: EdgeInsets.only(right: 16),
-          child: Icon(Icons.close, color: Colors.white),
-        ),
-        child: player,
-      );
-    }
-    return player;
+    // Allow swipe to dismiss on ALL platforms (without stopping playback)
+    return Dismissible(
+      key: ValueKey('mini_player_${_musicService.currentSong?.id}'),
+      direction: DismissDirection.horizontal,
+      onDismissed: (_) {
+        setState(() { _miniPlayerDismissed = true; });
+      },
+      background: Container(
+        height: 68,
+        color: Colors.red.shade400,
+        alignment: Alignment.centerRight,
+        padding: EdgeInsets.only(right: 16),
+        child: Icon(Icons.close, color: Colors.white),
+      ),
+      child: player,
+    );
   }
 
   void _showMiniPlayerQueue() {
@@ -4059,7 +4109,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         child: GestureDetector(
           onTap: () {
             final clean = _cleanDisplayUrl(_urlController.text);
-            _typeViewFromHome = false;
+            _typeViewFromHome = _isNewTabView || _isMakawHome;
             _ignoreUrlChanges = true;
             if (clean.isNotEmpty) _urlController.text = clean;
             _ignoreUrlChanges = false;
@@ -4149,7 +4199,18 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       );
     }
 
-    // NTP & Browsing: home button (left) | omnibox pill (center) | tab counter | overflow (right)
+    // NTP: centered omnibox only (no home, no tab counter, no overflow)
+    if (_isNewTabView) {
+      return Container(
+        color: headerBg,
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Row(children: [
+          _buildUrlPill(),
+        ]),
+      );
+    }
+
+    // Browsing: home button (left) | omnibox pill (center) | tab counter | overflow (right)
     return Container(
       color: headerBg,
       padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -5005,14 +5066,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         child: _buildShortcutsGrid(),
       ),
     );
-    // ─── Browser NTP: omnibox + shortcuts only (no branding/media/news) ─────
+    // ─── Browser NTP: shortcuts only (omnibox is in the header) ─────
     if (_isNewTabView) {
       return CustomScrollView(
         cacheExtent: 250,
         slivers: [
-          SliverToBoxAdapter(child: SizedBox(height: 40)),
-          SliverToBoxAdapter(child: omnibox),
-          SliverToBoxAdapter(child: SizedBox(height: 24)),
+          SliverToBoxAdapter(child: SizedBox(height: 16)),
           SliverToBoxAdapter(child: shortcuts),
           SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],

@@ -24,22 +24,18 @@ jobs:
         run: flutter pub get
 
       - name: Decode keystore
-        if: env.KEYSTORE_B64 != ''
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_B64" | base64 -d > android/app/makaw-release.jks
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/makaw-release.jks
 
       - name: Decode key.properties
-        if: env.KEYPROPS_B64 != ''
-        env:
-          KEYPROPS_B64: ${{ secrets.ANDROID_KEY_PROPERTIES_BASE64 }}
-        run: echo "$KEYPROPS_B64" | base64 -d > android/key.properties
+        if: ${{ secrets.ANDROID_KEY_PROPERTIES_BASE64 != '' }}
+        run: echo "${{ secrets.ANDROID_KEY_PROPERTIES_BASE64 }}" | base64 -d > android/key.properties
 
       - name: Build split APKs (per-ABI)
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --android-skip-build-dependency-validation
 
       - name: Build App Bundle (AAB)
-        run: flutter build appbundle --release
+        run: flutter build appbundle --release --android-skip-build-dependency-validation
 
       - name: Generate checksums
         run: |

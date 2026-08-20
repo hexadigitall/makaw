@@ -115,7 +115,28 @@ class UpdateService {
         ? (int.tryParse(remoteParts[2]) ?? 0)
         : 0;
 
-    if (remoteBuild <= currentBuild) {
+    // Compare using full semver (major.minor.patch) if available,
+    // otherwise fall back to build number comparison.
+    final currentParts = currentVersion.split('.');
+    final currentMajor = int.tryParse(currentParts.isNotEmpty ? currentParts[0] : '0') ?? 0;
+    final currentMinor = int.tryParse(currentParts.length > 1 ? currentParts[1] : '0') ?? 0;
+    final currentPatch = int.tryParse(currentParts.length > 2 ? currentParts[2] : '0') ?? 0;
+    final remoteMajor = int.tryParse(remoteParts.isNotEmpty ? remoteParts[0] : '0') ?? 0;
+    final remoteMinor = int.tryParse(remoteParts.length > 1 ? remoteParts[1] : '0') ?? 0;
+
+    bool isNewer = false;
+    if (remoteMajor > currentMajor) {
+      isNewer = true;
+    } else if (remoteMajor == currentMajor && remoteMinor > currentMinor) {
+      isNewer = true;
+    } else if (remoteMajor == currentMajor && remoteMinor == currentMinor && remoteBuild > currentPatch) {
+      isNewer = true;
+    } else if (remoteBuild > currentBuild) {
+      // Fallback: tag patch number vs pubspec build number
+      isNewer = true;
+    }
+
+    if (!isNewer) {
       return UpdateCheckResponse(result: UpdateCheckResult.upToDate);
     }
 

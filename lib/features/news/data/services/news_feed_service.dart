@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webfeed/webfeed.dart';
+import 'package:rss_dart/dart_rss.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../domain/entities/entities.dart';
 export '../../domain/entities/entities.dart';
@@ -432,7 +432,7 @@ class NewsFeedService {
               url: item.link ?? '',
               summary: item.description?.trim(),
               imageUrl: imageUrl,
-              pubDate: item.pubDate,
+              pubDate: item.pubDate != null ? DateTime.tryParse(item.pubDate!) : null,
               source: categoryName,
             );
           }).toList() ?? [];
