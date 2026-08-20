@@ -1894,7 +1894,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
                       child: Text(
                         progress > 0
                             ? 'Downloading ${(progress * 100).toInt()}%...'
-                            : 'Downloading update...',
+                            : 'Downloading ${info.platformLabel} update...',
                         style: TextStyle(fontSize: 14),
                       ),
                     ),
@@ -1916,7 +1916,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       ),
     );
 
-    final path = await _updateService?.downloadApk(
+    final path = await _updateService?.downloadUpdate(
       info,
       onProgress: (received, total) {
         if (total > 0) {
@@ -1935,13 +1935,23 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       return;
     }
 
-    scaffold.showSnackBar(SnackBar(content: Text('Installing...')));
-    final installed = await _updateService?.installApk(path) ?? false;
-    if (!installed) {
+    if (kIsWeb) return;
+
+    if (Platform.isAndroid) {
+      scaffold.showSnackBar(SnackBar(content: Text('Installing...')));
+      final opened = await _updateService?.openUpdateFile(path) ?? false;
+      if (!opened) {
+        scaffold.showSnackBar(SnackBar(
+          content: Text('Tap the notification or open the file from downloads to install.'),
+          duration: Duration(seconds: 5),
+        ));
+      }
+    } else {
       scaffold.showSnackBar(SnackBar(
-        content: Text('Tap the notification or open the APK from downloads to install.'),
-        duration: Duration(seconds: 5),
+        content: Text('Downloaded ${info.fileName} — opening release page...'),
+        duration: Duration(seconds: 3),
       ));
+      await _updateService?.openReleasePage();
     }
   }
 
@@ -2680,7 +2690,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     _urlFocusNode.removeListener(_onUrlFocusChanged);
     _musicService.removeListener(_onMusicChanged);
     _downloadManager?.dispose();
-    _updateService?.cleanOldApks();
+    _updateService?.cleanOldDownloads();
     _pty?.kill();
     _urlController.dispose();
     _searchController.dispose();
@@ -3210,103 +3220,192 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   // ─── Desktop NavigationRail Scaffold ───────────────────────────────────────
-  Widget _buildDesktopScaffold() {
-    final navItems = [
-      (Icons.language, 'Browser'),
-      (Icons.code, 'Code Studio'),
-      (Icons.terminal, 'Terminal'),
-      (Icons.music_note, 'Music'),
-      (Icons.videocam, 'Videos'),
-      (Icons.photo_library, 'Gallery'),
-      (Icons.description, 'Documents'),
-      (Icons.content_paste, 'Snippets'),
-      (Icons.cloud, 'Cloud Sync'),
-      (Icons.history, 'History'),
-    ];
-    final navKeys = ['browser', 'studio', 'terminal', 'music', 'player', 'images', 'documents', 'snippets', 'cloud', 'history'];
-    final currentIndex = navKeys.indexOf(_currentView);
-    final effectiveIndex = currentIndex >= 0 ? currentIndex : 0;
+  // ─── Desktop Push Menu State ──────────────────────────────────────────────
+  bool _desktopMenuOpen = false;
 
-    return Row(
-      children: [
-        NavigationRail(
-          selectedIndex: effectiveIndex,
-          onDestinationSelected: (i) => _switchToView(navKeys[i]),
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          indicatorColor: kAccentTeal.withOpacity(0.15),
-          selectedIconTheme: IconThemeData(color: kAccentTeal, size: 24),
-          unselectedIconTheme: IconThemeData(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), size: 22),
-          selectedLabelTextStyle: TextStyle(color: kAccentTeal, fontSize: kTextMicro, fontWeight: kWeightSemibold),
-          unselectedLabelTextStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: kTextMicro),
-          labelType: NavigationRailLabelType.all,
-          leading: Padding(
-            padding: EdgeInsets.symmetric(vertical: kSpaceSM),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+  void _toggleDesktopMenu() {
+    setState(() => _desktopMenuOpen = !_desktopMenuOpen);
+  }
+
+  Widget _buildDesktopScaffold() {
+    const menuWidth = 260.0;
+    final navItems = [
+      (Icons.language, 'Browser', 'browser'),
+      (Icons.code, 'Code Studio', 'studio'),
+      (Icons.terminal, 'Terminal', 'terminal'),
+      (Icons.music_note, 'Music', 'music'),
+      (Icons.videocam, 'Videos', 'player'),
+      (Icons.photo_library, 'Gallery', 'images'),
+      (Icons.description, 'Documents', 'documents'),
+      (Icons.content_paste, 'Snippets', 'snippets'),
+      (Icons.cloud, 'Cloud Sync', 'cloud'),
+      (Icons.history, 'History', 'history'),
+      (Icons.download, 'Downloads', 'downloads'),
+      (Icons.folder, 'Projects', 'projects'),
+      (Icons.account_tree, 'Git', 'git'),
+      (Icons.wifi_tethering, 'Media Sniffer', 'sniffer'),
+    ];
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: Row(
+        children: [
+          AnimatedContainer(
+            duration: Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+            width: _desktopMenuOpen ? menuWidth : 0,
+            child: _desktopMenuOpen
+                ? _buildDesktopSideMenu(navItems)
+                : SizedBox.shrink(),
+          ),
+          if (_desktopMenuOpen)
+            VerticalDivider(width: 1, thickness: 1, color: Theme.of(context).cardColor),
+          Expanded(
+            child: Column(
               children: [
-                Image.asset('assets/makaw_logo_28.png', width: 28, height: 28),
-                SizedBox(width: kSpaceSM),
-                Text('Makaw', style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextBody, fontWeight: kWeightBold, color: Theme.of(context).colorScheme.onSurface)),
+                Expanded(
+                  child: PopScope(
+                    canPop: false,
+                    onPopInvokedWithResult: (didPop, _) async {
+                      if (didPop) return;
+                      if (_currentView == 'browser') {
+                        if (_viewMode == ViewMode.typeView) {
+                          _urlFocusNode.unfocus();
+                          _suggestDebounce?.cancel();
+                          if (_browserTabs.isEmpty) {
+                            setState(() { _viewMode = ViewMode.home; });
+                            return;
+                          }
+                          final lastUrl = _browserTabs.isNotEmpty ? _browserTabs.last.url : '';
+                          setState(() { _viewMode = lastUrl.isEmpty ? ViewMode.home : ViewMode.browsing; });
+                          return;
+                        }
+                        if (_viewMode == ViewMode.browsing) {
+                          final controller = _tabControllers[_activeBrowserTabId];
+                          if (controller != null && await controller.canGoBack()) {
+                            controller.goBack();
+                            return;
+                          }
+                          setState(() { _viewMode = _urlController.text.isNotEmpty ? ViewMode.browsing : ViewMode.home; });
+                          return;
+                        }
+                      }
+                    },
+                    child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
+                  ),
+                ),
+                _buildDesktopFooter(),
               ],
             ),
           ),
-          trailing: Expanded(
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: EdgeInsets.only(bottom: kSpaceBase),
-                child: IconButton(
-                  icon: Icon(widget.themeMode == 'dark' ? Icons.light_mode : Icons.dark_mode, size: 22),
-                  onPressed: _cycleTheme,
-                  tooltip: 'Theme: ${widget.themeMode}',
-                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopSideMenu(List<(IconData, String, String)> navItems) {
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: kSpaceBase, vertical: kSpaceMD),
+              child: Row(
+                children: [
+                  Image.asset('assets/makaw_logo_28.png', width: 28, height: 28),
+                  SizedBox(width: kSpaceSM),
+                  Text('Makaw', style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextBody, fontWeight: kWeightBold, color: Theme.of(context).colorScheme.onSurface)),
+                ],
               ),
             ),
-          ),
-          destinations: navItems.map((item) => NavigationRailDestination(
-            icon: Icon(item.$1),
-            selectedIcon: Icon(item.$1),
-            label: Text(item.$2),
-          )).toList(),
-        ),
-        VerticalDivider(width: 1, thickness: 1, color: Theme.of(context).cardColor),
-        Expanded(
-          child: Scaffold(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            body: PopScope(
-              canPop: false,
-              onPopInvokedWithResult: (didPop, _) async {
-                if (didPop) return;
-                if (_currentView == 'browser') {
-                  if (_viewMode == ViewMode.typeView) {
-                    _urlFocusNode.unfocus();
-                    _suggestDebounce?.cancel();
-                    if (_browserTabs.isEmpty) {
-                      setState(() { _viewMode = ViewMode.home; });
-                      return;
-                    }
-                    final lastUrl = _browserTabs.isNotEmpty ? _browserTabs.last.url : '';
-                    setState(() { _viewMode = lastUrl.isEmpty ? ViewMode.home : ViewMode.browsing; });
-                    return;
-                  }
-                  if (_viewMode == ViewMode.browsing) {
-                    final controller = _tabControllers[_activeBrowserTabId];
-                    if (controller != null && await controller.canGoBack()) {
-                      controller.goBack();
-                      return;
-                    }
-                    setState(() { _viewMode = _urlController.text.isNotEmpty ? ViewMode.browsing : ViewMode.home; });
-                    return;
-                  }
-                }
+            Divider(height: 1, color: Theme.of(context).cardColor),
+            Expanded(
+              child: ListView.builder(
+                padding: EdgeInsets.symmetric(vertical: kSpaceXS),
+                itemCount: navItems.length,
+                itemBuilder: (ctx, i) {
+                  final item = navItems[i];
+                  final active = _currentView == item.$3;
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: kSpaceBase),
+                    leading: Icon(item.$1, size: 20, color: active ? kAccentTeal : Theme.of(context).colorScheme.onSurface.withOpacity(0.55)),
+                    title: Text(item.$2, style: TextStyle(
+                      fontSize: kTextCaption,
+                      fontWeight: active ? kWeightSemibold : kWeightRegular,
+                      color: active ? kAccentTeal : Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                    )),
+                    selected: active,
+                    selectedTileColor: kAccentTeal.withOpacity(0.08),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusSM)),
+                    onTap: () {
+                      _switchToView(item.$3);
+                      setState(() => _desktopMenuOpen = false);
+                    },
+                  );
+                },
+              ),
+            ),
+            Divider(height: 1, color: Theme.of(context).cardColor),
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: kSpaceBase),
+              leading: Icon(Icons.system_update, size: 20, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.55)),
+              title: Text('Check for Updates', style: TextStyle(fontSize: kTextCaption, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))),
+              onTap: () {
+                setState(() => _desktopMenuOpen = false);
+                _checkForUpdatesManual();
               },
-              child: SafeArea(
-                child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
-              ),
+            ),
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: kSpaceBase),
+              leading: Icon(Icons.info_outline, size: 20, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.55)),
+              title: Text('About Makaw', style: TextStyle(fontSize: kTextCaption, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))),
+              onTap: () {
+                setState(() => _desktopMenuOpen = false);
+                _showAboutMakaw();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopFooter() {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(top: BorderSide(color: Theme.of(context).cardColor, width: 1)),
+      ),
+      padding: EdgeInsets.symmetric(horizontal: kSpaceSM),
+      child: Row(
+        children: [
+          InkWell(
+            onTap: _toggleDesktopMenu,
+            borderRadius: BorderRadius.circular(kRadiusSM),
+            child: Padding(
+              padding: EdgeInsets.all(kSpaceXS),
+              child: Image.asset('assets/makaw_logo_28.png', width: 20, height: 20),
             ),
           ),
-        ),
-      ],
+          if (_desktopMenuOpen) ...[
+            SizedBox(width: kSpaceXS),
+            Text('Makaw', style: TextStyle(fontSize: kTextMicro, fontWeight: kWeightSemibold, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))),
+          ],
+          Spacer(),
+          IconButton(
+            icon: Icon(widget.themeMode == 'dark' ? Icons.light_mode : Icons.dark_mode, size: 16),
+            onPressed: _cycleTheme,
+            tooltip: 'Theme: ${widget.themeMode}',
+            padding: EdgeInsets.all(kSpaceXS),
+            constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+        ],
+      ),
     );
   }
 

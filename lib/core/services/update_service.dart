@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -6,18 +5,23 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:url_launcher/url_launcher.dart';
 
 class UpdateInfo {
   final int versionCode;
   final String versionName;
-  final String apkUrl;
+  final String downloadUrl;
+  final String fileName;
+  final String platformLabel;
   final String releaseNotes;
   final bool mandatory;
 
   UpdateInfo({
     required this.versionCode,
     required this.versionName,
-    required this.apkUrl,
+    required this.downloadUrl,
+    required this.fileName,
+    required this.platformLabel,
     this.releaseNotes = '',
     this.mandatory = false,
   });
@@ -47,6 +51,9 @@ class UpdateService {
 
   String get _apiUrl =>
       'https://api.github.com/repos/$repoOwner/$repoName/releases/latest';
+
+  String get _releasePageUrl =>
+      'https://github.com/$repoOwner/$repoName/releases/latest';
 
   Future<PackageInfo> get packageInfo async {
     _packageInfo ??= await PackageInfo.fromPlatform();
@@ -112,30 +119,11 @@ class UpdateService {
       return UpdateCheckResponse(result: UpdateCheckResult.upToDate);
     }
 
-    String? apkUrl;
-    for (final asset in assets) {
-      final name = asset['name'] as String? ?? '';
-      if (name.endsWith('.apk') &&
-          (name.contains('arm64') || name.contains('universal'))) {
-        apkUrl = asset['browser_download_url'] as String?;
-        if (name.contains('arm64')) break;
-      }
-    }
-
-    if (apkUrl == null && assets.isNotEmpty) {
-      for (final asset in assets) {
-        final name = asset['name'] as String? ?? '';
-        if (name.endsWith('.apk')) {
-          apkUrl = asset['browser_download_url'] as String?;
-          break;
-        }
-      }
-    }
-
-    if (apkUrl == null) {
+    final asset = _findPlatformAsset(assets);
+    if (asset == null) {
       return UpdateCheckResponse(
         result: UpdateCheckResult.error,
-        error: 'No APK found in release',
+        error: 'No compatible file found in release for ${_platformName}',
       );
     }
 
@@ -144,13 +132,84 @@ class UpdateService {
       info: UpdateInfo(
         versionCode: remoteBuild > 0 ? remoteBuild : currentBuild + 1,
         versionName: remoteVersion.isNotEmpty ? remoteVersion : currentVersion,
-        apkUrl: apkUrl,
+        downloadUrl: asset['browser_download_url'] as String,
+        fileName: asset['name'] as String,
+        platformLabel: _platformName,
         releaseNotes: body,
       ),
     );
   }
 
-  Future<String?> downloadApk(
+  Map<String, dynamic>? _findPlatformAsset(List<dynamic> assets) {
+    if (Platform.isAndroid) {
+      return _findAndroidAsset(assets);
+    } else if (Platform.isWindows) {
+      return _findWindowsAsset(assets);
+    } else if (Platform.isLinux) {
+      return _findLinuxAsset(assets);
+    } else if (Platform.isMacOS) {
+      return _findMacAsset(assets);
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _findAndroidAsset(List<dynamic> assets) {
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
+      if (name.endsWith('.apk') && name.contains('arm64')) return asset;
+    }
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
+      if (name.endsWith('.apk') && name.contains('universal')) return asset;
+    }
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
+      if (name.endsWith('.apk')) return asset;
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _findWindowsAsset(List<dynamic> assets) {
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
+      if (name.contains('windows') && name.endsWith('.zip')) return asset;
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _findLinuxAsset(List<dynamic> assets) {
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
+      if (name.contains('linux') && name.endsWith('.tar.gz')) return asset;
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _findMacAsset(List<dynamic> assets) {
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
+      if (name.contains('macos') && name.endsWith('.zip')) return asset;
+    }
+    return null;
+  }
+
+  String get _platformName {
+    if (Platform.isAndroid) return 'Android';
+    if (Platform.isWindows) return 'Windows';
+    if (Platform.isLinux) return 'Linux';
+    if (Platform.isMacOS) return 'macOS';
+    return 'Unknown';
+  }
+
+  String get _fileExtension {
+    if (Platform.isAndroid) return '.apk';
+    if (Platform.isWindows) return '.zip';
+    if (Platform.isLinux) return '.tar.gz';
+    if (Platform.isMacOS) return '.zip';
+    return '';
+  }
+
+  Future<String?> downloadUpdate(
     UpdateInfo info, {
     void Function(int received, int total)? onProgress,
     CancelToken? cancelToken,
@@ -160,7 +219,7 @@ class UpdateService {
       final downloadDir = Directory(p.join(dir.path, 'makaw_updates'));
       await downloadDir.create(recursive: true);
 
-      final filename = 'makaw-${info.versionName}.apk';
+      final filename = 'makaw-${info.versionName}${_fileExtension}';
       final savePath = p.join(downloadDir.path, filename);
 
       final existing = File(savePath);
@@ -169,7 +228,7 @@ class UpdateService {
       }
 
       await _dio.download(
-        info.apkUrl,
+        info.downloadUrl,
         savePath,
         cancelToken: cancelToken,
         onReceiveProgress: onProgress,
@@ -181,29 +240,53 @@ class UpdateService {
 
       return savePath;
     } catch (e) {
-      debugPrint('Download APK error: $e');
+      debugPrint('Download update error: $e');
       return null;
     }
   }
 
-  Future<bool> installApk(String path) async {
+  Future<bool> openUpdateFile(String path) async {
     try {
-      final result = await OpenFilex.open(path);
-      return result.type == ResultType.done;
+      if (Platform.isAndroid) {
+        final result = await OpenFilex.open(path);
+        return result.type == ResultType.done;
+      } else {
+        return await openReleasePage();
+      }
     } catch (e) {
-      debugPrint('Install APK error: $e');
+      debugPrint('Open update error: $e');
       return false;
     }
   }
 
-  Future<void> cleanOldApks() async {
+  Future<bool> openReleasePage() async {
+    try {
+      final uri = Uri.parse(_releasePageUrl);
+      return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('Open release page error: $e');
+      return false;
+    }
+  }
+
+  String get updateActionLabel {
+    if (Platform.isAndroid) return 'Install';
+    return 'Open Release Page';
+  }
+
+  String get updateActionHint {
+    if (Platform.isAndroid) return '';
+    return 'The file will be downloaded, then the release page will open for instructions.';
+  }
+
+  Future<void> cleanOldDownloads() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final downloadDir = Directory(p.join(dir.path, 'makaw_updates'));
       if (await downloadDir.exists()) {
         final files = await downloadDir.list().toList();
         for (final f in files) {
-          if (f is File && f.path.endsWith('.apk')) {
+          if (f is File) {
             await f.delete();
           }
         }
