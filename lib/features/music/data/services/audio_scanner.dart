@@ -1,11 +1,10 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:on_audio_query/on_audio_query.dart';
 import '../../domain/entities/entities.dart';
 
 class MakawAudioScanner {
-  final OnAudioQuery _audioQuery = OnAudioQuery();
+  static const MethodChannel _channel = MethodChannel('com.hexadigitall.makaw/metadata');
 
   static const List<String> blacklistedDirectories = [
     'whatsapp', 'telegram', 'recordings', 'notifications',
@@ -21,49 +20,15 @@ class MakawAudioScanner {
   static const int minFileSize = 800 * 1024;
 
   Future<List<SongInfo>> scanRealSongs() async {
-    final hasPermission = await _audioQuery.checkAndRequest(retryRequest: true);
-    if (!hasPermission) return [];
-
     try {
-      final allSongs = await _audioQuery.querySongs(
-        sortType: SongSortType.TITLE,
-        orderType: OrderType.ASC_OR_SMALLER,
-        uriType: UriType.EXTERNAL,
-        ignoreCase: true,
-      );
-
-      final realSongs = allSongs.where((song) {
-        final duration = song.duration ?? 0;
-        final size = song.size;
-        final path = (song.data).toLowerCase();
-
-        final isLongEnough = duration >= minDurationMs;
-        final isLargeEnough = size >= minFileSize;
-        final isNotBlacklisted = !blacklistedDirectories.any((dir) => path.contains(dir));
-        final hasValidExt = supportedExtensions.any((ext) => path.endsWith(ext));
-
-        return isLongEnough && isLargeEnough && isNotBlacklisted && hasValidExt;
-      }).map((song) => SongInfo(
-        id: song.id,
-        title: (song.title ?? '').trim(),
-        artist: (song.artist ?? '').trim(),
-        album: (song.album ?? '').trim(),
-        filePath: song.data,
-        duration: song.duration ?? 0,
-        albumId: song.albumId ?? -1,
-        size: song.size,
-      )).toList();
-
-      realSongs.sort((a, b) => _compareAtoZ(a.title, b.title));
-      return realSongs;
+      return await _methodChannelScan();
     } catch (e) {
       debugPrint('MakawAudioScanner: scan failed: $e');
-      return _fallbackMethodChannelScan();
+      return [];
     }
   }
 
-  Future<List<SongInfo>> _fallbackMethodChannelScan() async {
-    const channel = MethodChannel('com.hexadigitall.makaw/metadata');
+  Future<List<SongInfo>> _methodChannelScan() async {
     try {
       final dirs = [
         '/storage/emulated/0/Music',
@@ -87,7 +52,7 @@ class MakawAudioScanner {
 
       if (files.isEmpty) return [];
 
-      final results = await channel.invokeMethod<List<dynamic>>(
+      final results = await _channel.invokeMethod<List<dynamic>>(
         'extractMetadataBatch',
         {'paths': files.take(500).toList()},
       );
@@ -118,16 +83,5 @@ class MakawAudioScanner {
       debugPrint('MakawAudioScanner: fallback scan failed: $e');
       return [];
     }
-  }
-
-  static int _compareAtoZ(String a, String b) {
-    final cleanA = a.trim();
-    final cleanB = b.trim();
-    final isALetter = RegExp(r'^[a-zA-Z]').hasMatch(cleanA);
-    final isBLetter = RegExp(r'^[a-zA-Z]').hasMatch(cleanB);
-
-    if (isALetter && !isBLetter) return -1;
-    if (!isALetter && isBLetter) return 1;
-    return cleanA.toLowerCase().compareTo(cleanB.toLowerCase());
   }
 }
