@@ -4544,7 +4544,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
     return Column(
       children: [
-        if (!_isFullscreen) _buildBrowserHeader(),
+        if (!_isFullscreen && !_isMakawHome) _buildBrowserHeader(),
         if (!showHome && !isTypeView && progress != null && progress > 0 && progress < 100)
           ClipRRect(
             borderRadius: BorderRadius.circular(2),
