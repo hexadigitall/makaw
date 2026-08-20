@@ -24,12 +24,26 @@ jobs:
         run: flutter pub get
 
       - name: Decode keystore
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/makaw-release.jks
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/makaw-release.jks
+            echo "Keystore decoded successfully"
+          else
+            echo "No keystore secret found, building unsigned"
+          fi
 
       - name: Decode key.properties
-        if: ${{ secrets.ANDROID_KEY_PROPERTIES_BASE64 != '' }}
-        run: echo "${{ secrets.ANDROID_KEY_PROPERTIES_BASE64 }}" | base64 -d > android/key.properties
+        env:
+          KEYPROPS_B64: ${{ secrets.ANDROID_KEY_PROPERTIES_BASE64 }}
+        run: |
+          if [ -n "$KEYPROPS_B64" ]; then
+            echo "$KEYPROPS_B64" | base64 -d > android/key.properties
+            echo "Key properties decoded successfully"
+          else
+            echo "No key properties secret found, building unsigned"
+          fi
 
       - name: Build split APKs (per-ABI)
         run: flutter build apk --release --split-per-abi --android-skip-build-dependency-validation
