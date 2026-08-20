@@ -2237,7 +2237,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
       onTap: () => setState(() { _playIndex = index; _page = 'player'; }),
       child: Container(
         decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFF2D3748), width: 0.5)),
-        clipBehavior: Clip.antiAlias,
+        clipBehavior: Clip.hardEdge,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2748,7 +2748,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
                 onTap: () { final idx = _service.allVideos.indexOf(videos[i]); Navigator.pop(context); setState(() { _playIndex = idx; _page = 'player'; }); },
                 child: Container(
                   decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFF2D3748), width: 0.5)),
-                  clipBehavior: Clip.antiAlias,
+                  clipBehavior: Clip.hardEdge,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

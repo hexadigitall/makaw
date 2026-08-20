@@ -203,21 +203,22 @@ class NewsFeedWidgetState extends State<NewsFeedWidget> {
             ),
           ),
           const SizedBox(height: 12),
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: displayItems.length + (hasMore ? 1 : 0),
-            itemBuilder: (_, i) {
-              if (i == displayItems.length) {
-                return Padding(
+          Column(
+            children: [
+              for (int i = 0; i < displayItems.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: RepaintBoundary(child: _buildFeedCard(displayItems[i], cat.name)),
+                ),
+              if (hasMore)
+                Padding(
                   padding: const EdgeInsets.only(top: 4, bottom: 8),
                   child: GestureDetector(
                     onTap: () => _showMore(cat.name),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        border: Border(top: BorderSide(color: const Color(0xFF1E293B), width: 0.5)),
+                      decoration: const BoxDecoration(
+                        border: Border(top: BorderSide(color: Color(0xFF1E293B), width: 0.5)),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -230,13 +231,8 @@ class NewsFeedWidgetState extends State<NewsFeedWidget> {
                       ),
                     ),
                   ),
-                );
-              }
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _buildFeedCard(displayItems[i], cat.name),
-              );
-            },
+                ),
+            ],
           ),
         ],
       ),
@@ -280,7 +276,7 @@ class NewsFeedWidgetState extends State<NewsFeedWidget> {
           color: const Color(0xFF151E2A),
           borderRadius: BorderRadius.circular(14),
         ),
-        clipBehavior: Clip.antiAlias,
+        clipBehavior: Clip.hardEdge,
         child: Stack(
           children: [
             Column(
@@ -291,7 +287,17 @@ class NewsFeedWidgetState extends State<NewsFeedWidget> {
                     height: 180,
                     child: Image.network(card.imageUrl!,
                       width: double.infinity,
+                      height: 180,
                       fit: BoxFit.cover,
+                      cacheWidth: (MediaQuery.of(context).size.width * 1.5).toInt(),
+                      frameBuilder: (ctx, child, frame, wasSynchronouslyLoaded) {
+                        if (wasSynchronouslyLoaded || frame != null) return child;
+                        return Container(
+                          height: 180,
+                          color: const Color(0xFF1B242D),
+                          child: const Center(child: Icon(Icons.article, color: Color(0xFF94A3B8), size: 36)),
+                        );
+                      },
                       errorBuilder: (_, __, ___) => Container(
                         height: 140,
                         color: const Color(0xFF1B242D),

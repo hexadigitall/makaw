@@ -4541,198 +4541,220 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     final isWide = Responsive.isDesktop(context);
     return RefreshIndicator(
       onRefresh: _refreshNewsFeed,
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
-            child: Column(
-              children: [
-                SizedBox(height: kSpaceXXL),
-                Image.asset('assets/makaw_logo_64.png', width: 64, height: 64, fit: BoxFit.contain),
-                SizedBox(height: kSpaceMD),
-                Text('Makaw',
-                  style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextHero, fontWeight: kWeightMedium, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
-                SizedBox(height: kSpaceXS),
-                Text('Code Studio · Creative Platform',
-                  style: TextStyle(fontSize: kTextSubtitle, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-                SizedBox(height: kSpaceXL),
-                // ─── Feature Grid ─────────────────────────────────────
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: kSpaceBase),
-                  child: _buildWebFeatureGrid(isWide),
-                ),
-                SizedBox(height: kSpaceLG),
-                // ─── AI Assistant ─────────────────────────────────────
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: kSpaceBase),
-                    child: InkWell(
-                    onTap: _showAIChat,
-                    borderRadius: BorderRadius.circular(kRadiusXL),
-                    child: Container(
-                      width: double.infinity,
-                      padding: EdgeInsets.symmetric(vertical: 14, horizontal: kSpaceBase),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF4285F4), Color(0xFF9B59B6)],
-                          begin: Alignment.topLeft, end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(kRadiusXL),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.auto_awesome, color: Colors.white, size: 22),
-                          SizedBox(width: kSpaceMD),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('AI Assistant', style: TextStyle(color: Colors.white, fontSize: kTextBody, fontWeight: kWeightSemibold)),
-                              Text('Powered by Gemini', style: TextStyle(color: Colors.white70, fontSize: kTextCaption)),
-                            ],
-                          ),
-                          Spacer(),
-                          Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 14),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: 20),
-                // ─── Media Players ────────────────────────────────────
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _switchToView('music'),
-                          child: Container(
-                            padding: EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(children: [
-                                  Icon(Icons.music_note, color: kPrimaryBlue, size: 22),
-                                  SizedBox(width: 8),
-                                  Text('Music', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                                ]),
-                                SizedBox(height: 10),
-                                if (_musicService.currentSong != null) ...[
-                                  Text(_musicService.currentSong!.displayTitle,
-                                    style: TextStyle(color: Colors.white70, fontSize: 12), overflow: TextOverflow.ellipsis, maxLines: 1),
-                                  Text(_musicService.currentSong!.displayArtist,
-                                    style: TextStyle(color: kTextTertiary, fontSize: 11), overflow: TextOverflow.ellipsis, maxLines: 1),
-                                  SizedBox(height: 8),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                    children: [
-                                      IconButton(icon: Icon(Icons.skip_previous, color: kPrimaryBlue, size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.previousSong()),
-                                      IconButton(icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: kPrimaryBlue, size: 24), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.togglePlayPause()),
-                                      IconButton(icon: Icon(Icons.skip_next, color: kPrimaryBlue, size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.nextSong()),
-                                    ],
-                                  ),
-                                ] else ...[
-                                  Text('No music playing', style: TextStyle(color: kTextTertiary, fontSize: 12)),
-                                  SizedBox(height: 4),
-                                  Text('${_musicService.allSongs.length} songs', style: TextStyle(color: kTextTertiary, fontSize: 11)),
-                                  SizedBox(height: 8),
-                                  Container(
-                                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(color: kPrimaryBlue.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                                    child: Text('Open Player', style: TextStyle(color: kPrimaryBlue, fontSize: 11, fontWeight: FontWeight.w600)),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _switchToView('player'),
-                          child: Container(
-                            padding: EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(children: [
-                                  Icon(Icons.videocam, color: kDanger, size: 22),
-                                  SizedBox(width: 8),
-                                  Text('Videos', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                                ]),
-                                SizedBox(height: 10),
-                                Text('${_videoService.allVideos.length} videos', style: TextStyle(color: kTextTertiary, fontSize: 12)),
-                                SizedBox(height: 4),
-                                Text('${_videoService.folders.length} folders', style: TextStyle(color: kTextTertiary, fontSize: 11)),
-                                SizedBox(height: 8),
-                                Container(
-                                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(color: kDanger.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                                  child: Text('Open Player', style: TextStyle(color: kDanger, fontSize: 11, fontWeight: FontWeight.w600)),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(height: 20),
-                // ─── Download Cards ───────────────────────────────────
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
+      child: CustomScrollView(
+        cacheExtent: 250,
+        slivers: [
+          SliverToBoxAdapter(child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
+              child: Column(
+                children: [
+                  SizedBox(height: kSpaceXXL),
+                  Image.asset('assets/makaw_logo_64.png', width: 64, height: 64, fit: BoxFit.contain),
+                  SizedBox(height: kSpaceMD),
+                  Text('Makaw',
+                    style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextHero, fontWeight: kWeightMedium, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
+                  SizedBox(height: kSpaceXS),
+                  Text('Code Studio · Creative Platform',
+                    style: TextStyle(fontSize: kTextSubtitle, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+                  SizedBox(height: kSpaceXL),
+                ],
+              ),
+            ),
+          )),
+          SliverToBoxAdapter(child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: kSpaceBase),
+                child: _buildWebFeatureGrid(isWide),
+              ),
+            ),
+          )),
+          SliverToBoxAdapter(child: SizedBox(height: kSpaceLG)),
+          SliverToBoxAdapter(child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: kSpaceBase),
+                child: InkWell(
+                  onTap: _showAIChat,
+                  borderRadius: BorderRadius.circular(kRadiusXL),
                   child: Container(
                     width: double.infinity,
-                    padding: EdgeInsets.all(20),
+                    padding: EdgeInsets.symmetric(vertical: 14, horizontal: kSpaceBase),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(20),
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF4285F4), Color(0xFF9B59B6)],
+                        begin: Alignment.topLeft, end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(kRadiusXL),
                     ),
-                    child: Column(
+                    child: Row(
                       children: [
-                        Text('Download Makaw', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-                        SizedBox(height: 4),
-                        Text('Get the full native experience with all features',
-                          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-                        SizedBox(height: 16),
-                        Wrap(
-                          spacing: 12, runSpacing: 12,
-                          alignment: WrapAlignment.center,
+                        Icon(Icons.auto_awesome, color: Colors.white, size: 22),
+                        SizedBox(width: kSpaceMD),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _buildDownloadChip('Android', Icons.android),
-                            _buildDownloadChip('Windows', Icons.desktop_windows),
-                            _buildDownloadChip('macOS', Icons.laptop_mac),
-                            _buildDownloadChip('Linux', Icons.computer),
+                            Text('AI Assistant', style: TextStyle(color: Colors.white, fontSize: kTextBody, fontWeight: kWeightSemibold)),
+                            Text('Powered by Gemini', style: TextStyle(color: Colors.white70, fontSize: kTextCaption)),
                           ],
                         ),
+                        Spacer(),
+                        Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 14),
                       ],
                     ),
                   ),
                 ),
-                SizedBox(height: 20),
-                // ─── News Feed ────────────────────────────────────────
-                if (_newsFeedService != null)
-                  NewsFeedWidget(
-                    key: _newsFeedKey,
-                    service: _newsFeedService!,
-                    onNavigate: (url) => _navigateOrOpenNewTab(url),
-                    scrollController: _newsFeedScrollController,
-                  ),
-                SizedBox(height: 24),
-              ],
+              ),
             ),
-          ),
-        ),
+          )),
+          SliverToBoxAdapter(child: SizedBox(height: 20)),
+          SliverToBoxAdapter(child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _switchToView('music'),
+                        child: Container(
+                          padding: EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                Icon(Icons.music_note, color: kPrimaryBlue, size: 22),
+                                SizedBox(width: 8),
+                                Text('Music', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                              ]),
+                              SizedBox(height: 10),
+                              if (_musicService.currentSong != null) ...[
+                                Text(_musicService.currentSong!.displayTitle,
+                                  style: TextStyle(color: Colors.white70, fontSize: 12), overflow: TextOverflow.ellipsis, maxLines: 1),
+                                Text(_musicService.currentSong!.displayArtist,
+                                  style: TextStyle(color: kTextTertiary, fontSize: 11), overflow: TextOverflow.ellipsis, maxLines: 1),
+                                SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    IconButton(icon: Icon(Icons.skip_previous, color: kPrimaryBlue, size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.previousSong()),
+                                    IconButton(icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: kPrimaryBlue, size: 24), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.togglePlayPause()),
+                                    IconButton(icon: Icon(Icons.skip_next, color: kPrimaryBlue, size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.nextSong()),
+                                  ],
+                                ),
+                              ] else ...[
+                                Text('No music playing', style: TextStyle(color: kTextTertiary, fontSize: 12)),
+                                SizedBox(height: 4),
+                                Text('${_musicService.allSongs.length} songs', style: TextStyle(color: kTextTertiary, fontSize: 11)),
+                                SizedBox(height: 8),
+                                Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(color: kPrimaryBlue.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                                  child: Text('Open Player', style: TextStyle(color: kPrimaryBlue, fontSize: 11, fontWeight: FontWeight.w600)),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _switchToView('player'),
+                        child: Container(
+                          padding: EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                Icon(Icons.videocam, color: kDanger, size: 22),
+                                SizedBox(width: 8),
+                                Text('Videos', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                              ]),
+                              SizedBox(height: 10),
+                              Text('${_videoService.allVideos.length} videos', style: TextStyle(color: kTextTertiary, fontSize: 12)),
+                              SizedBox(height: 4),
+                              Text('${_videoService.folders.length} folders', style: TextStyle(color: kTextTertiary, fontSize: 11)),
+                              SizedBox(height: 8),
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(color: kDanger.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                                child: Text('Open Player', style: TextStyle(color: kDanger, fontSize: 11, fontWeight: FontWeight.w600)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )),
+          SliverToBoxAdapter(child: SizedBox(height: 20)),
+          SliverToBoxAdapter(child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Column(
+                    children: [
+                      Text('Download Makaw', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+                      SizedBox(height: 4),
+                      Text('Get the full native experience with all features',
+                        style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+                      SizedBox(height: 16),
+                      Wrap(
+                        spacing: 12, runSpacing: 12,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          _buildDownloadChip('Android', Icons.android),
+                          _buildDownloadChip('Windows', Icons.desktop_windows),
+                          _buildDownloadChip('macOS', Icons.laptop_mac),
+                          _buildDownloadChip('Linux', Icons.computer),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          )),
+          SliverToBoxAdapter(child: SizedBox(height: 20)),
+          if (_newsFeedService != null)
+            SliverToBoxAdapter(child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
+                child: NewsFeedWidget(
+                  key: _newsFeedKey,
+                  service: _newsFeedService!,
+                  onNavigate: (url) => _navigateOrOpenNewTab(url),
+                  scrollController: _newsFeedScrollController,
+                ),
+              ),
+            )),
+          SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
       ),
     );
   }
@@ -4985,40 +5007,39 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
     // ─── Browser NTP: omnibox + shortcuts only (no branding/media/news) ─────
     if (_isNewTabView) {
-      return SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        child: Column(children: [
-          SizedBox(height: 40),
-          omnibox,
-          SizedBox(height: 24),
-          shortcuts,
-          SizedBox(height: 24),
-        ]),
+      return CustomScrollView(
+        cacheExtent: 250,
+        slivers: [
+          SliverToBoxAdapter(child: SizedBox(height: 40)),
+          SliverToBoxAdapter(child: omnibox),
+          SliverToBoxAdapter(child: SizedBox(height: 24)),
+          SliverToBoxAdapter(child: shortcuts),
+          SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
       );
     }
     // ─── Makaw Home: full landing with branding, omnibox, shortcuts, AI, media, news ─────
     return RefreshIndicator(
       onRefresh: _refreshNewsFeed,
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        child: Column(
-        children: [
-          SizedBox(height: 16),
-          Text('Makaw',
+      child: CustomScrollView(
+        cacheExtent: 250,
+        slivers: [
+          SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverToBoxAdapter(child: Text('Makaw',
             style: TextStyle(
               fontFamily: 'Outfit',
               color: Theme.of(context).colorScheme.onSurface,
               fontSize: 42,
               fontWeight: FontWeight.w500,
               letterSpacing: -0.5,
-            )),
-          SizedBox(height: 24),
-          omnibox,
-          SizedBox(height: 20),
-          shortcuts,
-          SizedBox(height: 20),
+            ))),
+          SliverToBoxAdapter(child: SizedBox(height: 24)),
+          SliverToBoxAdapter(child: omnibox),
+          SliverToBoxAdapter(child: SizedBox(height: 20)),
+          SliverToBoxAdapter(child: shortcuts),
+          SliverToBoxAdapter(child: SizedBox(height: 20)),
           // AI assistant
-          Padding(
+          SliverToBoxAdapter(child: Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: InkWell(
               onTap: _showAIChat,
@@ -5050,10 +5071,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 ),
               ),
             ),
-          ),
-          SizedBox(height: 20),
+          )),
+          SliverToBoxAdapter(child: SizedBox(height: 20)),
           // ─── Media Players on Home ─────────────────────────────────────
-          Padding(
+          SliverToBoxAdapter(child: Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
@@ -5174,19 +5195,20 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 ),
               ],
             ),
-          ),
-          SizedBox(height: 8),
+          )),
+          SliverToBoxAdapter(child: SizedBox(height: 8)),
           // News Feed
           if (_newsFeedService != null)
-            NewsFeedWidget(
-              key: _newsFeedKey,
-              service: _newsFeedService!,
-              onNavigate: (url) => _navigateOrOpenNewTab(url),
-              scrollController: _newsFeedScrollController,
+            SliverToBoxAdapter(
+              child: NewsFeedWidget(
+                key: _newsFeedKey,
+                service: _newsFeedService!,
+                onNavigate: (url) => _navigateOrOpenNewTab(url),
+                scrollController: _newsFeedScrollController,
+              ),
             ),
-          SizedBox(height: 24),
+          SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
-      ),
       ),
     );
   }
