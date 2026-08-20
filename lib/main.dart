@@ -210,6 +210,7 @@ void main() async {
         androidNotificationIcon: 'drawable/ic_makaw_logo',
       ),
     );
+    globalMusicService.attachAudioHandler(globalAudioHandler);
   } catch (e) {
     print('AudioService init failed: $e');
   }

@@ -7,12 +7,46 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/services/media_notification_service.dart';
+import 'makaw_audio_handler.dart';
 import '../../domain/entities/entities.dart';
 export '../../domain/entities/entities.dart';
 
 class MusicPlayerService extends ChangeNotifier {
   MusicPlayerService() {
     _setupPlayer();
+  }
+
+  MakawAudioHandler? _audioHandler;
+  void attachAudioHandler(MakawAudioHandler handler) {
+    _audioHandler = handler;
+    _setupHandlerListeners();
+  }
+
+  void _setupHandlerListeners() {
+    final p = _audioHandler?.player;
+    if (p == null) return;
+    p.positionStream.listen((pos) {
+      _position = pos;
+      notifyListeners();
+    });
+    p.durationStream.listen((dur) {
+      _duration = dur ?? Duration.zero;
+      notifyListeners();
+    });
+    p.playerStateStream.listen((s) {
+      _isPlaying = s.playing;
+      if (s.processingState == ProcessingState.completed) {
+        if (_loopMode == LoopMode.one) {
+          p.seek(Duration.zero);
+          _isPlaying = true;
+          p.play();
+          notifyNowPlaying();
+        } else {
+          _nextSong();
+        }
+      }
+      notifyListeners();
+    });
   }
 
   Future<void> init() async {
@@ -107,14 +141,17 @@ class MusicPlayerService extends ChangeNotifier {
 
   void _setupPlayer() {
     player.positionStream.listen((p) {
+      if (_audioHandler != null) return;
       _position = p;
       notifyListeners();
     });
     player.durationStream.listen((d) {
+      if (_audioHandler != null) return;
       _duration = d ?? Duration.zero;
       notifyListeners();
     });
     player.playerStateStream.listen((s) {
+      if (_audioHandler != null) return;
       _isPlaying = s.playing;
       if (s.processingState == ProcessingState.completed) {
         if (_loopMode == LoopMode.one) {
@@ -331,9 +368,10 @@ class MusicPlayerService extends ChangeNotifier {
   void _playSource(SongInfo song) {
     _duration = Duration(milliseconds: song.duration);
     _position = Duration.zero;
-    player.setAudioSource(AudioSource.file(song.filePath));
+    final p = _audioHandler?.player ?? player;
+    p.setAudioSource(AudioSource.file(song.filePath));
     _isPlaying = true;
-    player.play();
+    p.play();
     notifyNowPlaying();
   }
 
@@ -352,11 +390,12 @@ class MusicPlayerService extends ChangeNotifier {
   }
 
   void togglePlayPause() {
-    if (player.playing) {
-      player.pause();
+    final p = _audioHandler?.player ?? player;
+    if (p.playing) {
+      p.pause();
       _isPlaying = false;
     } else {
-      player.play();
+      p.play();
       _isPlaying = true;
     }
     notifyNowPlaying();
@@ -367,7 +406,7 @@ class MusicPlayerService extends ChangeNotifier {
     if (_queue.isEmpty) return;
     int next = _currentIndex + 1;
     if (next >= _queue.length) {
-      if (_loopMode == LoopMode.all) { next = 0; } else { player.stop(); return; }
+      if (_loopMode == LoopMode.all) { next = 0; } else { (_audioHandler?.player ?? player).stop(); return; }
     }
     _currentIndex = next;
     _playSource(_queue[_currentIndex]);
@@ -384,7 +423,7 @@ class MusicPlayerService extends ChangeNotifier {
     _playSource(_queue[_currentIndex]);
   }
 
-  void seek(Duration d) => player.seek(d);
+  void seek(Duration d) => (_audioHandler?.player ?? player).seek(d);
 
   void toggleShuffle() {
     _ensureQueued();
@@ -537,7 +576,7 @@ class MusicPlayerService extends ChangeNotifier {
     if (index >= 0 && index < _queue.length && index != _currentIndex) { _queue.removeAt(index); notifyListeners(); }
   }
 
-  void clearQueue() { _queue.clear(); _currentIndex = -1; player.stop(); notifyListeners(); }
+  void clearQueue() { _queue.clear(); _currentIndex = -1; (_audioHandler?.player ?? player).stop(); notifyListeners(); }
 
   void reorderQueue(int oldIndex, int newIndex) {
     if (newIndex > oldIndex) newIndex--;
