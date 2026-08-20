@@ -813,6 +813,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       if (mounted) setState(() => _ready = true);
       if (!kIsWeb) {
       try {
+        _updateService = UpdateService(
+          repoOwner: 'hexadigitall',
+          repoName: 'makaw',
+          dio: Dio(),
+        );
+        _checkUpdatesOnStartup();
+      } catch (_) {}
+      try {
         _initDownloadDir();
         _musicService.loadPlaylists();
         _musicService.loadFavorites();
@@ -850,14 +858,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           }
         };
         _adBlocker.updateBlacklist();
-        _updateService = UpdateService(
-          repoOwner: 'hexadigitall',
-          repoName: 'makaw',
-          dio: Dio(),
-        );
         _initDb();
         _initSnippets();
-        _checkUpdatesOnStartup();
         _requestPermissions();
         _loadAiKey();
         _setupIntentChannel();
@@ -1776,7 +1778,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   Future<void> _checkForUpdatesManual() async {
     _showToast('Checking for updates...');
-    final result = await _updateService?.checkForUpdate();
+    if (_updateService == null) {
+      _showToast('Update service not available');
+      return;
+    }
+    final result = await _updateService!.checkForUpdate();
     if (!mounted || result == null) return;
     switch (result.result) {
       case UpdateCheckResult.available:
