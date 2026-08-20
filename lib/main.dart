@@ -472,12 +472,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   // Navigation
   void _onUrlFocusChanged() {
     if (_urlFocusNode.hasFocus && _viewMode != ViewMode.typeView) {
-      final rawUrl = _urlController.text;
-      final clean = _cleanDisplayUrl(rawUrl);
       _typeViewFromHome = _showHomeScreen;
-      _ignoreUrlChanges = true;
-      if (clean.isNotEmpty) _urlController.text = clean;
-      _ignoreUrlChanges = false;
       setState(() { _viewMode = ViewMode.typeView; });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
@@ -4110,11 +4105,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       return Expanded(
         child: GestureDetector(
           onTap: () {
-            final clean = _cleanDisplayUrl(_urlController.text);
             _typeViewFromHome = _isNewTabView || _isMakawHome;
-            _ignoreUrlChanges = true;
-            if (clean.isNotEmpty) _urlController.text = clean;
-            _ignoreUrlChanges = false;
             setState(() { _viewMode = ViewMode.typeView; });
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _urlFocusNode.requestFocus();
@@ -4201,13 +4192,20 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       );
     }
 
-    // NTP: centered omnibox only (no home, no tab counter, no overflow)
+    // NTP out of focus: tab counter (or incognito icon) + menu. No omnibox.
     if (_isNewTabView) {
       return Container(
         color: headerBg,
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Row(children: [
-          _buildUrlPill(),
+          if (inc)
+            IconButton(icon: Icon(Icons.visibility_off, color: kIncognitoPurple), onPressed: _goHome)
+          else
+            IconButton(icon: Icon(Icons.home_outlined, color: iconColor), onPressed: _goHome),
+          Spacer(),
+          _buildTabCounter(),
+          SizedBox(width: 4),
+          _buildOverflowMenu(),
         ]),
       );
     }
@@ -5006,7 +5004,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   Widget _buildHomeContent() {
     if (_isIncognitoActive) return _buildIncognitoLandingPage();
-    if (_showHomeScreen) _urlController.clear();
     // Shared omnibox widget used by both Makaw Home and Browser NTP
     final omnibox = Padding(
       padding: EdgeInsets.symmetric(horizontal: 16),
@@ -5311,7 +5308,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               textAlign: TextAlign.center,
             ),
             SizedBox(height: 36),
-            // Omnibox
+            // Tap to search — triggers the header omnibox (typeView)
             GestureDetector(
               onTap: () {
                 setState(() { _typeViewFromHome = true; _viewMode = ViewMode.typeView; });
@@ -5335,8 +5332,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                       'Search privately',
                       style: TextStyle(color: Colors.white38, fontSize: 16),
                     ),
-                    Spacer(),
-                    Icon(Icons.qr_code_scanner, color: Colors.white38, size: 22),
                   ],
                 ),
               ),
@@ -6182,7 +6177,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         final query = uri.queryParameters['q'];
         if (query != null && query.isNotEmpty) return query;
       }
-      return uri.host.startsWith('www.') ? uri.host.substring(4) : uri.host;
+      var host = uri.host.startsWith('www.') ? uri.host.substring(4) : uri.host;
+      final path = uri.path.isNotEmpty && uri.path != '/' ? uri.path : '';
+      final query = uri.hasQuery ? '?${uri.query}' : '';
+      return '$host$path$query';
     } catch (_) {
       return rawUrl;
     }
@@ -6484,25 +6482,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             final url = data['url'] as String? ?? '';
             final filename = data['filename'] as String? ?? '';
             if (url.isNotEmpty) {
-              final ext = url.split('?')[0].split('#')[0].split('.').last.toLowerCase();
-              String type;
-              if (['mp4','webm','mkv','avi','mov','flv','wmv','m3u8','mpd','ts'].contains(ext)) {
-                type = 'video';
-              } else if (['mp3','wav','flac','ogg','aac','m4a','opus'].contains(ext)) {
-                type = 'audio';
-              } else if (['jpg','jpeg','png','gif','webp','bmp','svg','ico','avif'].contains(ext)) {
-                type = 'image';
-              } else if (['pdf','epub','doc','docx','odt','rtf','pages','xls','xlsx','ppt','pptx','txt','csv'].contains(ext)) {
-                type = 'document';
-              } else {
-                type = 'other';
-              }
-              final list = _pendingMedia;
-              final exists = list.any((m) => m.url == url);
-              if (!exists) {
-                list.add(MediaItem(url: url, type: type, title: filename));
-                setState(() {});
-              }
+              _downloadManager?.enqueue(url, filename: filename.isNotEmpty ? filename : null);
+              _showToast('Downloading: ${filename.isNotEmpty ? filename : url.split('/').last.split('?').first}');
             }
           } catch (_) {}
         });
@@ -6594,6 +6575,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         if (tabId == _activeBrowserTabId) {
           _pullToRefreshController?.endRefreshing();
           _isWebViewLoading = false;
+          if (!_showHomeScreen && _viewMode != ViewMode.typeView) {
+            _ignoreUrlChanges = true;
+            _urlController.text = urlStr;
+            _ignoreUrlChanges = false;
+          }
           setState(() {
             _urlSuggestions = [];
             _searchSuggestions = [];
