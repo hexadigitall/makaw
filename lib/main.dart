@@ -67,6 +67,7 @@ import 'core/widgets/responsive.dart';
 import 'core/widgets/adaptive_container.dart';
 import 'core/widgets/adaptive_modal.dart';
 import 'core/widgets/adaptive_action_button.dart';
+import 'core/widgets/makaw_effects.dart';
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 
@@ -3127,9 +3128,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Image.asset('assets/makaw_logo_64.png', width: 64, height: 64, fit: BoxFit.contain),
-              SizedBox(height: 20),
-              CircularProgressIndicator(color: kAccentTeal),
+              MakawEffects.logoPresentation(size: 96),
+              SizedBox(height: 28),
+              MakawEffects.loadingRing(size: 40, color: kAccentTeal),
             ],
           ),
         ),
@@ -3467,7 +3468,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       child: Column(
         children: [
           SizedBox(height: 48),
-          Image.asset('assets/makaw_logo_64.png', width: 80, height: 80, fit: BoxFit.contain),
+          MakawEffects.logoWithOrbit(size: 80),
           SizedBox(height: 16),
           Text('Makaw',
             style: TextStyle(fontFamily: 'Outfit', fontSize: 42, fontWeight: FontWeight.w500, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
@@ -4611,7 +4612,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               child: Column(
                 children: [
                   SizedBox(height: kSpaceXXL),
-                  Image.asset('assets/makaw_logo_64.png', width: 64, height: 64, fit: BoxFit.contain),
+                  MakawEffects.logoWithOrbit(size: 64),
                   SizedBox(height: kSpaceMD),
                   Text('Makaw',
                     style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextHero, fontWeight: kWeightMedium, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
@@ -5084,14 +5085,16 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         cacheExtent: 250,
         slivers: [
           SliverToBoxAdapter(child: SizedBox(height: 16)),
-          SliverToBoxAdapter(child: Text('Makaw',
+          SliverToBoxAdapter(child: Center(child: MakawEffects.logoPresentation(size: 72))),
+          SliverToBoxAdapter(child: SizedBox(height: 4)),
+          SliverToBoxAdapter(child: Center(child: Text('Makaw',
             style: TextStyle(
               fontFamily: 'Outfit',
               color: Theme.of(context).colorScheme.onSurface,
               fontSize: 42,
               fontWeight: FontWeight.w500,
               letterSpacing: -0.5,
-            ))),
+            )))),
           SliverToBoxAdapter(child: SizedBox(height: 24)),
           SliverToBoxAdapter(child: omnibox),
           SliverToBoxAdapter(child: SizedBox(height: 20)),
