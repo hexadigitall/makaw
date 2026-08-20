@@ -486,6 +486,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     if (_scaffoldKey.currentState?.isDrawerOpen == true) {
       Navigator.of(context).pop();
     }
+    if (kIsWeb) {
+      setState(() => _currentView = view);
+      return;
+    }
     if (view == 'browser') {
       setState(() => _currentView = view);
     } else {
@@ -531,6 +535,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   }
 
   Widget? _buildFeaturePage(String view) {
+    if (kIsWeb) return _buildWebFeaturePage(view);
     switch (view) {
       case 'history': return MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url));
       case 'studio': return _buildFeatureScaffold('Code Studio', Icons.code, _buildStudioTab());
@@ -547,6 +552,47 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       case 'images': return _buildImagePage();
       case 'documents': return _buildDocumentPage();
       default: return null;
+    }
+  }
+
+  Widget _buildWebFeaturePage(String view) {
+    Widget _webUnavailable(String title, IconData icon, String message) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        appBar: AppBar(
+          title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 20, color: kAccentTeal), SizedBox(width: 8), Text(title)]),
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          leading: IconButton(icon: Icon(Icons.arrow_back), onPressed: () { setState(() => _currentView = 'browser'); }),
+        ),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 64, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2)),
+              SizedBox(height: 16),
+              Text(title, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+              SizedBox(height: 8),
+              Text(message, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: 14), textAlign: TextAlign.center),
+            ],
+          ),
+        ),
+      );
+    }
+
+    switch (view) {
+      case 'studio': return _buildFeatureScaffold('Code Studio', Icons.code, _buildStudioTab());
+      case 'snippets': return _buildFeatureScaffold('Snippets', Icons.content_paste, _buildSnippetsTab());
+      case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
+      case 'terminal': return _buildFeatureScaffold('Terminal', Icons.terminal, _buildTerminalTab());
+      case 'downloads': return _buildFeatureScaffold('Downloads', Icons.download, _buildDownloadsTab());
+      case 'history': return MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url));
+      case 'music': return _webUnavailable('Music Player', Icons.music_note, 'Music scanning requires local file access.\nUse the native app for the full music experience.');
+      case 'player': return _webUnavailable('Video Player', Icons.videocam, 'Video playback requires local file access.\nUse the native app for the full video experience.');
+      case 'images': return _webUnavailable('Gallery', Icons.photo_library, 'Image browsing requires local file access.\nUse the native app for the full gallery experience.');
+      case 'documents': return _webUnavailable('Documents', Icons.description, 'Document management requires local file access.\nUse the native app for the full documents experience.');
+      case 'sniffer': return _webUnavailable('Media Sniffer', Icons.wifi_tethering, 'Media sniffing works best in the native browser.');
+      case 'media': return _webUnavailable('Media Hub', Icons.video_library, 'Media hub requires local file access.');
+      default: return _webUnavailable(view, Icons.open_in_new, 'This feature is not available on web.');
     }
   }
 
@@ -4200,7 +4246,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       return IconButton(icon: Icon(Icons.more_horiz, color: iconColor), onPressed: _showEllipsisMenu);
     }
 
-    // Makaw Home: hamburger menu (left) | spacer | settings (right). NO tab counter, NO omnibox pill, NO overflow menu.
+    // Makaw Home: hamburger menu only. Clean header, no overflow/settings.
     if (_isMakawHome) {
       return Container(
         color: headerBg,
@@ -4211,10 +4257,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           else
             IconButton(icon: Icon(Icons.visibility_off, color: iconColor), onPressed: _goHome),
           Spacer(),
-        IconButton(
-          icon: Icon(Icons.settings, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: () => _switchToView('settings'),
-        ),
         ]),
       );
     }
@@ -4595,30 +4637,32 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   // ─── Web Content ────────────────────────────────────────────────────────
   Widget _buildWebContent() {
+    final featurePage = _currentView != 'browser' ? _buildFeaturePage(_currentView) : null;
     return Column(
       children: [
         _buildWebHeader(),
         Expanded(
-          child: _buildWebHomeContent(),
+          child: featurePage ?? _buildWebHomeContent(),
         ),
       ],
     );
   }
 
   Widget _buildWebHeader() {
+    final viewingFeature = _currentView != 'browser';
     return Container(
       color: Theme.of(context).colorScheme.surface,
       padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(children: [
         IconButton(
-          icon: Icon(Icons.menu, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+          icon: Icon(viewingFeature ? Icons.arrow_back : Icons.menu, color: Theme.of(context).colorScheme.onSurface),
+          onPressed: viewingFeature ? () => setState(() => _currentView = 'browser') : () => _scaffoldKey.currentState?.openDrawer(),
         ),
+        if (viewingFeature) ...[
+          SizedBox(width: 8),
+          Text(_currentView[0].toUpperCase() + _currentView.substring(1), style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
+        ],
         Spacer(),
-        IconButton(
-          icon: Icon(Icons.settings, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: () => _switchToView('settings'),
-        ),
       ]),
     );
   }
