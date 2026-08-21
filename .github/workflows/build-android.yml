@@ -53,8 +53,8 @@ jobs:
 
       - name: Rename APKs with proper branding
         run: |
+          VERSION=$(grep 'version:' pubspec.yaml | head -1 | sed 's/.*: //' | sed 's/+.*//')
           cd build/app/outputs/flutter-apk
-          VERSION=$(grep 'version:' ../../../pubspec.yaml | head -1 | sed 's/.*: //' | sed 's/+.*//')
           for f in app-*-release.apk; do
             if [ -f "$f" ]; then
               ABI=$(echo "$f" | sed 's/app-//' | sed 's/-release.apk//')
@@ -63,8 +63,7 @@ jobs:
               echo "Renamed $f -> $NEWNAME"
             fi
           done
-          # Rename AAB too
-          cd ../../bundle/release
+          cd "$GITHUB_WORKSPACE/build/app/outputs/bundle/release"
           if [ -f "app-release.aab" ]; then
             mv "app-release.aab" "makaw-v${VERSION}.aab"
             echo "Renamed app-release.aab -> makaw-v${VERSION}.aab"

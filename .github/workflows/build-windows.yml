@@ -61,8 +61,7 @@ jobs:
             --publisher "CN=Hexadigitall" `
             --capabilities "internetClient,broadFileSystemAccess" `
             --certificate-path "$env:USERPROFILE\makaw-cert.pfx" `
-            --certificate-password "$env:MSIX_CERT_PASSWORD" `
-            --output "makaw.msix"
+            --certificate-password "$env:MSIX_CERT_PASSWORD"
 
       - name: Package MSIX (self-signed fallback)
         if: env.MSIX_CERT_B64 == ''
@@ -71,8 +70,23 @@ jobs:
           dart run msix:create `
             --display-name "Makaw" `
             --publisher "CN=Hexadigitall" `
-            --capabilities "internetClient,broadFileSystemAccess" `
-            --output "makaw.msix"
+            --capabilities "internetClient,broadFileSystemAccess"
+
+      - name: Rename MSIX
+        shell: pwsh
+        run: |
+          $msix = Get-ChildItem -Path "build/windows/x64/runner/Release" -Filter "*.msix" -ErrorAction SilentlyContinue |
+                  Select-Object -First 1
+          if (-not $msix) {
+            $msix = Get-ChildItem -Path "." -Filter "Makaw.msix" -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+          }
+          if ($msix) {
+            Copy-Item $msix.FullName "makaw.msix" -Force
+            Write-Host "Renamed $($msix.Name) -> makaw.msix"
+          } else {
+            Write-Host "No MSIX found to rename"
+          }
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
