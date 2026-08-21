@@ -243,6 +243,37 @@ class NewsFeedService {
     return sorted;
   }
 
+  List<NewsCategory> getTopicCategories(String topic) {
+    if (topic == 'All') return getOrderedCategories();
+    return getOrderedCategories().where((c) => c.topic == topic).toList();
+  }
+
+  List<String> get availableTopics => topicOrder;
+
+  List<FeedCard> allCachedCardsDeduped() {
+    final all = <FeedCard>[];
+    final seenHosts = <String>{};
+    for (final entry in _cardCache.entries) {
+      for (final card in entry.value) {
+        final host = _extractHost(card.url ?? '');
+        if (host.isNotEmpty && seenHosts.contains(host)) continue;
+        if (host.isNotEmpty) seenHosts.add(host);
+        all.add(card);
+      }
+    }
+    all.sort((a, b) => (b.pubDate ?? b.timestamp).compareTo(a.pubDate ?? a.timestamp));
+    return all;
+  }
+
+  static String _extractHost(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.host.replaceFirst(RegExp(r'^www\.'), '');
+    } catch (_) {
+      return '';
+    }
+  }
+
   // ---- Feed Card Streaming (SDUI) ----
 
   Stream<List<FeedCard>> watchFeed(String categoryName) {
@@ -502,46 +533,48 @@ class NewsFeedService {
 
   // ---- Feed Definitions ----
 
+  static const List<String> topicOrder = ['All', 'World', 'Tech', 'Business', 'Science', 'Sports', 'Culture', 'Health'];
+
   static final List<NewsCategory> _globalFeeds = [
-    NewsCategory(name: 'Top Stories', feedUrl: 'https://feeds.bbci.co.uk/news/rss.xml', icon: 'newspaper'),
-    NewsCategory(name: 'World', feedUrl: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', icon: 'language'),
-    NewsCategory(name: 'US News', feedUrl: 'https://feeds.npr.org/1001/rss.xml', icon: 'newspaper'),
-    NewsCategory(name: 'Technology', feedUrl: 'https://feeds.bbci.co.uk/news/technology/rss.xml', icon: 'desktop'),
-    NewsCategory(name: 'TechCrunch', feedUrl: 'https://techcrunch.com/feed/', icon: 'code'),
-    NewsCategory(name: 'The Verge', feedUrl: 'https://www.theverge.com/rss/index.xml', icon: 'code'),
-    NewsCategory(name: 'Wired', feedUrl: 'https://www.wired.com/feed/rss', icon: 'code'),
-    NewsCategory(name: 'Ars Technica', feedUrl: 'https://feeds.arstechnica.com/arstechnica/index', icon: 'code'),
-    NewsCategory(name: 'CNET', feedUrl: 'https://www.cnet.com/rss/all/', icon: 'desktop'),
-    NewsCategory(name: 'Science', feedUrl: 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml', icon: 'science'),
-    NewsCategory(name: 'Nature', feedUrl: 'https://www.nature.com/nature.rss', icon: 'science'),
-    NewsCategory(name: 'New Scientist', feedUrl: 'https://www.newscientist.com/feed/home', icon: 'science'),
-    NewsCategory(name: 'Business', feedUrl: 'https://feeds.bbci.co.uk/news/business/rss.xml', icon: 'business'),
-    NewsCategory(name: 'Bloomberg', feedUrl: 'https://www.bloomberg.com/feed/podcast/etf-report.xml', icon: 'business'),
-    NewsCategory(name: 'Forbes', feedUrl: 'https://www.forbes.com/innovation/feed/', icon: 'business'),
-    NewsCategory(name: 'Sports', feedUrl: 'https://feeds.bbci.co.uk/sport/rss.xml', icon: 'sports_soccer'),
-    NewsCategory(name: 'ESPN', feedUrl: 'https://www.espn.com/espn/rss/news', icon: 'sports_soccer'),
-    NewsCategory(name: 'Sky Sports', feedUrl: 'https://www.skysports.com/rss/12040', icon: 'sports_soccer'),
-    NewsCategory(name: 'Entertainment', feedUrl: 'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml', icon: 'movie'),
-    NewsCategory(name: 'Variety', feedUrl: 'https://variety.com/feed/', icon: 'movie'),
-    NewsCategory(name: 'Hollywood Reporter', feedUrl: 'https://www.hollywoodreporter.com/feed/', icon: 'movie'),
-    NewsCategory(name: 'Gaming', feedUrl: 'https://www.ign.com/rss/articles/feed', icon: 'sports_esports'),
-    NewsCategory(name: 'Polygon', feedUrl: 'https://www.polygon.com/rss/index.xml', icon: 'sports_esports'),
-    NewsCategory(name: 'Health', feedUrl: 'https://www.who.int/rss-feeds/news-english.xml', icon: 'local_hospital'),
-    NewsCategory(name: 'Politics', feedUrl: 'https://www.politico.com/rss/politicopicks.xml', icon: 'account_balance'),
-    NewsCategory(name: 'AI & ML', feedUrl: 'https://blog.google/technology/ai/rss', icon: 'smart_toy'),
-    NewsCategory(name: 'Security', feedUrl: 'https://nakedsecurity.sophos.com/feed/', icon: 'security'),
-    NewsCategory(name: 'Space', feedUrl: 'https://www.nasa.gov/rss/dyn/breaking_news.rss', icon: 'rocket_launch'),
-    NewsCategory(name: 'Environment', feedUrl: 'https://www.theguardian.com/environment/rss', icon: 'eco'),
-    NewsCategory(name: 'Lifestyle', feedUrl: 'https://www.apartmenttherapy.com/main.rss', icon: 'spa'),
-    NewsCategory(name: 'Photography', feedUrl: 'https://www.dpreview.com/feeds/news', icon: 'camera_alt'),
-    NewsCategory(name: 'Startups', feedUrl: 'https://www.inc.com/rss/startups.xml', icon: 'rocket'),
-    NewsCategory(name: 'Education', feedUrl: 'https://www.edweek.org/feed/rss', icon: 'school'),
-    NewsCategory(name: 'Finance', feedUrl: 'https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_headlines', icon: 'account_balance'),
-    NewsCategory(name: 'Travel', feedUrl: 'https://www.lonelyplanet.com/news/feed/atom', icon: 'flight'),
-    NewsCategory(name: 'Food', feedUrl: 'https://www.seriouseats.com/feed.xml', icon: 'restaurant'),
-    NewsCategory(name: 'Music', feedUrl: 'https://www.billboard.com/feed/', icon: 'music_note'),
-    NewsCategory(name: 'Books', feedUrl: 'https://www.goodreads.com/blog/feed', icon: 'menu_book'),
-    NewsCategory(name: 'Automotive', feedUrl: 'https://www.motor1.com/rss/news/', icon: 'directions_car'),
+    NewsCategory(name: 'Top Stories', feedUrl: 'https://feeds.bbci.co.uk/news/rss.xml', icon: 'newspaper', topic: 'World'),
+    NewsCategory(name: 'World', feedUrl: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', icon: 'language', topic: 'World'),
+    NewsCategory(name: 'US News', feedUrl: 'https://feeds.npr.org/1001/rss.xml', icon: 'newspaper', topic: 'World'),
+    NewsCategory(name: 'Technology', feedUrl: 'https://feeds.bbci.co.uk/news/technology/rss.xml', icon: 'desktop', topic: 'Tech'),
+    NewsCategory(name: 'TechCrunch', feedUrl: 'https://techcrunch.com/feed/', icon: 'code', topic: 'Tech'),
+    NewsCategory(name: 'The Verge', feedUrl: 'https://www.theverge.com/rss/index.xml', icon: 'code', topic: 'Tech'),
+    NewsCategory(name: 'Wired', feedUrl: 'https://www.wired.com/feed/rss', icon: 'code', topic: 'Tech'),
+    NewsCategory(name: 'Ars Technica', feedUrl: 'https://feeds.arstechnica.com/arstechnica/index', icon: 'code', topic: 'Tech'),
+    NewsCategory(name: 'CNET', feedUrl: 'https://www.cnet.com/rss/all/', icon: 'desktop', topic: 'Tech'),
+    NewsCategory(name: 'Science', feedUrl: 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml', icon: 'science', topic: 'Science'),
+    NewsCategory(name: 'Nature', feedUrl: 'https://www.nature.com/nature.rss', icon: 'science', topic: 'Science'),
+    NewsCategory(name: 'New Scientist', feedUrl: 'https://www.newscientist.com/feed/home', icon: 'science', topic: 'Science'),
+    NewsCategory(name: 'Business', feedUrl: 'https://feeds.bbci.co.uk/news/business/rss.xml', icon: 'business', topic: 'Business'),
+    NewsCategory(name: 'Bloomberg', feedUrl: 'https://www.bloomberg.com/feed/podcast/etf-report.xml', icon: 'business', topic: 'Business'),
+    NewsCategory(name: 'Forbes', feedUrl: 'https://www.forbes.com/innovation/feed/', icon: 'business', topic: 'Business'),
+    NewsCategory(name: 'Sports', feedUrl: 'https://feeds.bbci.co.uk/sport/rss.xml', icon: 'sports_soccer', topic: 'Sports'),
+    NewsCategory(name: 'ESPN', feedUrl: 'https://www.espn.com/espn/rss/news', icon: 'sports_soccer', topic: 'Sports'),
+    NewsCategory(name: 'Sky Sports', feedUrl: 'https://www.skysports.com/rss/12040', icon: 'sports_soccer', topic: 'Sports'),
+    NewsCategory(name: 'Entertainment', feedUrl: 'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml', icon: 'movie', topic: 'Culture'),
+    NewsCategory(name: 'Variety', feedUrl: 'https://variety.com/feed/', icon: 'movie', topic: 'Culture'),
+    NewsCategory(name: 'Hollywood Reporter', feedUrl: 'https://www.hollywoodreporter.com/feed/', icon: 'movie', topic: 'Culture'),
+    NewsCategory(name: 'Gaming', feedUrl: 'https://www.ign.com/rss/articles/feed', icon: 'sports_esports', topic: 'Culture'),
+    NewsCategory(name: 'Polygon', feedUrl: 'https://www.polygon.com/rss/index.xml', icon: 'sports_esports', topic: 'Culture'),
+    NewsCategory(name: 'Health', feedUrl: 'https://www.who.int/rss-feeds/news-english.xml', icon: 'local_hospital', topic: 'Health'),
+    NewsCategory(name: 'Politics', feedUrl: 'https://www.politico.com/rss/politicopicks.xml', icon: 'account_balance', topic: 'World'),
+    NewsCategory(name: 'AI & ML', feedUrl: 'https://blog.google/technology/ai/rss', icon: 'smart_toy', topic: 'Tech'),
+    NewsCategory(name: 'Security', feedUrl: 'https://nakedsecurity.sophos.com/feed/', icon: 'security', topic: 'Tech'),
+    NewsCategory(name: 'Space', feedUrl: 'https://www.nasa.gov/rss/dyn/breaking_news.rss', icon: 'rocket_launch', topic: 'Science'),
+    NewsCategory(name: 'Environment', feedUrl: 'https://www.theguardian.com/environment/rss', icon: 'eco', topic: 'Science'),
+    NewsCategory(name: 'Lifestyle', feedUrl: 'https://www.apartmenttherapy.com/main.rss', icon: 'spa', topic: 'Culture'),
+    NewsCategory(name: 'Photography', feedUrl: 'https://www.dpreview.com/feeds/news', icon: 'camera_alt', topic: 'Culture'),
+    NewsCategory(name: 'Startups', feedUrl: 'https://www.inc.com/rss/startups.xml', icon: 'rocket', topic: 'Business'),
+    NewsCategory(name: 'Education', feedUrl: 'https://www.edweek.org/feed/rss', icon: 'school', topic: 'World'),
+    NewsCategory(name: 'Finance', feedUrl: 'https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_headlines', icon: 'account_balance', topic: 'Business'),
+    NewsCategory(name: 'Travel', feedUrl: 'https://www.lonelyplanet.com/news/feed/atom', icon: 'flight', topic: 'Culture'),
+    NewsCategory(name: 'Food', feedUrl: 'https://www.seriouseats.com/feed.xml', icon: 'restaurant', topic: 'Culture'),
+    NewsCategory(name: 'Music', feedUrl: 'https://www.billboard.com/feed/', icon: 'music_note', topic: 'Culture'),
+    NewsCategory(name: 'Books', feedUrl: 'https://www.goodreads.com/blog/feed', icon: 'menu_book', topic: 'Culture'),
+    NewsCategory(name: 'Automotive', feedUrl: 'https://www.motor1.com/rss/news/', icon: 'directions_car', topic: 'Culture'),
   ];
 
   static final Map<String, List<NewsCategory>> _localFeeds = {

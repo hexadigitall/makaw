@@ -8,6 +8,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/services/media_notification_service.dart';
 import 'makaw_audio_handler.dart';
+import 'music_db_service.dart';
 import '../../domain/entities/entities.dart';
 export '../../domain/entities/entities.dart';
 
@@ -55,21 +56,34 @@ class MusicPlayerService extends ChangeNotifier {
 
   Future<void> _loadCachedSongs() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final cached = prefs.getString('songList');
-      if (cached != null) {
-        final decoded = jsonDecode(cached) as List<dynamic>;
-        _allSongs = decoded.map((e) => SongInfo.fromJson(e as Map<String, dynamic>)).toList();
-        _applySort();
-      }
+      final rows = await MusicDbService.instance.loadSongs();
+      _allSongs = rows.map((r) => SongInfo(
+        id: r['id'] as int,
+        title: r['title'] as String? ?? '',
+        artist: r['artist'] as String? ?? '',
+        album: r['album'] as String? ?? '',
+        filePath: r['file_path'] as String,
+        duration: r['duration'] as int? ?? 0,
+        albumId: r['album_id'] as int? ?? -1,
+        size: r['size'] as int? ?? 0,
+      )).toList();
+      _applySort();
     } catch (_) {}
   }
 
   Future<void> _saveSongsToCache() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final encoded = jsonEncode(_allSongs.map((s) => s.toJson()).toList());
-      await prefs.setString('songList', encoded);
+      final maps = _allSongs.map((s) => {
+        'file_path': s.filePath,
+        'id': s.id,
+        'title': s.title,
+        'artist': s.artist,
+        'album': s.album,
+        'duration': s.duration,
+        'album_id': s.albumId,
+        'size': s.size,
+      }).toList();
+      await MusicDbService.instance.saveSongs(maps);
     } catch (_) {}
   }
 
@@ -275,16 +289,11 @@ class MusicPlayerService extends ChangeNotifier {
         }
       }
 
-      // Preload cached metadata
-      final prefs = await SharedPreferences.getInstance();
-      final cached = prefs.getString('songMeta');
+      // Preload cached metadata from SQLite
       Map<String, Map<String, dynamic>>? cache;
-      if (cached != null) {
-        try {
-          final decoded = jsonDecode(cached) as Map<String, dynamic>;
-          cache = decoded.map((k, v) => MapEntry(k, v as Map<String, dynamic>));
-        } catch (_) {}
-      }
+      try {
+        cache = await MusicDbService.instance.loadSongMetadata();
+      } catch (_) {}
 
       final found = <SongInfo>[];
       for (final entry in foundRaw) {
@@ -326,7 +335,7 @@ class MusicPlayerService extends ChangeNotifier {
       }
       if (goodMeta.isNotEmpty) {
         try {
-          await prefs.setString('songMeta', jsonEncode(goodMeta));
+          await MusicDbService.instance.saveSongMetadata(goodMeta);
         } catch (_) {}
       }
     } catch (e) {
@@ -504,7 +513,12 @@ class MusicPlayerService extends ChangeNotifier {
     _savePlaylists(); notifyListeners();
   }
 
-  void deletePlaylist(String name) { _playlists.removeWhere((p) => p.name == name); _savePlaylists(); notifyListeners(); }
+  void deletePlaylist(String name) {
+    _playlists.removeWhere((p) => p.name == name);
+    MusicDbService.instance.deletePlaylist(name);
+    _savePlaylists();
+    notifyListeners();
+  }
 
   bool renamePlaylist(String oldName, String newName) {
     if (oldName == newName || newName.trim().isEmpty) return false;
@@ -512,7 +526,9 @@ class MusicPlayerService extends ChangeNotifier {
     final pl = _playlists.where((p) => p.name == oldName).firstOrNull;
     if (pl == null) return false;
     pl.name = newName;
-    _savePlaylists(); notifyListeners();
+    MusicDbService.instance.renamePlaylist(oldName, newName);
+    _savePlaylists();
+    notifyListeners();
     return true;
   }
 
@@ -600,25 +616,53 @@ class MusicPlayerService extends ChangeNotifier {
   }
 
   Future<void> loadPlaylists() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString('music_playlists');
-    if (data != null) _playlists = (jsonDecode(data) as List).map((e) => Playlist.fromJson(e)).toList();
+    try {
+      final dbPlaylists = await MusicDbService.instance.loadPlaylists();
+      _playlists = dbPlaylists.map((dbPl) {
+        final songIds = dbPl.filePaths.map((filePath) {
+          final match = _allSongs.where((s) => s.filePath == filePath);
+          return match.isNotEmpty ? match.first.id : -1;
+        }).where((id) => id >= 0).toList();
+        return Playlist(name: dbPl.name, songIds: songIds);
+      }).toList();
+    } catch (_) {}
   }
 
   Future<void> _savePlaylists() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('music_playlists', jsonEncode(_playlists.map((p) => p.toJson()).toList()));
+    try {
+      final db = MusicDbService.instance;
+      final existingNames = (await db.loadPlaylists()).map((p) => p.name).toSet();
+      for (final pl in _playlists) {
+        if (!existingNames.contains(pl.name)) {
+          await db.createPlaylist(pl.name);
+        }
+        final filePaths = pl.songIds.map((id) {
+          final match = _allSongs.where((s) => s.id == id);
+          return match.isNotEmpty ? match.first.filePath : '';
+        }).where((p) => p.isNotEmpty).toList();
+        await db.setPlaylistSongs(pl.name, filePaths);
+      }
+    } catch (_) {}
   }
 
   Future<void> loadFavorites() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString('music_favorites');
-    if (data != null) _favoriteIds = (jsonDecode(data) as List).cast<int>();
+    try {
+      final favoritePaths = await MusicDbService.instance.loadFavoritePaths();
+      _favoriteIds = _allSongs
+          .where((s) => favoritePaths.contains(s.filePath))
+          .map((s) => s.id)
+          .toList();
+    } catch (_) {}
   }
 
   Future<void> _saveFavorites() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('music_favorites', jsonEncode(_favoriteIds));
+    try {
+      final paths = _favoriteIds.map((id) {
+        final match = _allSongs.where((s) => s.id == id);
+        return match.isNotEmpty ? match.first.filePath : '';
+      }).where((p) => p.isNotEmpty).toSet();
+      await MusicDbService.instance.saveFavorites(paths);
+    } catch (_) {}
   }
 
   @override

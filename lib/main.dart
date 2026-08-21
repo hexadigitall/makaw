@@ -52,6 +52,7 @@ import 'features/viewer/presentation/pages/html_viewer_page.dart';
 import 'features/music/presentation/pages/music_player_page.dart';
 import 'features/media/presentation/pages/image_viewer_page.dart';
 import 'features/music/data/services/music_player_service.dart';
+import 'features/music/data/services/music_db_service.dart';
 import 'features/media/data/services/image_viewer_service.dart';
 import 'features/media/data/services/video_player_service.dart';
 import 'features/documents/data/services/document_service.dart';
@@ -906,6 +907,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _checkUpdatesOnStartup();
       } catch (_) {}
       try {
+        await _initDb();
+      } catch (_) {}
+      try {
         _initDownloadDir();
         _musicService.loadPlaylists();
         _musicService.loadFavorites();
@@ -943,7 +947,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           }
         };
         _adBlocker.updateBlacklist();
-        _initDb();
         _initSnippets();
         _requestPermissions();
         _loadAiKey();
@@ -1273,7 +1276,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
     _db = await openDatabase(
       p.join(dir.path, 'makaw.db'),
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE projects (
@@ -1306,6 +1309,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
             last_used TEXT
           )
         ''');
+        await MusicDbService.createTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -1341,9 +1345,15 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
             ''');
           } catch (_) {}
         }
+        if (oldVersion < 5) {
+          try {
+            await MusicDbService.createTables(db);
+          } catch (_) {}
+        }
       },
     );
     HistoryService.init(_db!);
+    await MusicDbService.instance.init(_db!);
     _preseedGoogleConsentCookies();
     _loadProjects();
     _loadTerminalSessions();
@@ -1500,32 +1510,153 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       String shell;
       List<String> args;
       if (Platform.isAndroid) {
-        shell = 'sh';
-        args = ['-c', 'cd /storage/emulated/0 && sh'];
+        shell = '/system/bin/sh';
+        args = [];
       } else if (Platform.isWindows) {
         shell = 'powershell.exe';
         args = [];
       } else if (Platform.isMacOS) {
-        shell = '/bin/zsh';
+        shell = Platform.environment['SHELL'] ?? '/bin/zsh';
         args = [];
       } else {
-        shell = 'bash';
+        shell = Platform.environment['SHELL'] ?? '/bin/bash';
         args = [];
       }
       _pty = Pty.start(
         shell,
         arguments: args,
-        environment: {'TERM': 'xterm-256color'},
+        environment: {'TERM': 'xterm-256color', 'HOME': Platform.environment['HOME'] ?? ''},
         workingDirectory: _projectPath,
       );
       _pty!.output.cast<List<int>>().transform(const Utf8Decoder()).listen(_terminal.write);
-      _pty!.exitCode.then((code) => _terminal.write('Process exited: $code\n'));
+      _pty!.exitCode.then((code) => _terminal.write('\r\nProcess exited: $code\r\n'));
       _terminal.onOutput = (data) {
         _pty!.write(const Utf8Encoder().convert(data));
       };
     } catch (e) {
       _terminal.write('Failed to start terminal: $e\n');
     }
+  }
+
+  Widget _buildMobileTerminalBar() {
+    if (!Responsive.isMobile(context)) {
+      return Container(
+        color: kSurfaceElevated,
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
+            Icon(Icons.terminal, size: 16, color: Colors.grey),
+            SizedBox(width: 8),
+            Text('Terminal', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            Spacer(),
+            _iconBtn(Icons.block, 'Ctrl+C', () => _pty?.write(utf8.encode('\x03'))),
+            SizedBox(width: 4),
+            _iconBtn(Icons.stop, 'Ctrl+D', () => _pty?.write(utf8.encode('\x04'))),
+            SizedBox(width: 4),
+            _iconBtn(Icons.refresh, 'Clear', () { _terminal.eraseDisplay(); _terminal.eraseScrollbackOnly(); }),
+          ],
+        ),
+      );
+    }
+    return Container(
+      color: kSurfaceElevated,
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Row 1: Ctrl, Alt, Esc, Tab, pipes
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _terminalKeyBtn('CTRL', () => _terminalCtrlActive = !_terminalCtrlActive, isActive: _terminalCtrlActive),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('ALT', () => _terminalAltActive = !_terminalAltActive, isActive: _terminalAltActive),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('ESC', () => _sendTerminalKey('\x1b')),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('TAB', () => _sendTerminalKey('\t')),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('|', () => _sendTerminalKey('|')),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('/', () => _sendTerminalKey('/')),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('~', () => _sendTerminalKey('~')),
+                ],
+              ),
+            ),
+            SizedBox(height: 4),
+            // Row 2: arrows, backspace, enter
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _terminalKeyBtn('◀', () => _sendTerminalKey('\x1b[D')),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('▶', () => _sendTerminalKey('\x1b[C')),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('▲', () => _sendTerminalKey('\x1b[A')),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('▼', () => _sendTerminalKey('\x1b[B')),
+                  SizedBox(width: 8),
+                  _terminalKeyBtn('⌫', () => _sendTerminalKey('\x7f')),
+                  SizedBox(width: 4),
+                  _terminalKeyBtn('⏎', () => _sendTerminalKey('\r'), accent: true),
+                  SizedBox(width: 8),
+                  _iconBtn(Icons.block, 'Ctrl+C', () => _pty?.write(utf8.encode('\x03'))),
+                  SizedBox(width: 4),
+                  _iconBtn(Icons.refresh, 'Clear', () { _terminal.eraseDisplay(); _terminal.eraseScrollbackOnly(); }),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _terminalCtrlActive = false;
+  bool _terminalAltActive = false;
+
+  void _sendTerminalKey(String key) {
+    if (_pty == null) return;
+    String send = key;
+    if (_terminalCtrlActive && key.length == 1) {
+      final code = key.toLowerCase().codeUnitAt(0);
+      send = String.fromCharCode(code - 96);
+      _terminalCtrlActive = false;
+    }
+    if (_terminalAltActive) {
+      send = '\x1b$key';
+      _terminalAltActive = false;
+    }
+    _pty!.write(utf8.encode(send));
+  }
+
+  Widget _terminalKeyBtn(String label, VoidCallback onTap, {bool isActive = false, bool accent = false}) {
+    final bgColor = isActive
+        ? kTerminalAccent
+        : accent
+            ? kPrimaryBlue
+            : kSurfaceElevated;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: isActive ? kTerminalAccent : kSurfaceBorder, width: 0.5),
+        ),
+        child: Text(label, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+      ),
+    );
   }
 
   // ─── Browser Tabs ───────────────────────────────────────────────────────────
@@ -8253,23 +8384,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
               autofocus: true,
             ),
           ),
-          Container(
-            color: kSurfaceElevated,
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              children: [
-                Icon(Icons.terminal, size: 16, color: Colors.grey),
-                SizedBox(width: 8),
-                Text('Terminal', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                Spacer(),
-                _iconBtn(Icons.block, 'Ctrl+C', () => _pty?.write(utf8.encode('\x03'))),
-                SizedBox(width: 4),
-                _iconBtn(Icons.stop, 'Ctrl+D', () => _pty?.write(utf8.encode('\x04'))),
-                SizedBox(width: 4),
-                _iconBtn(Icons.refresh, 'Clear', () { _terminal.eraseDisplay(); _terminal.eraseScrollbackOnly(); }),
-              ],
-            ),
-          ),
+          _buildMobileTerminalBar(),
         ],
       ),
     );
@@ -8409,7 +8524,14 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
           ],
         ),
         body: SafeArea(
-          child: TerminalView(_terminal, controller: _terminalController, theme: TerminalThemes.defaultTheme, autofocus: true),
+          child: Column(
+            children: [
+              Expanded(
+                child: TerminalView(_terminal, controller: _terminalController, theme: TerminalThemes.defaultTheme, autofocus: true),
+              ),
+              _buildMobileTerminalBar(),
+            ],
+          ),
         ),
       ),
     );

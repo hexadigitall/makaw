@@ -50,3 +50,4 @@ android/.kotlin/
 # Generated
 *.g.dart
 *.freezed.dart
+doc/

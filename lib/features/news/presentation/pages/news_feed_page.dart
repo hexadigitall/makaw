@@ -26,6 +26,7 @@ class NewsFeedWidgetState extends State<NewsFeedWidget> {
   final List<StreamSubscription> _subscriptions = [];
   Timer? _impressionTimer;
   final Set<String> _impressedCards = {};
+  String _selectedTopic = 'All';
 
   @override
   void initState() {
@@ -161,13 +162,59 @@ class NewsFeedWidgetState extends State<NewsFeedWidget> {
     if (_loading && _feeds.isEmpty) {
       return Center(child: CircularProgressIndicator(color: const Color(0xFF818CF8)));
     }
-    final ordered = widget.service.getOrderedCategories();
+    final ordered = widget.service.getTopicCategories(_selectedTopic);
     return Column(
       children: [
-        for (final cat in ordered)
-          if ((_feeds[cat.name] ?? []).isNotEmpty)
-            _buildCategory(cat, _feeds[cat.name]!),
+        _buildTopicTabs(),
+        Expanded(
+          child: ListView(
+            controller: widget.scrollController,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            children: [
+              for (final cat in ordered)
+                if ((_feeds[cat.name] ?? []).isNotEmpty)
+                  _buildCategory(cat, _feeds[cat.name]!),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildTopicTabs() {
+    final topics = widget.service.availableTopics;
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: topics.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (ctx, i) {
+          final t = topics[i];
+          final selected = t == _selectedTopic;
+          return GestureDetector(
+            onTap: () => setState(() => _selectedTopic = t),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected ? const Color(0xFF818CF8) : const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: selected ? const Color(0xFF818CF8) : const Color(0xFF334155),
+                ),
+              ),
+              child: Text(t,
+                style: TextStyle(
+                  color: selected ? Colors.white : const Color(0xFF94A3B8),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                )),
+            ),
+          );
+        },
+      ),
     );
   }
 
