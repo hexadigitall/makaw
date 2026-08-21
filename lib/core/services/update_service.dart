@@ -193,6 +193,14 @@ class UpdateService {
   Map<String, dynamic>? _findWindowsAsset(List<dynamic> assets) {
     for (final asset in assets) {
       final name = asset['name'] as String? ?? '';
+      if (name.contains('windows') && name.endsWith('.exe')) return asset;
+    }
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
+      if (name.contains('windows') && name.endsWith('.msi')) return asset;
+    }
+    for (final asset in assets) {
+      final name = asset['name'] as String? ?? '';
       if (name.contains('windows') && name.endsWith('.zip')) return asset;
     }
     return null;
@@ -224,8 +232,8 @@ class UpdateService {
 
   String get _fileExtension {
     if (Platform.isAndroid) return '.apk';
-    if (Platform.isWindows) return '.zip';
-    if (Platform.isLinux) return '.tar.gz';
+    if (Platform.isWindows) return '.exe';
+    if (Platform.isLinux) return '.AppImage';
     if (Platform.isMacOS) return '.zip';
     return '';
   }
@@ -269,13 +277,36 @@ class UpdateService {
   Future<bool> openUpdateFile(String path) async {
     try {
       if (Platform.isAndroid) {
-        final result = await OpenFilex.open(path);
+        final result = await OpenFilex.open(path,
+            type: 'application/vnd.android.package-archive');
         return result.type == ResultType.done;
+      } else if (Platform.isWindows) {
+        return _launchDesktopInstaller(path);
+      } else if (Platform.isLinux) {
+        return _launchDesktopInstaller(path);
       } else {
         return await openReleasePage();
       }
     } catch (e) {
       debugPrint('Open update error: $e');
+      return await openReleasePage();
+    }
+  }
+
+  Future<bool> _launchDesktopInstaller(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) return false;
+
+      if (Platform.isLinux) {
+        await Process.run('chmod', ['+x', path]);
+      }
+
+      await Process.start(path, [], mode: ProcessStartMode.detached);
+      await Future.delayed(const Duration(milliseconds: 300));
+      return true;
+    } catch (e) {
+      debugPrint('Launch installer error: $e');
       return false;
     }
   }
@@ -292,12 +323,14 @@ class UpdateService {
 
   String get updateActionLabel {
     if (Platform.isAndroid) return 'Install';
-    return 'Open Release Page';
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) return 'Install & Restart';
+    return 'Download';
   }
 
   String get updateActionHint {
     if (Platform.isAndroid) return '';
-    return 'The file will be downloaded, then the release page will open for instructions.';
+    if (Platform.isWindows || Platform.isLinux) return 'The installer will launch and the app will close so the file is not locked.';
+    return '';
   }
 
   Future<void> cleanOldDownloads() async {

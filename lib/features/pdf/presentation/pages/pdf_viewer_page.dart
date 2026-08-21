@@ -274,6 +274,19 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                       minScale: 0.5,
                       maxScale: 5.0,
                       backgroundColor: _kDark,
+                      layoutPages: (pages, params) {
+                        final pageLayouts = <Rect>[];
+                        double y = 0;
+                        for (var i = 0; i < pages.length; i++) {
+                          final page = pages[i];
+                          final margin = i == 0 ? 16.0 : 8.0;
+                          y += margin;
+                          pageLayouts.add(Rect.fromLTWH(0, y, page.width, page.height));
+                          y += page.height;
+                        }
+                        final docWidth = pages.isNotEmpty ? pages.first.width : 612.0;
+                        return PdfPageLayout(pageLayouts: pageLayouts, documentSize: Size(docWidth, y + 16));
+                      },
                       getPageRenderingScale: (context, page, controller, estimatedScale) {
                         final dpr = MediaQuery.of(context).devicePixelRatio;
                         return dpr > estimatedScale ? dpr : estimatedScale;

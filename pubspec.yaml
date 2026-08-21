@@ -51,6 +51,8 @@ dependencies:
   universal_html: ^2.2.4
   web: ^1.0.0
   palette_generator: ^0.3.3+7
+  pdf: ^3.12.0
+  image: ^4.3.0
 
 msix_config:
   display_name: Makaw
