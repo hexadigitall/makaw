@@ -70,7 +70,8 @@ jobs:
           dart run msix:create `
             --display-name "Makaw" `
             --publisher "CN=Hexadigitall" `
-            --capabilities "internetClient,broadFileSystemAccess"
+            --capabilities "internetClient,broadFileSystemAccess" `
+            --certificate-password "ci-dummy"
 
       - name: Rename MSIX
         shell: pwsh
