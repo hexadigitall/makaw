@@ -61,7 +61,8 @@ jobs:
             --publisher "CN=Hexadigitall" `
             --capabilities "internetClient,broadFileSystemAccess" `
             --certificate-path "$env:USERPROFILE\makaw-cert.pfx" `
-            --certificate-password "$env:MSIX_CERT_PASSWORD"
+            --certificate-password "$env:MSIX_CERT_PASSWORD" `
+            --install-certificate false
 
       - name: Package MSIX (self-signed fallback)
         if: env.MSIX_CERT_B64 == ''
@@ -71,7 +72,8 @@ jobs:
             --display-name "Makaw" `
             --publisher "CN=Hexadigitall" `
             --capabilities "internetClient,broadFileSystemAccess" `
-            --certificate-password "ci-dummy"
+            --certificate-password "ci-dummy" `
+            --install-certificate false
 
       - name: Rename MSIX
         shell: pwsh
