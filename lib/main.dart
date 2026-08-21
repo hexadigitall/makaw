@@ -164,6 +164,69 @@ const kRadiusFull = 999.0;
 
 enum ViewMode { home, newTab, typeView, browsing }
 
+// ─── WebView2 Runtime Detection ─────────────────────────────────────────────
+bool? _webview2Available;
+
+Future<bool> isWebView2Available() async {
+  if (_webview2Available != null) return _webview2Available!;
+  if (!kIsWeb && !Platform.isWindows) { _webview2Available = true; return true; }
+  if (kIsWeb) { _webview2Available = true; return true; }
+  try {
+    final result = await Process.run('reg', [
+      'query',
+      r'HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BEE-13A6279A0750}',
+      '/v',
+      'pv',
+    ]);
+    _webview2Available = result.exitCode == 0;
+  } catch (_) {
+    _webview2Available = false;
+  }
+  return _webview2Available!;
+}
+
+Widget buildWebView2Fallback() {
+  return Container(
+    color: const Color(0xFF0F172A),
+    child: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.language, size: 64, color: Colors.white.withValues(alpha: 0.3)),
+            const SizedBox(height: 20),
+            const Text('WebView2 Runtime Not Found',
+              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            Text(
+              'Makaw needs the Microsoft Edge WebView2 Runtime to display web pages.\n\n'
+              'Please download and install it from Microsoft, then restart Makaw.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14, height: 1.5),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final uri = Uri.parse('https://developer.microsoft.com/en-us/microsoft-edge/webview2/');
+                if (await canLaunchUrl(uri)) await launchUrl(uri);
+              },
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Download WebView2 Runtime'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF818CF8),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 // ─── Download Guard ────────────────────────────────────────────────────────
 class MakawDownloadGuard {
   static const Set<String> blockedExtensions = {
@@ -1525,7 +1588,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _pty = Pty.start(
         shell,
         arguments: args,
-        environment: {'TERM': 'xterm-256color', 'HOME': Platform.environment['HOME'] ?? ''},
+        environment: {
+          ...Platform.environment,
+          'TERM': 'xterm-256color',
+          'HOME': Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '',
+        },
         workingDirectory: _projectPath,
       );
       _pty!.output.cast<List<int>>().transform(const Utf8Decoder()).listen(_terminal.write);
@@ -3450,7 +3517,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   }
                   if (_browserTabs.isEmpty) {
                     setState(() {
-                      _viewMode = ViewMode.home;
+                      _viewMode = ViewMode.newTab;
                       _urlSuggestions = [];
                       _searchSuggestions = [];
                       _suggestions = [];
@@ -3617,11 +3684,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                           _urlFocusNode.unfocus();
                           _suggestDebounce?.cancel();
                           if (_browserTabs.isEmpty) {
-                            setState(() { _viewMode = ViewMode.home; });
+                            setState(() { _viewMode = ViewMode.newTab; });
                             return;
                           }
-                          final lastUrl = _browserTabs.isNotEmpty ? _browserTabs.last.url : '';
-                          setState(() { _viewMode = lastUrl.isEmpty ? ViewMode.home : ViewMode.browsing; });
+                          final activeTab = _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.last);
+                          setState(() { _viewMode = activeTab.url.isEmpty ? ViewMode.newTab : ViewMode.browsing; });
                           return;
                         }
                         if (_viewMode == ViewMode.browsing) {
@@ -6783,8 +6850,23 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
     final initialUrl = tab.url.isNotEmpty ? tab.url : 'about:blank';
 
+    if (!kIsWeb && Platform.isWindows) {
+      return FutureBuilder<bool>(
+        future: isWebView2Available(),
+        builder: (ctx, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator(color: Color(0xFF818CF8)));
+          }
+          if (snap.data == false) return buildWebView2Fallback();
+          return _buildTabWebViewInternal(tab, settings, initialUrl);
+        },
+      );
+    }
+    return _buildTabWebViewInternal(tab, settings, initialUrl);
+  }
+
+  Widget _buildTabWebViewInternal(BrowserTab tab, InAppWebViewSettings settings, String initialUrl) {
     return InAppWebView(
-      key: tab.webViewKey,
       initialSettings: settings,
       initialUrlRequest: URLRequest(url: WebUri(initialUrl)),
       initialUserScripts: UnmodifiableListView([
