@@ -70,6 +70,8 @@ import 'core/widgets/adaptive_container.dart';
 import 'core/widgets/adaptive_modal.dart';
 import 'core/widgets/adaptive_action_button.dart';
 import 'core/widgets/makaw_effects.dart';
+import 'features/studio/data/code_studio_service.dart';
+import 'features/studio/presentation/pages/code_studio_workspace.dart';
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 
@@ -3674,6 +3676,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           Expanded(
             child: Column(
               children: [
+                if (_currentView == 'browser' && _browserTabs.isNotEmpty)
+                  _buildDesktopTabStrip(),
                 Expanded(
                   child: PopScope(
                     canPop: false,
@@ -3808,6 +3812,78 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ],
       ),
     );
+  }
+
+  Widget _buildDesktopTabStrip() {
+    return Container(
+      height: 36,
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: Row(
+        children: [
+          SizedBox(width: 8),
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _browserTabs.length,
+              itemBuilder: (ctx, i) {
+                final tab = _browserTabs[i];
+                final active = tab.id == _activeBrowserTabId;
+                final displayTitle = tab.title.isNotEmpty ? tab.title : (tab.url.isEmpty ? 'New Tab' : _extractDomain(tab.url));
+                return GestureDetector(
+                  onTap: () => _switchBrowserTab(tab.id),
+                  child: Container(
+                    width: 180,
+                    margin: EdgeInsets.only(top: 6, left: 2),
+                    decoration: BoxDecoration(
+                      color: active ? Theme.of(context).colorScheme.surface : Colors.transparent,
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+                      border: Border(
+                        top: BorderSide(color: active ? kAccentTeal : Colors.transparent, width: 2),
+                      ),
+                    ),
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      children: [
+                        Icon(tab.incognito ? Icons.visibility_off : Icons.language,
+                          size: 12, color: active ? kAccentTeal : Theme.of(context).colorScheme.onSurface.withOpacity(0.4)),
+                        SizedBox(width: 6),
+                        Expanded(
+                          child: Text(displayTitle,
+                            overflow: TextOverflow.ellipsis, maxLines: 1,
+                            style: TextStyle(fontSize: 11,
+                              color: active ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurface.withOpacity(0.55))),
+                        ),
+                        GestureDetector(
+                          onTap: () => _closeBrowserTab(tab.id),
+                          child: Icon(Icons.close, size: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.add, size: 16, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
+            onPressed: () => _createBrowserTab(incognito: _isIncognitoActive),
+            tooltip: 'New Tab',
+            padding: EdgeInsets.all(4),
+            constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+          SizedBox(width: 4),
+        ],
+      ),
+    );
+  }
+
+  String _extractDomain(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.host;
+    } catch (_) {
+      return url.length > 30 ? url.substring(0, 30) : url;
+    }
   }
 
   Widget _buildWebLandingPage() {
@@ -5372,6 +5448,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   // ─── Makaw App Portal ────────────────────────────────────────────────────
   Widget _buildMakawAppPortal() {
     final isWide = Responsive.isDesktop(context);
+    final maxContentWidth = isWide ? Responsive.desktopMax : double.infinity;
+    final maxSearchWidth = isWide ? 680.0 : double.infinity;
     return RefreshIndicator(
       onRefresh: _refreshNewsFeed,
       child: CustomScrollView(
@@ -5379,7 +5457,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         slivers: [
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isWide ? 600 : double.infinity),
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
                 child: Column(children: [
@@ -5394,7 +5472,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           )),
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isWide ? 560 : double.infinity),
+              constraints: BoxConstraints(maxWidth: maxSearchWidth),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
                 child: GestureDetector(
@@ -5431,7 +5509,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           )),
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isWide ? 600 : double.infinity),
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 24, 16, 0),
                 child: Column(
@@ -5455,7 +5533,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           if (_musicService.currentSong != null)
             SliverToBoxAdapter(child: Center(
               child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: isWide ? 600 : double.infinity),
+                constraints: BoxConstraints(maxWidth: maxContentWidth),
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
                   child: Container(
@@ -5498,7 +5576,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             )),
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isWide ? 600 : double.infinity),
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
                 child: InkWell(
@@ -5559,6 +5637,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   // ─── Browser NTP (New Tab Page) ──────────────────────────────────────────
   Widget _buildBrowserNtpView() {
     final isWide = Responsive.isDesktop(context);
+    final maxContentWidth = isWide ? Responsive.desktopMax : double.infinity;
+    final maxSearchWidth = isWide ? 680.0 : double.infinity;
     return RefreshIndicator(
       onRefresh: _refreshNewsFeed,
       child: CustomScrollView(
@@ -5575,7 +5655,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           )),
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isWide ? 520 : double.infinity),
+              constraints: BoxConstraints(maxWidth: maxSearchWidth),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: GestureDetector(
@@ -5609,7 +5689,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           )),
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isWide ? 520 : double.infinity),
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
                 child: Column(
@@ -5626,7 +5706,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           )),
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isWide ? 520 : double.infinity),
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
                 child: Column(
@@ -5644,7 +5724,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           if (_newsFeedService != null)
             SliverToBoxAdapter(child: Center(
               child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: isWide ? 520 : double.infinity),
+                constraints: BoxConstraints(maxWidth: maxContentWidth),
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(16, 24, 16, 0),
                   child: Column(
@@ -8694,10 +8774,18 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                               onPressed: () => _deleteProject(proj['id'] as int),
                             ),
                           ]),
-                          onTap: () {
-                            setState(() { _currentProject = name; _currentLang = lang; });
-                            _openFileInEditor('$name.$lang', proj['content'] ?? '', language: lang);
-                            _openStudioEditor();
+                          onTap: () async {
+                            final projDir = Directory(proj['path'] ?? '');
+                            if (projDir.existsSync()) {
+                              final files = projDir.listSync().whereType<File>().toList();
+                              final project = CodeStudioProject(name: name, rootDir: projDir, files: files);
+                              Navigator.of(context).push(PageRouteBuilder(
+                                pageBuilder: (_, __, ___) => CodeStudioWorkspacePage(project: project),
+                                transitionDuration: Duration(milliseconds: 200),
+                                reverseTransitionDuration: Duration(milliseconds: 150),
+                                transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+                              ));
+                            }
                           },
                         ),
                       );
@@ -8711,30 +8799,65 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
 
   void _promptNewStudioProject() {
     final controller = TextEditingController(text: 'untitled');
+    String template = 'javascript';
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        title: Text('New Project', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        content: TextField(
-          controller: controller, autofocus: true,
-          decoration: InputDecoration(hintText: 'Project name', prefixIcon: Icon(Icons.code)),
-          onSubmitted: (v) { Navigator.of(ctx).pop(); if (v.trim().isNotEmpty) _openNewStudioProject(v.trim()); },
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          title: Text('New Project', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller, autofocus: true,
+                decoration: InputDecoration(hintText: 'Project name', prefixIcon: Icon(Icons.code)),
+              ),
+              SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: template,
+                dropdownColor: Theme.of(context).colorScheme.surface,
+                decoration: InputDecoration(labelText: 'Template', isDense: true),
+                items: ['javascript','python','dart','html','css','typescript'].map(
+                  (t) => DropdownMenuItem(value: t, child: Text(t)),
+                ).toList(),
+                onChanged: (v) => setDlgState(() { if (v != null) template = v; }),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('Cancel')),
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                if (controller.text.trim().isNotEmpty) _openNewStudioProject(controller.text.trim(), template);
+              },
+              child: Text('Create', style: TextStyle(color: kPrimaryBlue)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('Cancel')),
-          TextButton(onPressed: () { Navigator.of(ctx).pop(); if (controller.text.trim().isNotEmpty) _openNewStudioProject(controller.text.trim()); }, child: Text('Create', style: TextStyle(color: kPrimaryBlue))),
-        ],
       ),
     );
   }
 
-  void _openNewStudioProject(String name) {
-    final lang = _currentLang.isNotEmpty ? _currentLang : 'javascript';
-    final boilerplate = BOILERPLATES[lang] ?? '';
-    setState(() { _currentProject = name; _currentLang = lang; });
-    _openFileInEditor('$name.$lang', boilerplate, language: lang);
-    _openStudioEditor();
+  void _openNewStudioProject(String name, String template) async {
+    final project = await CodeStudioService.createProject(name, template);
+    if (!mounted) return;
+    if (_db != null) {
+      await _db!.insert('projects', {
+        'name': name,
+        'content': '',
+        'language': template,
+        'path': project.rootDir.path,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    Navigator.of(context).push(PageRouteBuilder(
+      pageBuilder: (_, __, ___) => CodeStudioWorkspacePage(project: project),
+      transitionDuration: Duration(milliseconds: 200),
+      reverseTransitionDuration: Duration(milliseconds: 150),
+      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+    )).then((_) => _loadProjects());
   }
 
   void _openStudioEditor() {
