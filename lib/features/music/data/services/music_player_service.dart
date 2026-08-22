@@ -1,21 +1,16 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../../../core/services/media_notification_service.dart';
 import 'makaw_audio_handler.dart';
 import 'music_db_service.dart';
 import '../../domain/entities/entities.dart';
 export '../../domain/entities/entities.dart';
 
 class MusicPlayerService extends ChangeNotifier {
-  MusicPlayerService() {
-    _setupPlayer();
-  }
+  MusicPlayerService();
 
   MakawAudioHandler? _audioHandler;
   void attachAudioHandler(MakawAudioHandler handler) {
@@ -36,16 +31,6 @@ class MusicPlayerService extends ChangeNotifier {
     });
     p.playerStateStream.listen((s) {
       _isPlaying = s.playing;
-      if (s.processingState == ProcessingState.completed) {
-        if (_loopMode == LoopMode.one) {
-          p.seek(Duration.zero);
-          _isPlaying = true;
-          p.play();
-          notifyNowPlaying();
-        } else {
-          _nextSong();
-        }
-      }
       notifyListeners();
     });
   }
@@ -86,8 +71,6 @@ class MusicPlayerService extends ChangeNotifier {
       await MusicDbService.instance.saveSongs(maps);
     } catch (_) {}
   }
-
-  final AudioPlayer player = AudioPlayer();
 
   VoidCallback? onNowPlaying;
 
@@ -153,48 +136,6 @@ class MusicPlayerService extends ChangeNotifier {
 
   final List<String> _audioExts = ['.mp3', '.flac', '.wav', '.ogg', '.aac', '.m4a', '.wma', '.opus'];
 
-  void _setupPlayer() {
-    player.positionStream.listen((p) {
-      if (_audioHandler != null) return;
-      _position = p;
-      notifyListeners();
-    });
-    player.durationStream.listen((d) {
-      if (_audioHandler != null) return;
-      _duration = d ?? Duration.zero;
-      notifyListeners();
-    });
-    player.playerStateStream.listen((s) {
-      if (_audioHandler != null) return;
-      _isPlaying = s.playing;
-      if (s.processingState == ProcessingState.completed) {
-        if (_loopMode == LoopMode.one) {
-          player.seek(Duration.zero);
-          _isPlaying = true;
-          player.play();
-          notifyNowPlaying();
-        } else {
-          _nextSong();
-        }
-      }
-      notifyListeners();
-    });
-  }
-
-  void _startPositionTimer() {
-    if (_positionTimer != null) return;
-    _positionTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (player.playing) {
-        MediaNotificationService.instance.syncPlaybackState(
-          isPlaying: true,
-          position: _position,
-        );
-      }
-    });
-  }
-
-  Timer? _positionTimer;
-
   static const _metadataChannel = MethodChannel('com.hexadigitall.makaw/metadata');
 
   Future<Map<String, dynamic>?> _extractFileMetadata(String filePath) async {
@@ -232,10 +173,10 @@ class MusicPlayerService extends ChangeNotifier {
         if (!await dir.exists()) continue;
         await for (final entity in dir.list(recursive: true, followLinks: false)) {
           if (entity is File) {
-            final p = entity.path;
-            final ext = p.toLowerCase();
-            if (_audioExts.any((e) => ext.endsWith(e)) && seen.add(p)) {
-              foundRaw.add(MapEntry(idCounter++, p));
+            final path = entity.path;
+            final ext = path.toLowerCase();
+            if (_audioExts.any((e) => ext.endsWith(e)) && seen.add(path)) {
+              foundRaw.add(MapEntry(idCounter++, path));
             }
           }
         }
@@ -253,7 +194,6 @@ class MusicPlayerService extends ChangeNotifier {
         }
       }
 
-      // Extract metadata in batches
       final batchSize = 50;
       final metaMap = <String, Map<String, dynamic>>{};
       for (int i = 0; i < foundRaw.length; i += batchSize) {
@@ -268,28 +208,10 @@ class MusicPlayerService extends ChangeNotifier {
               final m = Map<String, dynamic>.from(r as Map);
               metaMap[m['path'] as String] = m;
             }
-            if (results.isNotEmpty) {
-              final sample = results[0] as Map<Object?, Object?>;
-              print('MakawMetadata: batch got ${results.length} results, sample title="${sample['title']}"');
-            }
           }
-        } catch (e) {
-          print('MakawMetadata: batch invoke failed: $e');
-        }
+        } catch (_) {}
       }
 
-      print('MakawMetadata: metaMap has ${metaMap.length} entries, foundRaw has ${foundRaw.length} files');
-      if (foundRaw.isNotEmpty && metaMap.isNotEmpty) {
-        final samplePath = foundRaw.first.value;
-        final sampleMeta = metaMap[samplePath];
-        if (sampleMeta != null) {
-          print('MakawMetadata: sample match for "$samplePath": artist="${sampleMeta['artist']}" album="${sampleMeta['album']}" duration=${sampleMeta['duration']}');
-        } else {
-          print('MakawMetadata: NO MATCH for "$samplePath" in metaMap keys: ${metaMap.keys.take(3).join(", ")}...');
-        }
-      }
-
-      // Preload cached metadata from SQLite
       Map<String, Map<String, dynamic>>? cache;
       try {
         cache = await MusicDbService.instance.loadSongMetadata();
@@ -298,11 +220,10 @@ class MusicPlayerService extends ChangeNotifier {
       final found = <SongInfo>[];
       for (final entry in foundRaw) {
         final p = entry.value;
-        // Try fresh extraction first; if it has no real data, use cache
         var meta = metaMap[p];
         if (meta != null) {
           final t = (meta['title'] as String? ?? '').trim();
-          if (t.isEmpty) meta = cache?[p]; // fresh extraction returned nothing, use cache
+          if (t.isEmpty) meta = cache?[p];
         } else {
           meta = cache?[p];
         }
@@ -310,6 +231,8 @@ class MusicPlayerService extends ChangeNotifier {
         final artist = (meta?['artist'] as String? ?? '').trim();
         final album = (meta?['album'] as String? ?? '').trim();
         final durationMs = (meta?['duration'] as int? ?? 0);
+
+        if (durationMs < 30000) continue;
 
         found.add(SongInfo(
           id: entry.key,
@@ -325,7 +248,6 @@ class MusicPlayerService extends ChangeNotifier {
       _allSongs = found;
       if (_allSongs.isEmpty) _scanError = 'No music files found. Tap Scan to try again.';
 
-      // Cache only entries that have actual metadata
       final goodMeta = <String, Map<String, dynamic>>{};
       for (final entry in metaMap.entries) {
         if ((entry.value['title'] as String? ?? '').trim().isNotEmpty ||
@@ -351,19 +273,18 @@ class MusicPlayerService extends ChangeNotifier {
   void playSong(int index, {List<SongInfo>? fromList}) {
     final list = fromList ?? _allSongs;
     if (index < 0 || index >= list.length) return;
-    if (fromList != null || _queue.isEmpty) _queue = List.from(list);
+    _queue = List.from(list);
     _currentIndex = index;
-    _playSource(_queue[_currentIndex]);
+    _playThroughHandler();
   }
 
   void playShuffled(List<SongInfo> list) {
     if (list.isEmpty) return;
     _savedQueue = List.from(list);
     _isShuffled = true;
-    _queue = List.from(list);
-    _queue.shuffle(Random());
+    _queue = List.from(list)..shuffle(Random());
     _currentIndex = 0;
-    _playSource(_queue[_currentIndex]);
+    _playThroughHandler();
   }
 
   void playSongInfo(SongInfo song) {
@@ -371,17 +292,33 @@ class MusicPlayerService extends ChangeNotifier {
     if (idx >= 0) { playSong(idx); return; }
     _queue = [song];
     _currentIndex = 0;
-    _playSource(song);
+    _playThroughHandler();
   }
 
-  void _playSource(SongInfo song) {
-    _duration = Duration(milliseconds: song.duration);
+  void _playThroughHandler() {
+    if (_queue.isEmpty || _currentIndex < 0) return;
+    _duration = Duration(milliseconds: _queue[_currentIndex].duration);
     _position = Duration.zero;
-    final p = _audioHandler?.player ?? player;
-    p.setAudioSource(AudioSource.file(song.filePath));
     _isPlaying = true;
-    p.play();
+
+    if (_audioHandler != null) {
+      _audioHandler!.loadQueue(
+        _queue,
+        initialIndex: _currentIndex,
+        shuffle: false,
+      );
+      _audioHandler!.setLoopMode(_loopMode);
+    } else {
+      _playFallback(_queue[_currentIndex]);
+    }
     notifyNowPlaying();
+  }
+
+  void _playFallback(SongInfo song) {
+    final p = _audioHandler?.player;
+    if (p == null) return;
+    p.setAudioSource(AudioSource.file(song.filePath));
+    p.play();
   }
 
   void _ensureQueued() {
@@ -394,12 +331,11 @@ class MusicPlayerService extends ChangeNotifier {
   void notifyNowPlaying() {
     onNowPlaying?.call();
     notifyListeners();
-    MediaNotificationService.instance.syncPlaybackState(isPlaying: _isPlaying, position: _position);
-    _startPositionTimer();
   }
 
   void togglePlayPause() {
-    final p = _audioHandler?.player ?? player;
+    final p = _audioHandler?.player;
+    if (p == null) return;
     if (p.playing) {
       p.pause();
       _isPlaying = false;
@@ -415,10 +351,17 @@ class MusicPlayerService extends ChangeNotifier {
     if (_queue.isEmpty) return;
     int next = _currentIndex + 1;
     if (next >= _queue.length) {
-      if (_loopMode == LoopMode.all) { next = 0; } else { (_audioHandler?.player ?? player).stop(); return; }
+      if (_loopMode == LoopMode.all) {
+        next = 0;
+      } else {
+        _audioHandler?.player.stop();
+        _isPlaying = false;
+        notifyListeners();
+        return;
+      }
     }
     _currentIndex = next;
-    _playSource(_queue[_currentIndex]);
+    _playThroughHandler();
   }
 
   void nextSong() => _nextSong();
@@ -426,13 +369,18 @@ class MusicPlayerService extends ChangeNotifier {
   void previousSong() {
     _ensureQueued();
     if (_queue.isEmpty) return;
+    final p = _audioHandler?.player;
+    if (p != null && p.position.inSeconds > 3) {
+      p.seek(Duration.zero);
+      return;
+    }
     int prev = _currentIndex - 1;
     if (prev < 0) { prev = _loopMode == LoopMode.all ? _queue.length - 1 : 0; }
     _currentIndex = prev;
-    _playSource(_queue[_currentIndex]);
+    _playThroughHandler();
   }
 
-  void seek(Duration d) => (_audioHandler?.player ?? player).seek(d);
+  void seek(Duration d) => _audioHandler?.player.seek(d);
 
   void toggleShuffle() {
     _ensureQueued();
@@ -458,6 +406,7 @@ class MusicPlayerService extends ChangeNotifier {
       }
       _isShuffled = true;
     }
+    _audioHandler?.loadQueue(_queue, initialIndex: _currentIndex, shuffle: false);
     notifyListeners();
   }
 
@@ -467,6 +416,7 @@ class MusicPlayerService extends ChangeNotifier {
       case LoopMode.all: _loopMode = LoopMode.one; break;
       case LoopMode.one: _loopMode = LoopMode.off; break;
     }
+    _audioHandler?.setLoopMode(_loopMode);
     notifyListeners();
   }
 
@@ -501,7 +451,7 @@ class MusicPlayerService extends ChangeNotifier {
     notifyListeners();
     if (minutes > 0) {
       Future.delayed(Duration(minutes: minutes), () {
-        if (_timerMinutes > 0) { player.stop(); _timerMinutes = 0; notifyListeners(); }
+        if (_timerMinutes > 0) { _audioHandler?.player.stop(); _timerMinutes = 0; notifyListeners(); }
       });
     }
   }
@@ -580,19 +530,37 @@ class MusicPlayerService extends ChangeNotifier {
     return map;
   }
 
-  void addToQueue(SongInfo song) { _queue.add(song); notifyListeners(); }
+  void addToQueue(SongInfo song) {
+    _queue.add(song);
+    _audioHandler?.addToQueue(song);
+    notifyListeners();
+  }
 
   void playNext(SongInfo song) {
-    if (_currentIndex >= 0 && _currentIndex < _queue.length) { _queue.insert(_currentIndex + 1, song); }
-    else { _queue.add(song); }
+    if (_currentIndex >= 0 && _currentIndex < _queue.length) {
+      _queue.insert(_currentIndex + 1, song);
+    } else {
+      _queue.add(song);
+    }
+    _audioHandler?.playNext(song);
     notifyListeners();
   }
 
   void removeFromQueue(int index) {
-    if (index >= 0 && index < _queue.length && index != _currentIndex) { _queue.removeAt(index); notifyListeners(); }
+    if (index >= 0 && index < _queue.length && index != _currentIndex) {
+      _queue.removeAt(index);
+      _audioHandler?.removeFromQueue(index);
+      if (index < _currentIndex) _currentIndex--;
+      notifyListeners();
+    }
   }
 
-  void clearQueue() { _queue.clear(); _currentIndex = -1; (_audioHandler?.player ?? player).stop(); notifyListeners(); }
+  void clearQueue() {
+    _queue.clear();
+    _currentIndex = -1;
+    _audioHandler?.clearQueue();
+    notifyListeners();
+  }
 
   void reorderQueue(int oldIndex, int newIndex) {
     if (newIndex > oldIndex) newIndex--;
@@ -605,13 +573,14 @@ class MusicPlayerService extends ChangeNotifier {
     } else if (oldIndex > _currentIndex && newIndex <= _currentIndex) {
       _currentIndex++;
     }
+    _audioHandler?.reorderQueue(oldIndex, newIndex);
     notifyListeners();
   }
 
   void playFromQueue(int index) {
     if (index >= 0 && index < _queue.length) {
       _currentIndex = index;
-      _playSource(_queue[index]);
+      _playThroughHandler();
     }
   }
 
@@ -666,5 +635,8 @@ class MusicPlayerService extends ChangeNotifier {
   }
 
   @override
-  void dispose() { _positionTimer?.cancel(); player.dispose(); MediaNotificationService.instance.hide(); super.dispose(); }
+  void dispose() {
+    _audioHandler?.disposeHandler();
+    super.dispose();
+  }
 }

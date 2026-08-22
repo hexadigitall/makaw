@@ -59,22 +59,6 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
         mediaItem.add(queue.value[index]);
       }
     });
-
-    _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) {
-        _handleTrackComplete();
-      }
-    });
-  }
-
-  void _handleTrackComplete() {
-    final loopMode = _player.loopMode;
-    if (loopMode == LoopMode.one) {
-      _player.seek(Duration.zero);
-      _player.play();
-    } else if (loopMode == LoopMode.off && _masterIndex >= _masterQueue.length - 1) {
-      stop();
-    }
   }
 
   MediaItem _songToMediaItem(SongInfo song) {
