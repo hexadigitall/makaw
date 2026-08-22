@@ -4,7 +4,7 @@ import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import 'package:highlight/highlight.dart' show Mode;
 import 'package:highlight/languages/all.dart';
-import '../data/code_studio_service.dart';
+import '../../data/code_studio_service.dart';
 
 class CodeStudioWorkspacePage extends StatefulWidget {
   final CodeStudioProject project;

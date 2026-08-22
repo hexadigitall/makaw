@@ -1430,7 +1430,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
           if (_showLyrics && _lyricsText.isEmpty) _fetchLyrics();
         }),
         const SizedBox(width: 12),
-        _actionChip(Icons.speed, '${_service.player.speed}x', _service.player.speed != 1.0, () => _speedSheet()),
+        _actionChip(Icons.speed, '${_service.speed}x', _service.speed != 1.0, () => _speedSheet()),
         const SizedBox(width: 12),
         PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: Colors.white.withValues(alpha: 0.6), size: 22),
@@ -1690,7 +1690,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
 
   void _speedSheet() {
     final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
-    final cur = _service.player.speed;
+    final cur = _service.speed;
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1A1A2E),
@@ -1709,7 +1709,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
                 speeds.map((s) => ListTile(
                   title: Text('${s}x', style: TextStyle(color: cur == s ? const Color(0xFF818CF8) : Colors.white)),
                   trailing: cur == s ? const Icon(Icons.check, color: Color(0xFF818CF8), size: 20) : null,
-                  onTap: () { _service.player.setSpeed(s); Navigator.pop(context); },
+                  onTap: () { _service.setSpeed(s); Navigator.pop(context); },
                 )).toList(),
               ),
             ),

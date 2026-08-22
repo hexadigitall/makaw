@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:makaw_mobile/features/documents/domain/entities/document_file_info.dart';
+import 'package:makaw/features/documents/domain/entities/document_file_info.dart';
 
 void main() {
   group('DocumentFileInfo', () {

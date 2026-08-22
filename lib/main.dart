@@ -313,16 +313,16 @@ Future<void> _initMediaNotification() async {
     globalMusicService.notificationStatus = 'channel: ${notif.channelImportance}';
 
     notif.onPlay = () {
-      globalMusicService.player.play();
+      globalMusicService.play();
       globalMusicService.notifyNowPlaying();
     };
     notif.onPause = () {
-      globalMusicService.player.pause();
+      globalMusicService.pause();
       globalMusicService.notifyNowPlaying();
     };
     notif.onNext = () => globalMusicService.nextSong();
     notif.onPrevious = () => globalMusicService.previousSong();
-    notif.onSeek = (pos) => globalMusicService.player.seek(pos);
+    notif.onSeek = (pos) => globalMusicService.seek(pos);
 
     globalMusicService.onNowPlaying = () {
       final song = globalMusicService.currentSong;
@@ -1688,6 +1688,16 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _terminalAltActive = false;
     }
     _pty!.write(utf8.encode(send));
+  }
+
+  Widget _iconBtn(IconData icon, String tooltip, VoidCallback onPressed) {
+    return IconButton(
+      icon: Icon(icon, size: 18),
+      onPressed: onPressed,
+      tooltip: tooltip,
+      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+      padding: EdgeInsets.all(4),
+    );
   }
 
   Widget _terminalKeyBtn(String label, VoidCallback onTap, {bool isActive = false, bool accent = false}) {

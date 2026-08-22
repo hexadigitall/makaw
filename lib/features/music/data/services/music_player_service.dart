@@ -379,6 +379,22 @@ class MusicPlayerService extends ChangeNotifier {
     notifyNowPlaying();
   }
 
+  void play() {
+    final p = _audioHandler?.player;
+    if (p == null) return;
+    p.play();
+    _isPlaying = true;
+    notifyNowPlaying();
+  }
+
+  void pause() {
+    final p = _audioHandler?.player;
+    if (p == null) return;
+    p.pause();
+    _isPlaying = false;
+    notifyNowPlaying();
+  }
+
   void _nextSong() {
     _ensureQueued();
     if (_queue.isEmpty) return;
@@ -414,6 +430,10 @@ class MusicPlayerService extends ChangeNotifier {
   }
 
   void seek(Duration d) => _audioHandler?.player.seek(d);
+
+  double get speed => _audioHandler?.player.speed ?? 1.0;
+
+  void setSpeed(double speed) => _audioHandler?.player.setSpeed(speed);
 
   void toggleShuffle() {
     _ensureQueued();

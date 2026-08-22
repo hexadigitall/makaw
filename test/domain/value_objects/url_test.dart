@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:makaw_mobile/core/domain/value_objects/url.dart';
+import 'package:makaw/core/domain/value_objects/url.dart';
 
 void main() {
   group('Url value object', () {
