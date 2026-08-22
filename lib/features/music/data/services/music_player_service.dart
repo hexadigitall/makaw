@@ -162,13 +162,42 @@ class MusicPlayerService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final dirs = ['/storage/emulated/0/Music', '/storage/emulated/0/music',
-        '/storage/emulated/0/Download', '/storage/emulated/0/download'];
       final foundRaw = <MapEntry<int, String>>[];
       final seen = <String>{};
       int idCounter = 1;
 
-      for (final dirPath in dirs) {
+      List<String> musicDirs;
+      List<String> rootScanPaths;
+
+      if (Platform.isAndroid) {
+        musicDirs = [
+          '/storage/emulated/0/Music', '/storage/emulated/0/music',
+          '/storage/emulated/0/Download', '/storage/emulated/0/download',
+        ];
+        rootScanPaths = ['/storage/emulated/0/'];
+      } else if (Platform.isWindows) {
+        final userProfile = Platform.environment['USERPROFILE'] ?? '';
+        final home = Platform.environment['HOMEPATH'] ?? '';
+        final drive = Platform.environment['HOMEDRIVE'] ?? 'C:';
+        final homeDir = '$drive$home';
+        musicDirs = [
+          '$userProfile\\Music', '$userProfile\\Downloads',
+          '$homeDir\\Music', '$homeDir\\Downloads',
+        ];
+        rootScanPaths = [];
+      } else if (Platform.isLinux || Platform.isMacOS) {
+        final home = Platform.environment['HOME'] ?? '';
+        musicDirs = [
+          '$home/Music', '$home/Downloads',
+          '$home/.local/share/Music',
+        ];
+        rootScanPaths = [];
+      } else {
+        musicDirs = [];
+        rootScanPaths = [];
+      }
+
+      for (final dirPath in musicDirs) {
         final dir = Directory(dirPath);
         if (!await dir.exists()) continue;
         await for (final entity in dir.list(recursive: true, followLinks: false)) {
@@ -182,8 +211,9 @@ class MusicPlayerService extends ChangeNotifier {
         }
       }
 
-      final root = Directory('/storage/emulated/0/');
-      if (await root.exists()) {
+      for (final rootPath in rootScanPaths) {
+        final root = Directory(rootPath);
+        if (!await root.exists()) continue;
         await for (final entity in root.list(recursive: false, followLinks: false)) {
           if (entity is File && seen.add(entity.path)) {
             final ext = entity.path.toLowerCase();
@@ -196,20 +226,23 @@ class MusicPlayerService extends ChangeNotifier {
 
       final batchSize = 50;
       final metaMap = <String, Map<String, dynamic>>{};
-      for (int i = 0; i < foundRaw.length; i += batchSize) {
-        final batch = foundRaw.skip(i).take(batchSize).map((e) => e.value).toList();
-        try {
-          final results = await _metadataChannel.invokeMethod<List<dynamic>>(
-            'extractMetadataBatch',
-            {'paths': batch},
-          );
-          if (results != null) {
-            for (final r in results) {
-              final m = Map<String, dynamic>.from(r as Map);
-              metaMap[m['path'] as String] = m;
+      final isAndroid = Platform.isAndroid;
+      if (isAndroid) {
+        for (int i = 0; i < foundRaw.length; i += batchSize) {
+          final batch = foundRaw.skip(i).take(batchSize).map((e) => e.value).toList();
+          try {
+            final results = await _metadataChannel.invokeMethod<List<dynamic>>(
+              'extractMetadataBatch',
+              {'paths': batch},
+            );
+            if (results != null) {
+              for (final r in results) {
+                final m = Map<String, dynamic>.from(r as Map);
+                metaMap[m['path'] as String] = m;
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
 
       Map<String, Map<String, dynamic>>? cache;
@@ -232,7 +265,7 @@ class MusicPlayerService extends ChangeNotifier {
         final album = (meta?['album'] as String? ?? '').trim();
         final durationMs = (meta?['duration'] as int? ?? 0);
 
-        if (durationMs < 30000) continue;
+        if (isAndroid && durationMs < 30000) continue;
 
         found.add(SongInfo(
           id: entry.key,

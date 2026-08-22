@@ -251,15 +251,6 @@ class ConflictPart {
   bool inTheirs = false;
 }
 
-class EditorFile {
-  int id;
-  String name;
-  String content;
-  String language;
-  bool dirty;
-  EditorFile({required this.id, required this.name, required this.content, this.language = 'javascript', this.dirty = false});
-}
-
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 void main() async {
@@ -480,11 +471,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool _typeViewKeyboardDismissed = false;
   bool _showMediaHub = false;
   bool _ready = false;
-  bool _miniPlayerDismissed = false;
-  InAppWebViewController? _monacoController;
   Database? _db;
-  String _currentProject = 'untitled';
-  String _currentLang = 'javascript';
   String _projectPath = '';
   List<Map<String, dynamic>> _projects = [];
   String _gitOutput = '';
@@ -684,11 +671,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   // Media sniffer — per-tab
   final Map<int, List<MediaItem>> _tabMedia = {};
   List<MediaItem> get _pendingMedia => _tabMedia.putIfAbsent(_activeBrowserTabId, () => []);
-
-  // Editor file tabs
-  List<EditorFile> _openFiles = [];
-  int _activeFileId = 0;
-  int _fileIdCounter = 0;
 
   // Content blocker & download manager
   final ContentBlockerService _contentBlocker = ContentBlockerService();
@@ -2368,84 +2350,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   // ─── Editor ──────────────────────────────────────────────────────────────────
 
-  void _openFileInEditor(String name, String content, {String? language}) {
-    final existing = _openFiles.indexWhere((f) => f.name == name);
-    if (existing >= 0) {
-      setState(() => _activeFileId = _openFiles[existing].id);
-      _loadFileInMonaco(_openFiles[existing]);
-      return;
-    }
-    final id = ++_fileIdCounter;
-    final file = EditorFile(id: id, name: name, content: content, language: language ?? detectLanguage(name));
-    setState(() {
-      _openFiles.add(file);
-      _activeFileId = id;
-    });
-    _loadFileInMonaco(file);
-  }
-
-  void _loadFileInMonaco(EditorFile file) {
-    final escaped = file.content.replaceAll('\\', '\\\\').replaceAll('`', '\\`').replaceAll(r'$', r'\$');
-    _monacoController?.evaluateJavascript(source: '''
-      window.editor.getModel().setValue(`$escaped`);
-      monaco.editor.setModelLanguage(window.editor.getModel(), '${file.language}');
-    ''');
-  }
-
-  void _closeEditorFile(int id) {
-    if (_openFiles.length <= 1) return;
-    final idx = _openFiles.indexWhere((f) => f.id == id);
-    setState(() {
-      _openFiles.removeWhere((f) => f.id == id);
-      if (_activeFileId == id) {
-        final next = _openFiles[idx > 0 ? idx - 1 : 0];
-        _activeFileId = next.id;
-        _loadFileInMonaco(next);
-      }
-    });
-  }
-
-  Future<void> _saveProject() async {
-    final code = await _monacoController?.evaluateJavascript(source: "window.editor.getValue()");
-    final ext = _currentLang == 'dart' ? 'dart' : _currentLang == 'python' ? 'py' : _currentLang == 'typescript' ? 'ts' : _currentLang;
-    final path = p.join(_projectPath, '$_currentProject.$ext');
-    await File(path).writeAsString(code ?? '');
-    await _db!.insert('projects', {
-      'name': _currentProject,
-      'content': code,
-      'language': _currentLang,
-      'path': path,
-      'updated_at': DateTime.now().toIso8601String()
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-
-    // Mark file clean
-    final af = _openFiles.where((f) => f.id == _activeFileId);
-    if (af.isNotEmpty) af.first.dirty = false;
-
-    _loadProjects();
-    _showToast('Saved');
-  }
-
-  Future<void> _runPreview() async {
-    final code = await _monacoController?.evaluateJavascript(source: "window.editor.getValue()");
-    String html = code ?? '';
-    if (_currentLang == 'javascript' || _currentLang == 'typescript') {
-      html = '<!DOCTYPE html><html><body><script type="module">$html</script></body></html>';
-    } else if (_currentLang == 'css') {
-      html = '<!DOCTYPE html><html><head><style>$html</style></head><body><h1>CSS Preview</h1></body></html>';
-    } else if (_currentLang == 'dart') {
-      html = '<!DOCTYPE html><html><body><pre>$html</pre></body></html>';
-    }
-    final uri = Uri.dataFromString(html, mimeType: 'text/html', encoding: utf8);
-    await _activeWebview?.loadUrl(urlRequest: URLRequest(url: WebUri(uri.toString())));
-    _switchToView('browser');
-  }
-
-  Future<void> _formatCode() async {
-    await _monacoController?.evaluateJavascript(source: "window.editor.getAction('editor.action.formatDocument').run()");
-    _showToast('Formatted');
-  }
-
   // ─── Git Functions ──────────────────────────────────────────────────────────
 
   Future<void> _gitStatus() async {
@@ -4009,164 +3913,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
-  Widget _buildMiniMusicPlayer() {
-    final song = _musicService.currentSong;
-    if (song == null) return SizedBox.shrink();
-    if (_miniPlayerDismissed) return SizedBox.shrink();
-    final progress = _musicService.duration.inMilliseconds > 0
-        ? (_musicService.position.inMilliseconds / _musicService.duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-    final player = GestureDetector(
-      onTap: () => _switchToView('music'),
-      onLongPress: () => _showMiniPlayerQueue(),
-      onHorizontalDragEnd: (details) {
-        if (details.primaryVelocity == null) return;
-        if (details.primaryVelocity! < -100) {
-          _musicService.nextSong();
-        } else if (details.primaryVelocity! > 100) {
-          _musicService.previousSong();
-        }
-      },
-      onVerticalDragEnd: (details) {
-        if (details.primaryVelocity != null && details.primaryVelocity! < -200) {
-          _switchToView('music');
-        }
-      },
-      child: Container(
-        height: 68,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          border: Border(top: BorderSide(color: Theme.of(context).cardColor, width: 1)),
-        ),
-        child: Column(
-          children: [
-            // Ultra-thin 2px progress indicator
-            SizedBox(
-              height: 2,
-              child: LinearProgressIndicator(
-                value: progress,
-                backgroundColor: Theme.of(context).cardColor,
-                valueColor: AlwaysStoppedAnimation(kAccentTeal),
-                minHeight: 2,
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 44, height: 44,
-                      decoration: BoxDecoration(
-                        color: kAccentTeal.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(Icons.music_note, color: kAccentTeal, size: 22),
-                    ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(song.displayTitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          Text(song.displayArtist, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.skip_previous, color: Theme.of(context).colorScheme.onSurface, size: 22),
-                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-                      padding: EdgeInsets.zero,
-                      onPressed: () => _musicService.previousSong(),
-                    ),
-                    IconButton(
-                      icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: kAccentTeal, size: 32),
-                      constraints: BoxConstraints(minWidth: 36, minHeight: 36),
-                      padding: EdgeInsets.zero,
-                      onPressed: () => _musicService.togglePlayPause(),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.skip_next, color: Theme.of(context).colorScheme.onSurface, size: 22),
-                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-                      padding: EdgeInsets.zero,
-                      onPressed: () => _musicService.nextSong(),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    // Allow swipe to dismiss on ALL platforms (without stopping playback)
-    return Dismissible(
-      key: ValueKey('mini_player_${_musicService.currentSong?.id}'),
-      direction: DismissDirection.horizontal,
-      onDismissed: (_) {
-        setState(() { _miniPlayerDismissed = true; });
-      },
-      background: Container(
-        height: 68,
-        color: Colors.red.shade400,
-        alignment: Alignment.centerRight,
-        padding: EdgeInsets.only(right: 16),
-        child: Icon(Icons.close, color: Colors.white),
-      ),
-      child: player,
-    );
-  }
-
-  void _showMiniPlayerQueue() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Container(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, margin: EdgeInsets.symmetric(vertical: 12), decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2), borderRadius: BorderRadius.circular(2))),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Row(children: [
-                Text('Queue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-                Spacer(),
-                Text('${_musicService.queueLength} tracks', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-              ]),
-            ),
-            SizedBox(height: 8),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _musicService.queueLength,
-                itemBuilder: (ctx, i) {
-                  final track = _musicService.queue[i];
-                  if (track == null) return SizedBox.shrink();
-                  final isCurrent = i == _musicService.currentIndex;
-                  return ListTile(
-                    leading: Container(
-                      width: 40, height: 40,
-                      decoration: BoxDecoration(color: isCurrent ? kAccentTeal.withOpacity(0.2) : Theme.of(context).cardColor, borderRadius: BorderRadius.circular(8)),
-                      child: Center(child: isCurrent
-                          ? Icon(Icons.equalizer, color: kAccentTeal, size: 20)
-                          : Text('${i + 1}', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: 13))),
-                    ),
-                    title: Text(track.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400)),
-                    subtitle: Text(track.displayArtist, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: 12)),
-                    onTap: () { Navigator.pop(ctx); _musicService.playFromQueue(i); },
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildDrawer(BuildContext context) {
     final items = kIsWeb ? [
       ('Code Studio', Icons.code, 'studio'),
@@ -4356,143 +4102,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   // ─── Studio Tab ─────────────────────────────────────────────────────────────
-
-  Widget _buildStudioTab() {
-    return Column(
-      children: [
-        // File tabs bar
-        Container(
-          height: 36,
-          color: Theme.of(context).colorScheme.surface,
-          child: _openFiles.isEmpty
-              ? null
-              : ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _openFiles.length,
-                  itemBuilder: (ctx, i) {
-                    final f = _openFiles[i];
-                    final active = f.id == _activeFileId;
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() => _activeFileId = f.id);
-                        _loadFileInMonaco(f);
-                      },
-                      child: Container(
-                        padding: EdgeInsets.symmetric(horizontal: 10),
-                        decoration: BoxDecoration(
-                          border: Border(bottom: BorderSide(color: active ? kPrimaryBlue : Colors.transparent, width: 2)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (f.dirty) Text('● ', style: TextStyle(color: Colors.yellow, fontSize: 12)),
-                            Text(f.name, style: TextStyle(fontSize: 12, color: active ? Colors.white : Colors.grey)),
-                            SizedBox(width: 4),
-                            GestureDetector(
-                              onTap: () => _closeEditorFile(f.id),
-                              child: Icon(Icons.close, size: 14, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        // Toolbar
-        Container(
-          color: kSurfaceElevated,
-          padding: EdgeInsets.all(6),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  decoration: InputDecoration(hintText: 'Project name', isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
-                  controller: TextEditingController(text: _currentProject),
-                  onChanged: (v) => _currentProject = v,
-                ),
-              ),
-              SizedBox(width: 6),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 6),
-                decoration: BoxDecoration(
-                  color: kSurfaceBorder,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: DropdownButton<String>(
-                  value: _currentLang,
-                  dropdownColor: kSurfaceElevated,
-                  underline: SizedBox(),
-                  style: TextStyle(fontSize: 12, color: Colors.white),
-                  items: LANG_OPTIONS.map((l) => DropdownMenuItem(value: l, child: Text(l, style: TextStyle(fontSize: 12)))).toList(),
-                  onChanged: (v) async {
-                    setState(() => _currentLang = v!);
-                    await _monacoController?.evaluateJavascript(source: "monaco.editor.setModelLanguage(window.editor.getModel(), '$_currentLang')");
-                  },
-                ),
-              ),
-              SizedBox(width: 4),
-              _iconBtn(Icons.save, 'Save', _saveProject),
-              _iconBtn(Icons.play_arrow, 'Run', _runPreview),
-              _iconBtn(Icons.format_align_left, 'Format', _formatCode),
-              _iconBtn(Icons.add, 'New', _newFile),
-            ],
-          ),
-        ),
-        // Monaco editor
-        Expanded(
-          child: InAppWebView(
-            initialData: InAppWebViewInitialData(data: _monacoHtml()),
-            onWebViewCreated: (c) {
-              _monacoController = c;
-              c.addJavaScriptHandler(handlerName: 'editorChanged', callback: (_) {
-                final af = _openFiles.where((f) => f.id == _activeFileId);
-                if (af.isNotEmpty && !af.first.dirty) {
-                  setState(() => af.first.dirty = true);
-                }
-              });
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _iconBtn(IconData icon, String tooltip, VoidCallback onPressed) {
-    return IconButton(
-      icon: Icon(icon, size: 18),
-      onPressed: onPressed,
-      tooltip: tooltip,
-      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-      padding: EdgeInsets.all(4),
-    );
-  }
-
-  void _newFile() {
-    final controller = TextEditingController(text: 'untitled.dart');
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('New File'),
-        content: TextField(controller: controller, autofocus: true, decoration: InputDecoration(hintText: 'filename.dart')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              final name = controller.text.trim();
-              if (name.isEmpty) return;
-              final lang = detectLanguage(name);
-              final boilerplate = BOILERPLATES[lang] ?? '';
-              _openFileInEditor(name, boilerplate, language: lang);
-              _currentLang = lang;
-            },
-            child: Text('Create'),
-          ),
-        ],
-      ),
-    );
-  }
 
   bool get _isIncognitoActive {
     final tab = _activeTab;
@@ -8326,9 +7935,16 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                       dense: true,
                       title: Text(s['name']!, style: TextStyle(fontSize: 13)),
                       trailing: Icon(Icons.content_paste, size: 16, color: kPrimaryBlue),
-                      onTap: () {
-                        _openFileInEditor('snippet.dart', s['code'] ?? '');
-                        _switchToView('studio');
+                      onTap: () async {
+                        final dir = Directory(p.join(_projectPath, 'snippets'));
+                        if (!await dir.exists()) await dir.create(recursive: true);
+                        final f = File(p.join(dir.path, '${s['name'] ?? 'snippet'}.dart'));
+                        await f.writeAsString(s['code'] ?? '');
+                        final project = CodeStudioProject(name: 'Snippets', rootDir: dir, files: [f]);
+                        Navigator.of(context).push(PageRouteBuilder(
+                          pageBuilder: (_, __, ___) => CodeStudioWorkspacePage(project: project),
+                          transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+                        ));
                         _showToast('Snippet inserted');
                       },
                     );
@@ -8371,13 +7987,20 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                   subtitle: Text('$lang  •  ${updated.toString().substring(0, 10)}', style: TextStyle(fontSize: 11, color: Colors.grey)),
                   trailing: Icon(Icons.open_in_new, size: 16, color: kPrimaryBlue),
                   onTap: () async {
-                    setState(() {
-                      _currentProject = name;
-                      _currentLang = lang;
-                    });
-                    final content = p['content'] ?? '';
-                    _openFileInEditor('$name.$lang', content, language: lang);
-                    _switchToView('studio');
+                    final projPath = p['path'] as String?;
+                    if (projPath != null && projPath.isNotEmpty) {
+                      final dir = Directory(projPath);
+                      if (await dir.exists()) {
+                        final files = dir.listSync().whereType<File>().toList();
+                        if (files.isNotEmpty) {
+                          final project = CodeStudioProject(name: name, rootDir: dir, files: files);
+                          Navigator.of(context).push(PageRouteBuilder(
+                            pageBuilder: (_, __, ___) => CodeStudioWorkspacePage(project: project),
+                            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+                          ));
+                        }
+                      }
+                    }
                   },
                 ),
               );
@@ -8860,36 +8483,6 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     )).then((_) => _loadProjects());
   }
 
-  void _openStudioEditor() {
-    Navigator.of(context).push(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => _buildStudioEditorPage(),
-      transitionDuration: Duration(milliseconds: 200),
-      reverseTransitionDuration: Duration(milliseconds: 150),
-      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-    ));
-  }
-
-  Widget _buildStudioEditorPage() {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) { if (!didPop) Navigator.of(context).pop(); },
-      child: Scaffold(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        appBar: AppBar(
-          title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.code, size: 20, color: kPrimaryBlue), SizedBox(width: 8), Text(_currentProject.isNotEmpty ? _currentProject : 'Code Studio')]),
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          leading: IconButton(icon: Icon(Icons.arrow_back), onPressed: () => Navigator.of(context).pop()),
-          actions: [
-            _iconBtn(Icons.save, 'Save', _saveProject),
-            _iconBtn(Icons.play_arrow, 'Run', _runPreview),
-            _iconBtn(Icons.format_align_left, 'Format', _formatCode),
-            _iconBtn(Icons.add, 'New', _newFile),
-          ],
-        ),
-        body: _buildStudioTab(),
-      ),
-    );
-  }
 }
 
 // ─── QR Scanner Page Widget ───────────────────────────────────────────────
