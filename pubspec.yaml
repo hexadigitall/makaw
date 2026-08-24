@@ -1,6 +1,6 @@
 name: makaw
 description: Makaw — Full-featured hybrid browser, code studio & creative platform
-version: 1.0.41+41
+version: 1.0.42+42
 publish_to: 'none'
 
 environment:
