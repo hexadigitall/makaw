@@ -72,6 +72,9 @@ import 'core/widgets/adaptive_action_button.dart';
 import 'core/widgets/makaw_effects.dart';
 import 'features/studio/data/code_studio_service.dart';
 import 'features/studio/presentation/pages/code_studio_workspace.dart';
+import 'features/studio/presentation/pages/studio_hub_page.dart';
+import 'features/media/presentation/pages/video_library_page.dart';
+import 'features/music/presentation/widgets/makaw_mini_player.dart';
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 
@@ -271,7 +274,6 @@ void main() async {
     return true; // handled — prevents app process crash
   };
 
-  try { await globalMusicService.init(); } catch (_) {}
   try { await _initMediaNotification(); } catch (_) {}
   try {
     globalAudioHandler = await audio_svc.AudioService.init(
@@ -323,19 +325,6 @@ Future<void> _initMediaNotification() async {
     notif.onNext = () => globalMusicService.nextSong();
     notif.onPrevious = () => globalMusicService.previousSong();
     notif.onSeek = (pos) => globalMusicService.seek(pos);
-
-    globalMusicService.onNowPlaying = () {
-      final song = globalMusicService.currentSong;
-      if (song != null) {
-        notif.show(
-          title: song.displayTitle,
-          artist: song.displayArtist,
-          isPlaying: globalMusicService.isPlaying,
-          position: globalMusicService.position,
-          duration: globalMusicService.duration,
-        );
-      }
-    };
   } catch (e) {
     audioServiceStatus = 'error';
     globalMusicService.notificationStatus = 'init error: $e';
@@ -563,45 +552,24 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       return;
     }
     if (view == 'browser') {
-      setState(() => _currentView = view);
+      setState(() { _currentView = 'browser'; _viewMode = ViewMode.newTab; _urlController.clear(); _homeScreenKey++; });
+    } else if (view == 'home') {
+      _goToMakawHome();
     } else {
-      final mediaViews = {'music', 'player', 'images', 'documents'};
       final page = _buildFeaturePage(view);
       if (page != null) {
-        final wasBrowsing = !_showHomeScreen;
-        if (mediaViews.contains(view)) {
-          Navigator.of(context).push(PageRouteBuilder(
-            pageBuilder: (_, __, ___) => _buildMediaHubPage(),
-            transitionDuration: Duration(milliseconds: 200),
-            reverseTransitionDuration: Duration(milliseconds: 150),
-            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-          )).then((_) {
-            if (mounted) {
-              _urlController.clear();
-              setState(() { _viewMode = wasBrowsing ? ViewMode.browsing : ViewMode.newTab; });
-              if (wasBrowsing) _syncUrlController();
-            }
-          });
-          Navigator.of(context).push(PageRouteBuilder(
-            pageBuilder: (_, __, ___) => page,
-            transitionDuration: Duration(milliseconds: 200),
-            reverseTransitionDuration: Duration(milliseconds: 150),
-            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-          ));
-        } else {
-          Navigator.of(context).push(PageRouteBuilder(
-            pageBuilder: (_, __, ___) => page,
-            transitionDuration: Duration(milliseconds: 200),
-            reverseTransitionDuration: Duration(milliseconds: 150),
-            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-          )).then((_) {
-            if (mounted) {
-              _urlController.clear();
-              setState(() { _viewMode = wasBrowsing ? ViewMode.browsing : ViewMode.newTab; });
-              if (wasBrowsing) _syncUrlController();
-            }
-          });
-        }
+        final prevMode = _viewMode;
+        Navigator.of(context).push(PageRouteBuilder(
+          pageBuilder: (_, __, ___) => page,
+          transitionDuration: Duration(milliseconds: 200),
+          reverseTransitionDuration: Duration(milliseconds: 150),
+          transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+        )).then((_) {
+          if (mounted && _viewMode == prevMode) {
+            _urlController.clear();
+            setState(() { _homeScreenKey++; });
+          }
+        });
       }
     }
   }
@@ -610,7 +578,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     if (kIsWeb) return _buildWebFeaturePage(view);
     switch (view) {
       case 'history': return MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url));
-      case 'studio': return _buildStudioHubPage();
+      case 'studio': return const MakawStudioHubPage();
       case 'sniffer': return _buildFeatureScaffold('Media Sniffer', Icons.wifi_tethering, _buildSnifferTab());
       case 'snippets': return _buildFeatureScaffold('Snippets', Icons.content_paste, _buildSnippetsTab());
       case 'projects': return _buildFeatureScaffold('Projects', Icons.folder, _buildProjectsTab());
@@ -618,7 +586,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
       case 'terminal': return _buildTerminalHubPage();
       case 'downloads': return _buildFeatureScaffold('Downloads', Icons.download, _buildDownloadsTab());
-      case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => Navigator.of(context).pop());
+      case 'player': return const MakawVideoLibraryPage();
       case 'music': return _buildMusicPlayerPage();
       case 'media': return _buildMediaHubPage();
       case 'images': return _buildImagePage();
@@ -955,6 +923,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       } catch (_) {}
       try {
         await _initDb();
+        await _musicService.init();
       } catch (_) {}
       try {
         _initDownloadDir();
@@ -1522,7 +1491,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       'last_used': DateTime.now().toIso8601String(),
     });
     await _loadTerminalSessions();
-    _openTerminalSession(id);
+    _openTerminalSessionAndNavigate(id);
   }
 
   Future<void> _openTerminalSession(int id) async {
@@ -3001,16 +2970,33 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     Share.share('$title\n$url', subject: title);
   }
 
+  OverlayEntry? _toastOverlay;
+
   void _showToast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      duration: Duration(seconds: 2),
-      behavior: SnackBarBehavior.floating,
+    _toastOverlay?.remove();
+    _toastOverlay = OverlayEntry(builder: (ctx) => Positioned(
+      bottom: MediaQuery.of(ctx).viewInsets.bottom + 40,
+      left: 24, right: 24,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.inverseSurface,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 3))],
+          ),
+          child: Text(msg, style: TextStyle(color: Theme.of(context).colorScheme.onInverseSurface, fontSize: 14)),
+        ),
+      ),
     ));
+    Overlay.of(context).insert(_toastOverlay!);
+    Future.delayed(Duration(seconds: 2), () { _toastOverlay?.remove(); _toastOverlay = null; });
   }
 
   @override
   void dispose() {
+    _toastOverlay?.remove();
     WidgetsBinding.instance.removeObserver(this);
     _urlFocusNode.removeListener(_onUrlFocusChanged);
     _musicService.removeListener(_onMusicChanged);
@@ -3110,15 +3096,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => DirectVideoPlayer(
-              url: _playVideoUrl,
-              title: _playVideoTitle ?? 'Video',
-              onDownload: _playVideoUrl != null ? () {
-                final url = _playVideoUrl!;
-                final filename = url.split('/').last.split('?').first;
-                _downloadManager?.enqueue(url, filename: filename.isNotEmpty ? filename : 'video_${DateTime.now().millisecondsSinceEpoch}.mp4');
-                _showToast('Downloading: $filename');
-              } : null,
+            builder: (_) => MakawVideoPlayerScreen(
+              videoPath: _playVideoUrl ?? '',
+              videoTitle: _playVideoTitle ?? 'Video',
             ),
           )).then((_) {
             setState(() { _playVideoUrl = null; _playVideoTitle = null; });
@@ -3298,9 +3278,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   title: _playVideoTitle ?? 'Video',
                   subtitle: 'Video Player',
                   onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => VideoPlayerWidget(onOpenMusic: () { Navigator.of(context).pop(); _switchToView('music'); }, onHome: () => Navigator.of(context).pop()),
-                    ));
+                    _switchToView('player');
                   },
                 ),
               SizedBox(height: 20),
@@ -3480,9 +3458,19 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               if (context.mounted) Navigator.of(context).pop();
             },
             child: SafeArea(
-              child: kIsWeb ? _buildWebContent() : (_currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink()),
+              child: kIsWeb ? _buildWebContent() : _buildBrowserContent(),
             ),
           ),
+          if (!kIsWeb && _musicService.currentSong != null && _isMakawHome)
+            Positioned(
+              left: 12, right: 12,
+              bottom: (_isMakawHome && Responsive.isMobile(context)) ? 68 : 12,
+              child: MakawMiniPlayer(
+                audioHandler: globalAudioHandler!,
+                service: _musicService,
+                onExpand: () => _switchToView('music'),
+              ),
+            ),
         ],
       ),
     );
@@ -4056,28 +4044,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildImagePage() {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()));
-        }
-      },
-      child: ImageViewerWidget(),
-    );
+    return ImageViewerWidget();
   }
 
   Widget _buildDocumentPage() {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()));
-        }
-      },
-      child: DocumentWidget(
-        openFile: (path) => _openFile(path),
-      ),
+    return DocumentWidget(
+      openFile: (path) => _openFile(path),
     );
   }
 
@@ -4212,8 +4184,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       return IconButton(icon: Icon(Icons.more_horiz, color: iconColor), onPressed: _showEllipsisMenu);
     }
 
-    // Makaw Home: hamburger menu only. Clean header, no overflow/settings.
-    if (_isMakawHome) {
+    // NTP: hamburger + tab counter + overflow (no omnibox — user taps body search to navigate)
+    if (_isNewTabView || _isMakawHome) {
       return Container(
         color: headerBg,
         padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -4221,23 +4193,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           if (!inc)
             IconButton(icon: Icon(Icons.menu, color: iconColor), onPressed: () => _scaffoldKey.currentState?.openDrawer())
           else
-            IconButton(icon: Icon(Icons.visibility_off, color: iconColor), onPressed: _goHome),
+            IconButton(icon: Icon(Icons.visibility_off, color: kIncognitoPurple), onPressed: _goHome),
           Spacer(),
-        ]),
-      );
-    }
-
-    // NTP: search pill (center) | tab counter + menu (right)
-    if (_isNewTabView) {
-      return Container(
-        color: headerBg,
-        padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: Row(children: [
-          if (inc)
-            IconButton(icon: Icon(Icons.visibility_off, color: kIncognitoPurple), onPressed: _goHome)
-          else
-            IconButton(icon: Icon(Icons.home_outlined, color: iconColor), onPressed: _goHome),
-          _buildUrlPill(),
           _buildTabCounter(),
           SizedBox(width: 4),
           _buildOverflowMenu(),
@@ -5026,7 +4983,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   void _goToNtp() {
     _homeScreenKey++;
     _urlController.clear();
-    setState(() { _viewMode = ViewMode.newTab; });
+    setState(() { _viewMode = ViewMode.home; });
   }
 
   void _goIncognitoNtp() {
@@ -5059,16 +5016,46 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   Widget _buildHomeContent() {
     if (_isIncognitoActive) return _buildIncognitoLandingPage();
-    if (_isMakawHome) return _buildMakawAppPortal();
-    if (_isNewTabView) return _buildBrowserNtpView();
-    return SizedBox.shrink();
+    return _buildMakawAppPortal();
   }
 
-  // ─── Makaw App Portal ────────────────────────────────────────────────────
+  Widget _buildUniversalSearchBar() {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: () {
+        _typeViewFromHome = true;
+        setState(() { _currentView = 'browser'; _viewMode = ViewMode.typeView; });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _urlFocusNode.requestFocus();
+          _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
+        });
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(32),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12, offset: Offset(0, 2))],
+        ),
+        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        child: Row(children: [
+          Icon(Icons.search, color: cs.onSurface.withOpacity(0.5), size: 22),
+          SizedBox(width: 12),
+          Expanded(child: Text('Search files, apps & web...',
+            style: TextStyle(color: cs.onSurface.withOpacity(0.5), fontSize: 15),
+            overflow: TextOverflow.ellipsis)),
+          GestureDetector(
+            onTap: _scanQRCode,
+            child: Icon(Icons.qr_code_scanner, color: cs.onSurface.withOpacity(0.5), size: 22),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // ─── Makaw App Portal (Unified Home / NTP) ──────────────────────────────
   Widget _buildMakawAppPortal() {
     final isWide = Responsive.isDesktop(context);
     final maxContentWidth = isWide ? Responsive.desktopMax : double.infinity;
-    final maxSearchWidth = isWide ? 680.0 : double.infinity;
     return RefreshIndicator(
       onRefresh: _refreshNewsFeed,
       child: CustomScrollView(
@@ -5078,7 +5065,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: Padding(
-                padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
+                padding: EdgeInsets.fromLTRB(16, isWide ? 48 : 32, 16, 0),
                 child: Column(children: [
                   MakawEffects.logoPresentation(size: 56),
                   SizedBox(height: 6),
@@ -5091,38 +5078,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           )),
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxSearchWidth),
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
-                child: GestureDetector(
-                  onTap: () {
-                    setState(() { _currentView = 'browser'; _viewMode = ViewMode.typeView; });
-                    _typeViewFromHome = true;
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _urlFocusNode.requestFocus();
-                      _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
-                    });
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(32),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12, offset: Offset(0, 2))],
-                    ),
-                    padding: EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                    child: Row(children: [
-                      Icon(Icons.search, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), size: 22),
-                      SizedBox(width: 12),
-                      Text('Search Makaw Ecosystem, Web & Files...',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: 15)),
-                      Spacer(),
-                      GestureDetector(
-                        onTap: _scanQRCode,
-                        child: Icon(Icons.qr_code_scanner, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), size: 22),
-                      ),
-                    ]),
-                  ),
-                ),
+                child: _buildUniversalSearchBar(),
               ),
             ),
           )),
@@ -5130,7 +5089,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: Padding(
-                padding: EdgeInsets.fromLTRB(16, 24, 16, 0),
+                padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -5138,11 +5097,14 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                       fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
                     SizedBox(height: 14),
                     Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                      _buildPortalAppItem(Icons.language, 'Web', kAccentTeal, () => _goToBrowserHome()),
+                      _buildPortalAppItem(Icons.language, 'Web', kAccentTeal, () {
+                        setState(() { _currentView = 'browser'; _viewMode = ViewMode.newTab; _urlController.clear(); _homeScreenKey++; });
+                      }),
                       _buildPortalAppItem(Icons.music_note, 'Music', kMusicAccent, () => _switchToView('music')),
                       _buildPortalAppItem(Icons.videocam, 'Videos', kVideoAccent, () => _switchToView('player')),
                       _buildPortalAppItem(Icons.description, 'Docs', kDocumentAccent, () => _switchToView('documents')),
                       _buildPortalAppItem(Icons.code, 'Studio', kStudioAccent, () => _switchToView('studio')),
+                      _buildPortalAppItem(Icons.terminal, 'Terminal', kTerminalAccent, () => _switchToView('terminal')),
                     ]),
                   ],
                 ),
@@ -5193,6 +5155,40 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 ),
               ),
             )),
+          SliverToBoxAdapter(child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('TOP SITES', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
+                      fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1)),
+                    SizedBox(height: 12),
+                    _buildTopSitesGrid(),
+                  ],
+                ),
+              ),
+            ),
+          )),
+          SliverToBoxAdapter(child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('BOOKMARKS & RECENTS', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
+                      fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1)),
+                    SizedBox(height: 10),
+                    _buildBookmarksRow(),
+                  ],
+                ),
+              ),
+            ),
+          )),
           SliverToBoxAdapter(child: Center(
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: maxContentWidth),
@@ -5999,9 +5995,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
 
     if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp'].contains(ext)) {
-      Navigator.of(context).push(fastRoute(DirectVideoPlayer(
-        filePath: filePath,
-        title: filePath.split('\\').last.split('/').last,
+      Navigator.of(context).push(fastRoute(MakawVideoPlayerScreen(
+        videoPath: filePath,
+        videoTitle: filePath.split('\\').last.split('/').last,
       )));
       return;
     }
@@ -7950,9 +7946,9 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                         if (!await dir.exists()) await dir.create(recursive: true);
                         final f = File(p.join(dir.path, '${s['name'] ?? 'snippet'}.dart'));
                         await f.writeAsString(s['code'] ?? '');
-                        final project = CodeStudioProject(name: 'Snippets', rootDir: dir, files: [f]);
+                        final project = StudioProject(name: 'Snippets', directory: dir, lastModified: DateTime.now());
                         Navigator.of(context).push(PageRouteBuilder(
-                          pageBuilder: (_, __, ___) => CodeStudioWorkspacePage(project: project),
+                          pageBuilder: (_, __, ___) => MakawStudioWorkspacePage(project: project),
                           transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
                         ));
                         _showToast('Snippet inserted');
@@ -8003,9 +7999,9 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                       if (await dir.exists()) {
                         final files = dir.listSync().whereType<File>().toList();
                         if (files.isNotEmpty) {
-                          final project = CodeStudioProject(name: name, rootDir: dir, files: files);
+                          final project = StudioProject(name: name, directory: dir, lastModified: DateTime.now());
                           Navigator.of(context).push(PageRouteBuilder(
-                            pageBuilder: (_, __, ___) => CodeStudioWorkspacePage(project: project),
+                            pageBuilder: (_, __, ___) => MakawStudioWorkspacePage(project: project),
                             transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
                           ));
                         }
@@ -8193,7 +8189,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
       appBar: AppBar(
         title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.terminal, size: 20, color: kTerminalAccent), SizedBox(width: 8), Text('Terminal')]),
         backgroundColor: Theme.of(context).colorScheme.surface,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: _goToMakawHome),
+        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: () => Navigator.of(context).pop()),
         actions: [
           IconButton(
             icon: Icon(Icons.add, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
@@ -8340,7 +8336,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
       appBar: AppBar(
         title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.code, size: 20, color: kPrimaryBlue), SizedBox(width: 8), Text('Code Studio')]),
         backgroundColor: Theme.of(context).colorScheme.surface,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: _goToMakawHome),
+        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: () => Navigator.of(context).pop()),
         actions: [
           IconButton(
             icon: Icon(Icons.add, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
@@ -8411,9 +8407,9 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                             final projDir = Directory(proj['path'] ?? '');
                             if (projDir.existsSync()) {
                               final files = projDir.listSync().whereType<File>().toList();
-                              final project = CodeStudioProject(name: name, rootDir: projDir, files: files);
+                              final project = StudioProject(name: name, directory: projDir, lastModified: DateTime.now());
                               Navigator.of(context).push(PageRouteBuilder(
-                                pageBuilder: (_, __, ___) => CodeStudioWorkspacePage(project: project),
+                                pageBuilder: (_, __, ___) => MakawStudioWorkspacePage(project: project),
                                 transitionDuration: Duration(milliseconds: 200),
                                 reverseTransitionDuration: Duration(milliseconds: 150),
                                 transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
@@ -8481,12 +8477,12 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
         'name': name,
         'content': '',
         'language': template,
-        'path': project.rootDir.path,
+        'path': project.directory.path,
         'updated_at': DateTime.now().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     Navigator.of(context).push(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => CodeStudioWorkspacePage(project: project),
+      pageBuilder: (_, __, ___) => MakawStudioWorkspacePage(project: project),
       transitionDuration: Duration(milliseconds: 200),
       reverseTransitionDuration: Duration(milliseconds: 150),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),

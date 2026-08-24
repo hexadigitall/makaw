@@ -87,22 +87,44 @@ class MainActivity : FlutterActivity() {
                             MediaStore.Audio.Media.ARTIST,
                             MediaStore.Audio.Media.ALBUM,
                             MediaStore.Audio.Media.DURATION,
+                            MediaStore.Audio.Media.SIZE,
                         ),
-                        null, null, null
+                        "${MediaStore.Audio.Media.IS_MUSIC} != 0",
+                        null, null
+                    )
+                    val blacklistedDirs = listOf(
+                        "whatsapp/media/whatsapp voice notes",
+                        "whatsapp/media/whatsapp animated gifs",
+                        "whatsapp/media/whatsapp stickers",
+                        "telegram",
+                        "recordings",
+                        "notifications",
+                        "alarms",
+                        "ringtones",
+                        "call_recorder",
+                        "voice_recorder",
+                        ".thumbnails",
+                        "status"
                     )
                     cursor?.use {
                         while (it.moveToNext()) {
                             val filePath = it.getString(it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)) ?: continue
+                            val pathLower = filePath.lowercase()
+                            if (blacklistedDirs.any { dir -> pathLower.contains(dir) }) continue
+                            val fileSize = it.getLong(it.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE))
+                            if (fileSize < 800 * 1024) continue
                             val title = it.getString(it.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)) ?: ""
                             val artist = it.getString(it.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)) ?: ""
                             val album = it.getString(it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)) ?: ""
                             val duration = it.getLong(it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION))
+                            if (duration < 30000) continue
                             mediaStoreMap[filePath] = mapOf(
                                 "path" to filePath,
                                 "title" to title,
                                 "artist" to artist,
                                 "album" to album,
                                 "duration" to duration,
+                                "size" to fileSize,
                             )
                         }
                     }
@@ -170,6 +192,24 @@ class MainActivity : FlutterActivity() {
                     retriever?.release()
                 }
                 result.success(results)
+            } else if (call.method == "getAlbumArt") {
+                val path = call.argument<String>("path") ?: ""
+                try {
+                    val retriever = android.media.MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(path)
+                        val artBytes = retriever.embeddedPicture
+                        if (artBytes != null) {
+                            result.success(artBytes)
+                        } else {
+                            result.success(null)
+                        }
+                    } finally {
+                        retriever.release()
+                    }
+                } catch (_: Exception) {
+                    result.success(null)
+                }
             } else {
                 result.notImplemented()
             }

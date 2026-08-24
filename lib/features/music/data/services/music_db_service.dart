@@ -47,7 +47,8 @@ class MusicDbService {
         title TEXT,
         artist TEXT,
         album TEXT,
-        duration INTEGER
+        duration INTEGER,
+        size INTEGER
       )
     ''');
 

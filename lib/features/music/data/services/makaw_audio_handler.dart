@@ -16,11 +16,19 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
   bool get isShuffled => _isShuffled;
   List<SongInfo>? _savedQueue;
 
+  StreamSubscription<int?>? _indexSub;
+
   MakawAudioHandler() {
     _initPlayer();
   }
 
   AudioPlayer get player => _player;
+
+  static String _safeFileUri(String path) {
+    var p = path.replaceAll('\\', '/');
+    if (!p.startsWith('/')) p = '/$p';
+    return Uri.file(p).toString();
+  }
 
   void _initPlayer() {
     _player.playbackEventStream.listen((event) {
@@ -53,7 +61,8 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
       ));
     });
 
-    _player.currentIndexStream.listen((index) {
+    _indexSub?.cancel();
+    _indexSub = _player.currentIndexStream.listen((index) {
       if (index != null && queue.value.isNotEmpty && index < queue.value.length) {
         _masterIndex = index;
         mediaItem.add(queue.value[index]);
@@ -63,7 +72,7 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
 
   MediaItem _songToMediaItem(SongInfo song) {
     return MediaItem(
-      id: song.filePath,
+      id: _safeFileUri(song.filePath),
       title: song.displayTitle,
       artist: song.displayArtist,
       album: song.displayAlbum,
@@ -75,24 +84,20 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
     );
   }
 
-  Future<void> loadQueue(List<SongInfo> songs, {int initialIndex = 0, bool shuffle = false}) async {
+  Future<void> loadQueue(List<SongInfo> songs, {int initialIndex = 0, bool shuffle = false, bool autoPlay = true}) async {
+    if (songs.isEmpty) return;
     _masterQueue = List.from(songs);
 
-    if (shuffle && songs.isNotEmpty) {
+    if (shuffle) {
       final current = songs[initialIndex];
-      final shuffled = List<SongInfo>.from(songs)..shuffle();
-      if (!shuffled.contains(current)) {
-        shuffled.removeLast();
-        shuffled.insert(0, current);
-      } else {
-        shuffled.remove(current);
-        shuffled.insert(0, current);
-      }
-      _masterQueue = shuffled;
+      _savedQueue = List.from(songs);
+      _masterQueue = List.from(songs)..shuffle();
+      _masterQueue.remove(current);
+      _masterQueue.insert(0, current);
       _masterIndex = 0;
       _isShuffled = true;
     } else {
-      _masterIndex = initialIndex;
+      _masterIndex = initialIndex.clamp(0, songs.length - 1);
       _isShuffled = false;
     }
 
@@ -101,7 +106,7 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
 
     final audioSources = items.map((item) {
       return AudioSource.uri(
-        Uri.parse('file://${item.extras!['filePath']}'),
+        Uri.parse(item.id),
         tag: item,
       );
     }).toList();
@@ -109,7 +114,7 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
     _playlist.clear();
     await _playlist.addAll(audioSources);
     await _player.setAudioSource(_playlist, initialIndex: _masterIndex);
-    _player.play();
+    if (autoPlay) _player.play();
 
     mediaItem.add(items[_masterIndex]);
   }
@@ -132,14 +137,14 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToNext() async {
-    if (_masterIndex < _masterQueue.length - 1) {
-      _masterIndex++;
-      await _player.seekToNext();
-      mediaItem.add(queue.value[_masterIndex]);
-    } else if (_player.loopMode == LoopMode.all) {
-      _masterIndex = 0;
+    if (_player.loopMode == LoopMode.one) {
       await _player.seek(Duration.zero);
-      mediaItem.add(queue.value[0]);
+      return;
+    }
+    if (_masterIndex < _masterQueue.length - 1) {
+      await _player.seekToNext();
+    } else if (_player.loopMode == LoopMode.all) {
+      await _player.seek(Duration.zero);
     }
   }
 
@@ -148,25 +153,17 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_player.position.inSeconds > 3) {
       await _player.seek(Duration.zero);
     } else if (_masterIndex > 0) {
-      _masterIndex--;
       await _player.seekToPrevious();
-      mediaItem.add(queue.value[_masterIndex]);
     } else if (_player.loopMode == LoopMode.all) {
-      _masterIndex = _masterQueue.length - 1;
       await _player.seek(Duration.zero);
-      await _player.setAudioSource(_playlist, initialIndex: _masterIndex);
-      _player.play();
-      mediaItem.add(queue.value[_masterIndex]);
     }
   }
 
   @override
   Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) async {
     final enabled = shuffleMode == AudioServiceShuffleMode.all;
-    if (enabled && !_isShuffled) {
-      _toggleShuffleInternal();
-    } else if (!enabled && _isShuffled) {
-      _toggleShuffleInternal();
+    if (enabled != _isShuffled) {
+      toggleShuffle();
     }
   }
 
@@ -176,15 +173,16 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
       if (_savedQueue != null) {
         _masterQueue = List.from(_savedQueue!);
         _savedQueue = null;
-      }
-      if (cur != null) {
-        _masterIndex = _masterQueue.indexWhere((s) => s.id == cur.id);
+        if (cur != null) {
+          _masterIndex = _masterQueue.indexWhere((s) => s.filePath == cur.filePath);
+          if (_masterIndex < 0) _masterIndex = 0;
+        }
       }
       _isShuffled = false;
     } else {
       _savedQueue = List.from(_masterQueue);
       if (cur != null) {
-        _masterQueue.removeWhere((s) => s.id == cur.id);
+        _masterQueue.removeWhere((s) => s.filePath == cur.filePath);
         _masterQueue.shuffle();
         _masterQueue.insert(0, cur);
         _masterIndex = 0;
@@ -227,7 +225,7 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
     currentItems.add(item);
     queue.add(currentItems);
     _playlist.add(AudioSource.uri(
-      Uri.parse('file://${song.filePath}'),
+      Uri.parse(_safeFileUri(song.filePath)),
       tag: item,
     ));
   }
@@ -240,7 +238,7 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
     currentItems.insert(insertAt, item);
     queue.add(currentItems);
     _playlist.insert(insertAt, AudioSource.uri(
-      Uri.parse('file://${song.filePath}'),
+      Uri.parse(_safeFileUri(song.filePath)),
       tag: item,
     ));
   }
@@ -258,12 +256,12 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void reorderQueue(int oldIndex, int newIndex) {
     if (newIndex > oldIndex) newIndex--;
+    if (oldIndex == _masterIndex || newIndex == _masterIndex) return;
+
     final item = _masterQueue.removeAt(oldIndex);
     _masterQueue.insert(newIndex, item);
 
-    if (oldIndex == _masterIndex) {
-      _masterIndex = newIndex;
-    } else if (oldIndex < _masterIndex && newIndex >= _masterIndex) {
+    if (oldIndex < _masterIndex && newIndex >= _masterIndex) {
       _masterIndex--;
     } else if (oldIndex > _masterIndex && newIndex <= _masterIndex) {
       _masterIndex++;
@@ -276,6 +274,7 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void clearQueue() {
+    _player.stop();
     _masterQueue.clear();
     _masterIndex = -1;
     _playlist.clear();
@@ -295,6 +294,7 @@ class MakawAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> disposeHandler() async {
+    _indexSub?.cancel();
     await _player.dispose();
   }
 }

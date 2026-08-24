@@ -1,11 +1,13 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:http/http.dart' as http;
 import 'package:palette_generator/palette_generator.dart';
+import 'package:makaw/main.dart';
 import '../../data/services/music_player_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import 'music_playlist_page.dart';
@@ -31,7 +33,7 @@ class MusicPlayerWidget extends ConsumerStatefulWidget {
 }
 
 class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
-  MusicPlayerService get _service => ref.read(musicPlayerServiceProvider) ?? MusicPlayerService();
+  MusicPlayerService get _service => ref.read(musicPlayerServiceProvider) ?? globalMusicService;
   final TextEditingController _searchCtrl = TextEditingController();
   final Set<int> _selectedIds = {};
   bool _selectMode = false;
@@ -89,22 +91,57 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     _prevSongId = song.id;
     _paletteLoading = true;
     try {
-      final file = File(song.filePath);
-      if (!await file.exists()) return;
-      final provider = FileImage(file);
-      final palette = await PaletteGenerator.fromImageProvider(
-        provider,
-        maximumColorCount: 16,
-      ).timeout(const Duration(seconds: 3));
-      if (palette.dominantColor != null) {
-        final c = palette.dominantColor!.color;
-        final hsl = HSLColor.fromColor(c);
-        final dark = hsl.withLightness((hsl.lightness * 0.35).clamp(0.0, 1.0)).toColor();
-        final accent = hsl.withSaturation((hsl.saturation * 1.2).clamp(0.0, 1.0)).toColor();
-        if (mounted) setState(() { _dominantColor = dark; _accentColor = accent; });
+      final artBytes = await _service.getAlbumArt(song.filePath);
+      if (artBytes != null && artBytes.isNotEmpty) {
+        final provider = MemoryImage(artBytes);
+        final palette = await PaletteGenerator.fromImageProvider(
+          provider,
+          maximumColorCount: 16,
+        ).timeout(const Duration(seconds: 3));
+        if (palette.dominantColor != null) {
+          final c = palette.dominantColor!.color;
+          final hsl = HSLColor.fromColor(c);
+          final dark = hsl.withLightness((hsl.lightness * 0.35).clamp(0.0, 1.0)).toColor();
+          final accent = hsl.withSaturation((hsl.saturation * 1.2).clamp(0.0, 1.0)).toColor();
+          if (mounted) setState(() { _dominantColor = dark; _accentColor = accent; });
+        }
       }
     } catch (_) {}
     _paletteLoading = false;
+  }
+
+  Widget _buildAlbumArt(double artSize, SongInfo song) {
+    return FutureBuilder<Uint8List?>(
+      future: _service.getAlbumArt(song.filePath),
+      builder: (context, snapshot) {
+        final artBytes = snapshot.data;
+        if (artBytes != null && artBytes.isNotEmpty) {
+          return Image.memory(
+            artBytes,
+            width: artSize,
+            height: artSize,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _defaultArtIcon(),
+          );
+        }
+        return _defaultArtIcon();
+      },
+    );
+  }
+
+  Widget _defaultArtIcon() {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [_dominantColor, _accentColor.withValues(alpha: 0.4)],
+        ),
+      ),
+      child: const Center(child: Icon(Icons.music_note, color: Color(0xFF818CF8), size: 80)),
+    );
   }
 
   // ─── Lyrics ────────────────────────────────────────────────────────────────
@@ -1015,44 +1052,110 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     final s = _service.currentSong;
     if (s == null) return const SizedBox.shrink();
 
+    final pct = _service.duration > Duration.zero
+        ? (_service.position.inMilliseconds / _service.duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
     return GestureDetector(
       onTap: () => _service.setShowNowPlaying(true),
       child: Container(
-        color: const Color(0xFF1A1A2E),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        child: Row(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.4),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _thumbSmall(),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+            SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 2.5,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 0),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 0),
+                activeTrackColor: Theme.of(context).colorScheme.primary,
+                inactiveTrackColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                thumbColor: Colors.transparent,
+                overlayColor: Colors.transparent,
+              ),
+              child: Slider(
+                value: pct.toDouble(),
+                onChanged: (v) {
+                  final pos = Duration(milliseconds: (v * _service.duration.inMilliseconds).round());
+                  _service.seek(pos);
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Row(
                 children: [
-                  Text(s.displayTitle, style: const TextStyle(color: Colors.white, fontSize: 13), overflow: TextOverflow.ellipsis, maxLines: 1),
-                  Row(
-                    children: [
-                      Text(fmtDur(_service.position), style: const TextStyle(color: Color(0xFF666680), fontSize: 10)),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: LinearProgressIndicator(
-                          value: _service.duration > Duration.zero
-                              ? (_service.position.inMilliseconds / _service.duration.inMilliseconds).clamp(0.0, 1.0) : 0,
-                          backgroundColor: const Color(0xFF2A2A4E),
-                          valueColor: const AlwaysStoppedAnimation(Color(0xFF818CF8)),
-                        ),
+                  _buildSmallAlbumArt(s),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(s.displayTitle,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 14, fontWeight: FontWeight.w600,
+                          )),
+                        const SizedBox(height: 2),
+                        Text(s.displayArtist,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                            fontSize: 12,
+                          )),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.skip_previous_rounded,
+                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                      size: 24),
+                    onPressed: _service.previousSong,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    padding: EdgeInsets.zero,
+                  ),
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      icon: Icon(
+                        _service.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                        color: Theme.of(context).colorScheme.onPrimary, size: 26,
                       ),
-                      const SizedBox(width: 4),
-                      Text(fmtDur(_service.duration), style: const TextStyle(color: Color(0xFF666680), fontSize: 10)),
-                    ],
+                      onPressed: _service.togglePlayPause,
+                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      padding: EdgeInsets.zero,
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.skip_next_rounded,
+                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                      size: 24),
+                    onPressed: _service.nextSong,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    padding: EdgeInsets.zero,
                   ),
                 ],
               ),
-            ),
-            IconButton(
-              icon: Icon(_service.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                  color: const Color(0xFF818CF8), size: 32),
-              onPressed: () => _service.togglePlayPause(),
             ),
           ],
         ),
@@ -1060,11 +1163,30 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     );
   }
 
-  Widget _thumbSmall() {
+  Widget _buildSmallAlbumArt(SongInfo song) {
+    return FutureBuilder<Uint8List?>(
+      future: _service.getAlbumArt(song.filePath),
+      builder: (context, snapshot) {
+        final artBytes = snapshot.data;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: 48, height: 48,
+            child: (artBytes != null && artBytes.isNotEmpty)
+                ? Image.memory(artBytes, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _thumbFallback())
+                : _thumbFallback(),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _thumbFallback() {
     return Container(
-      width: 36, height: 36,
-      decoration: BoxDecoration(color: const Color(0xFF2A2A4E), borderRadius: BorderRadius.circular(6)),
-      child: const Icon(Icons.music_note, color: Color(0xFF818CF8), size: 18),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Icon(Icons.music_note,
+        color: Theme.of(context).colorScheme.primary, size: 24),
     );
   }
 
@@ -1178,7 +1300,10 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
                 ),
                 child: _showLyrics
                     ? ClipRRect(borderRadius: BorderRadius.circular(20), child: _buildLyricsView())
-                    : const Center(child: Icon(Icons.music_note, color: Color(0xFF818CF8), size: 80)),
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: _buildAlbumArt(artSize, song),
+                      ),
               ),
             ),
           ),

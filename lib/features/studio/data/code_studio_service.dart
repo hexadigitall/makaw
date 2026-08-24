@@ -1,88 +1,104 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
-class CodeStudioProject {
+class StudioProject {
   final String name;
-  final Directory rootDir;
-  final List<File> files;
-  CodeStudioProject({required this.name, required this.rootDir, required this.files});
+  final Directory directory;
+  final DateTime lastModified;
+
+  StudioProject({required this.name, required this.directory, required this.lastModified});
 }
 
 class CodeStudioService {
-  static Future<Directory> get _baseProjectsDir async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(appDir.path, 'MakawProjects'));
-    if (!await dir.exists()) await dir.create(recursive: true);
+  static Future<Directory> get rootWorkspacesDir async {
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory('${docs.path}/MakawProjects');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
     return dir;
   }
 
-  static const Map<String, (String fileName, String starterCode)> _templates = {
-    'javascript': ('main.js', '// JavaScript in Makaw Code Studio\nconsole.log("Hello from Makaw!");\n'),
-    'python': ('main.py', '# Python in Makaw Code Studio\nprint("Hello from Makaw!")\n'),
-    'dart': ('main.dart', 'void main() {\n  print("Hello from Makaw!");\n}\n'),
-    'html': ('index.html', '<!DOCTYPE html>\n<html>\n<body>\n  <h1>Hello Makaw</h1>\n</body>\n</html>\n'),
-    'css': ('style.css', '/* Makaw CSS */\nbody {\n  background: #0f172a;\n  color: #e2e8f0;\n}\n'),
-    'typescript': ('main.ts', '// TypeScript in Makaw Code Studio\nconst greeting: string = "Hello from Makaw!";\nconsole.log(greeting);\n'),
-  };
+  static Future<StudioProject> createProject(String projectName, String template) async {
+    final root = await rootWorkspacesDir;
+    final projectDir = Directory('${root.path}/$projectName');
+    if (!await projectDir.exists()) {
+      await projectDir.create(recursive: true);
+    }
 
-  static Future<CodeStudioProject> createProject(String projectName, String template) async {
-    final base = await _baseProjectsDir;
-    final projectDir = Directory(p.join(base.path, projectName));
-    if (!await projectDir.exists()) await projectDir.create(recursive: true);
+    if (template == 'dart') {
+      await File('${projectDir.path}/main.dart').writeAsString(
+        'void main() {\n  print("Hello from Makaw Studio!");\n}\n',
+      );
+    } else if (template == 'python') {
+      await File('${projectDir.path}/main.py').writeAsString(
+        '# Python Project in Makaw\nprint("Hello from Makaw!")\n',
+      );
+    } else if (template == 'web') {
+      await File('${projectDir.path}/index.html').writeAsString(
+        '<!DOCTYPE html>\n<html>\n<head><title>$projectName</title></head>\n<body>\n  <h1>Hello Makaw Web</h1>\n</body>\n</html>\n',
+      );
+      await File('${projectDir.path}/style.css').writeAsString('body { font-family: sans-serif; padding: 20px; }');
+      await File('${projectDir.path}/app.js').writeAsString('console.log("App initialized");');
+    } else {
+      await File('${projectDir.path}/script.js').writeAsString('console.log("Hello from Makaw!");\n');
+    }
 
-    final (fileName, starterCode) = _templates[template] ?? _templates['javascript']!;
-    final file = File(p.join(projectDir.path, fileName));
-    await file.writeAsString(starterCode, flush: true);
-
-    return CodeStudioProject(name: projectName, rootDir: projectDir, files: [file]);
+    return StudioProject(name: projectName, directory: projectDir, lastModified: DateTime.now());
   }
 
-  static Future<List<CodeStudioProject>> listProjects() async {
-    final base = await _baseProjectsDir;
-    final projects = <CodeStudioProject>[];
-    if (!await base.exists()) return projects;
-    for (final entry in base.listSync()) {
-      if (entry is Directory) {
-        final files = entry.listSync().whereType<File>().toList();
-        projects.add(CodeStudioProject(
-          name: p.basename(entry.path),
-          rootDir: entry,
-          files: files,
-        ));
+  static Future<List<StudioProject>> getProjects() async {
+    final root = await rootWorkspacesDir;
+    final List<StudioProject> list = [];
+    if (await root.exists()) {
+      for (var entity in root.listSync()) {
+        if (entity is Directory) {
+          list.add(StudioProject(
+            name: entity.path.split(Platform.pathSeparator).last,
+            directory: entity,
+            lastModified: entity.statSync().modified,
+          ));
+        }
       }
     }
-    return projects;
+    list.sort((a, b) => b.lastModified.compareTo(a.lastModified));
+    return list;
   }
 
-  static Future<void> deleteProject(String projectName) async {
-    final base = await _baseProjectsDir;
-    final dir = Directory(p.join(base.path, projectName));
-    if (await dir.exists()) await dir.delete(recursive: true);
+  static Future<void> deleteProject(Directory projectDir) async {
+    if (await projectDir.exists()) {
+      await projectDir.delete(recursive: true);
+    }
   }
 
-  static Future<File> createFile(Directory projectDir, String fileName) async {
-    final file = File(p.join(projectDir.path, fileName));
-    if (!await file.exists()) await file.writeAsString('', flush: true);
+  static Future<File> createFile(Directory parent, String name, {String content = ''}) async {
+    final file = File('${parent.path}/$name');
+    if (!await file.exists()) {
+      await file.writeAsString(content, flush: true);
+    }
     return file;
   }
 
-  static Future<void> deleteFile(File file) async {
-    if (await file.exists()) await file.delete();
+  static Future<Directory> createFolder(Directory parent, String name) async {
+    final dir = Directory('${parent.path}/$name');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
   }
 
-  static String detectLanguage(String filePath) {
-    final ext = p.extension(filePath).replaceAll('.', '').toLowerCase();
-    const map = {
-      'dart': 'dart', 'py': 'python', 'js': 'javascript', 'ts': 'typescript',
-      'html': 'html', 'htm': 'html', 'css': 'css', 'json': 'json',
-      'yaml': 'yaml', 'yml': 'yaml', 'xml': 'xml', 'sh': 'shell',
-      'md': 'markdown', 'txt': 'plaintext',
-    };
-    return map[ext] ?? 'plaintext';
+  static Future<void> deleteEntity(FileSystemEntity entity) async {
+    if (await entity.exists()) {
+      await entity.delete(recursive: true);
+    }
   }
 
   static Future<ProcessResult> executeCode(File file) async {
+    if (kIsWeb || Platform.isAndroid || Platform.isIOS) {
+      return ProcessResult(0, 0, '', 'Code execution is not supported on mobile/web platforms.\nUse Windows, macOS, or Linux.');
+    }
     final path = file.path;
     if (path.endsWith('.py')) return await Process.run('python', [path]);
     if (path.endsWith('.js')) return await Process.run('node', [path]);
