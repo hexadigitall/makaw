@@ -178,7 +178,7 @@ class _MakawStudioWorkspacePageState extends State<MakawStudioWorkspacePage> {
           ),
         Expanded(child: Column(children: [
           Expanded(flex: 3, child: CodeTheme(
-            data: const CodeThemeData(styles: monokaiSublimeTheme),
+            data: CodeThemeData(styles: monokaiSublimeTheme),
             child: SingleChildScrollView(
               child: CodeField(
                 controller: _codeController,

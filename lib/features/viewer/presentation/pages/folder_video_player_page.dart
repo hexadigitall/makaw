@@ -32,9 +32,9 @@ class _FolderVideoPlayerWidgetState extends State<FolderVideoPlayerWidget> {
             IconButton(icon: Icon(Icons.close), onPressed: widget.onClose),
         ],
       ),
-      body: DirectVideoPlayer(
-        filePath: filePath,
-        title: filePath.split('\\').last.split('/').last,
+      body: MakawVideoPlayerScreen(
+        videoPath: filePath,
+        videoTitle: filePath.split('\\').last.split('/').last,
       ),
     );
   }
