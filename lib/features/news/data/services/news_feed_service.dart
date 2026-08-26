@@ -384,7 +384,9 @@ class NewsFeedService {
         _lastFetch[categoryName] = DateTime.now();
         _feedControllers[categoryName]?.add(List.from(_cardCache[categoryName]!));
       }
-    } catch (_) {}
+    } catch (e) {
+      print('Feed refresh($categoryName) error: $e');
+    }
   }
 
   Future<void> refreshAll() async {

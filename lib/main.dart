@@ -282,23 +282,6 @@ void main() async {
 
   try { await globalMusicService.init(); } catch (_) {}
   try { await _initMediaNotification(); } catch (_) {}
-  try {
-    globalAudioHandler = await audio_svc.AudioService.init(
-      builder: () => MakawAudioHandler(),
-      config: const audio_svc.AudioServiceConfig(
-        androidNotificationChannelId: 'com.hexadigitall.makaw.audio',
-        androidNotificationChannelName: 'Makaw Music Playback',
-        androidNotificationOngoing: true,
-        androidStopForegroundOnPause: true,
-        androidNotificationIcon: 'drawable/ic_makaw_logo',
-      ),
-    );
-    if (globalAudioHandler != null) {
-      globalMusicService.attachAudioHandler(globalAudioHandler!);
-    }
-  } catch (e) {
-    print('AudioService init failed: $e');
-  }
   runApp(ProviderScope(child: MakawApp()));
 }
 
@@ -322,16 +305,16 @@ Future<void> _initMediaNotification() async {
     globalMusicService.notificationStatus = 'channel: ${notif.channelImportance}';
 
     notif.onPlay = () {
-      globalMusicService.player.play();
+      globalMusicService.player?.play();
       globalMusicService.notifyNowPlaying();
     };
     notif.onPause = () {
-      globalMusicService.player.pause();
+      globalMusicService.player?.pause();
       globalMusicService.notifyNowPlaying();
     };
     notif.onNext = () => globalMusicService.nextSong();
     notif.onPrevious = () => globalMusicService.previousSong();
-    notif.onSeek = (pos) => globalMusicService.player.seek(pos);
+    notif.onSeek = (pos) => globalMusicService.player?.seek(pos);
 
     globalMusicService.onNowPlaying = () {
       final song = globalMusicService.currentSong;
@@ -960,6 +943,26 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         await _loadShortcuts();
       } catch (_) {}
       if (mounted) setState(() => _ready = true);
+      // Init AudioService after first frame — engine must be fully ready
+      if (!kIsWeb) {
+      try {
+        globalAudioHandler = await audio_svc.AudioService.init(
+          builder: () => MakawAudioHandler(),
+          config: const audio_svc.AudioServiceConfig(
+            androidNotificationChannelId: 'com.hexadigitall.makaw.audio',
+            androidNotificationChannelName: 'Makaw Music Playback',
+            androidNotificationOngoing: true,
+            androidStopForegroundOnPause: true,
+            androidNotificationIcon: 'drawable/ic_makaw_logo',
+          ),
+        );
+        if (globalAudioHandler != null) {
+          globalMusicService.attachAudioHandler(globalAudioHandler!);
+        }
+      } catch (e) {
+        print('AudioService init failed: $e');
+      }
+      }
       if (!kIsWeb) {
       try {
         _updateService = UpdateService(
@@ -3533,7 +3536,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   }
                   _ignoreUrlChanges = false;
                   setState(() {
-                    _viewMode = _typeViewFromHome ? ViewMode.newTab : ViewMode.browsing;
+                    _viewMode = _typeViewFromHome ? ViewMode.home : ViewMode.browsing;
                     _urlSuggestions = [];
                     _searchSuggestions = [];
                   });
@@ -3549,7 +3552,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 }
                 // No back history: if browsing, go to NTP. If on NTP with no tabs, minimize.
                 if (_viewMode == ViewMode.browsing) {
-                  _goToNtp();
+                  _goHome();
                   return;
                 }
                 if (_viewMode == ViewMode.newTab) {

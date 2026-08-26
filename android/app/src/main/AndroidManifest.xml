@@ -96,11 +96,7 @@
         </activity>
         <service android:name="com.hexadigitall.makaw.MediaSessionService"
             android:foregroundServiceType="mediaPlayback"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
-            </intent-filter>
-        </service>
+            android:exported="false" />
         <receiver android:name="com.hexadigitall.makaw.MediaSessionReceiver"
             android:exported="false" />
         <!-- audio_service foreground service for background playback + notifications -->

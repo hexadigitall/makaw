@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -24,13 +25,35 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
   final _epubController = EpubController();
   double _progress = 0;
   bool _isLoading = true;
+  bool _hasError = false;
+  String _errorMsg = '';
   double _currentFontSize = 16;
-  bool _restoredPosition = false;
 
   @override
   void initState() {
     super.initState();
-    _loadPosition();
+    _loadEpub();
+  }
+
+  Future<void> _loadEpub() async {
+    try {
+      final file = File(widget.filePath);
+      if (!file.existsSync()) {
+        setState(() { _hasError = true; _errorMsg = 'File not found'; _isLoading = false; });
+        return;
+      }
+      await _loadPosition();
+      // Safety timeout — if callbacks never fire, dismiss loading after 15s
+      Timer(const Duration(seconds: 15), () {
+        if (mounted && _isLoading) {
+          setState(() => _isLoading = false);
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() { _hasError = true; _errorMsg = e.toString(); _isLoading = false; });
+      }
+    }
   }
 
   Future<void> _loadPosition() async {
@@ -42,7 +65,6 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
         final cfi = map['cfi'] as String?;
         if (cfi != null && cfi.isNotEmpty) {
           // Restore to saved CFI position after epub loads
-          _restoredPosition = false;
         }
       }
     } catch (_) {}
@@ -73,6 +95,30 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
         ),
         backgroundColor: const Color(0xFF0F172A),
         body: const Center(child: Text('File not found', style: TextStyle(color: Colors.white54))),
+      );
+    }
+
+    if (_hasError) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(widget.title, style: const TextStyle(fontSize: 14)),
+          backgroundColor: const Color(0xFF1E293B),
+          actions: [
+            if (widget.onClose != null)
+              IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
+          ],
+        ),
+        backgroundColor: const Color(0xFF0F172A),
+        body: Center(child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
+            SizedBox(height: 12),
+            Text('Could not open EPUB', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+            SizedBox(height: 8),
+            Text(_errorMsg, style: TextStyle(color: Colors.white54, fontSize: 12), textAlign: TextAlign.center),
+          ],
+        )),
       );
     }
 
@@ -138,15 +184,14 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
                 theme: EpubTheme.dark(),
               ),
               onChaptersLoaded: (_) {
-                setState(() => _isLoading = false);
+                if (mounted) setState(() => _isLoading = false);
               },
               onEpubLoaded: () {
-                setState(() => _isLoading = false);
+                if (mounted) setState(() => _isLoading = false);
               },
               onRelocated: (value) {
                 final p = value?.progress ?? 0;
-                setState(() => _progress = p);
-                // Save position periodically (every ~5% change)
+                if (mounted) setState(() => _progress = p);
                 if ((p * 100).round() % 5 == 0) _savePosition();
               },
               selectAnnotationRange: false,

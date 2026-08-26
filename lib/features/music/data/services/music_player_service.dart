@@ -13,6 +13,7 @@ class MusicPlayerService extends ChangeNotifier {
   MusicPlayerService();
 
   MakawAudioHandler? _audioHandler;
+  AudioPlayer? get player => _audioHandler?.player;
   void attachAudioHandler(MakawAudioHandler handler) {
     _audioHandler = handler;
     _setupHandlerListeners();
