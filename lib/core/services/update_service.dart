@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -48,17 +47,40 @@ class UpdateService {
   String get _apiUrl =>
       'https://api.github.com/repos/$repoOwner/$repoName/releases/latest';
 
+  /// GitHub's unauthenticated API is rate-limited (60 req/hr/IP). These
+  /// endpoints are NOT part of that API quota, so we fall back to them when
+  /// the API is unavailable/rate-limited so update delivery is never silently
+  /// blocked.
+  String get _atomUrl =>
+      'https://github.com/$repoOwner/$repoName/releases.atom';
+
   Future<PackageInfo> get packageInfo async {
     _packageInfo ??= await PackageInfo.fromPlatform();
     return _packageInfo!;
   }
 
   Future<UpdateCheckResponse> checkForUpdate() async {
-    try {
-      final info = await packageInfo;
-      final currentVersion = info.version;
-      final currentBuild = int.tryParse(info.buildNumber) ?? 0;
+    final info = await packageInfo;
+    final currentVersion = info.version;
+    final currentBuild = int.tryParse(info.buildNumber) ?? 0;
 
+    // 1. Primary: GitHub API (gives full asset list + release notes).
+    final apiResult = await _checkViaApi(currentVersion, currentBuild);
+    if (apiResult.result != UpdateCheckResult.error) {
+      return apiResult;
+    }
+
+    // 2. Fallback: parse the Atom feed (no API quota) for the latest tag,
+    //    then build the APK download URL deterministically.
+    final fallback = await _checkViaAtom(currentVersion, currentBuild);
+    return fallback;
+  }
+
+  Future<UpdateCheckResponse> _checkViaApi(
+    String currentVersion,
+    int currentBuild,
+  ) async {
+    try {
       final response = await _dio.get(
         _apiUrl,
         options: Options(
@@ -91,6 +113,88 @@ class UpdateService {
         error: e.toString(),
       );
     }
+  }
+
+  Future<UpdateCheckResponse> _checkViaAtom(
+    String currentVersion,
+    int currentBuild,
+  ) async {
+    try {
+      final response = await _dio.get(
+        _atomUrl,
+        options: Options(
+          receiveTimeout: const Duration(seconds: 20),
+          sendTimeout: const Duration(seconds: 15),
+          followRedirects: true,
+        ),
+      );
+      if (response.statusCode != 200) {
+        return UpdateCheckResponse(
+          result: UpdateCheckResult.error,
+          error: 'Atom HTTP ${response.statusCode}',
+        );
+      }
+
+      final html = response.data;
+      final xml = html is String ? html : html.toString();
+      final tag = _latestTagFromAtom(xml);
+      if (tag == null) {
+        return UpdateCheckResponse(
+          result: UpdateCheckResult.error,
+          error: 'No tag in atom feed',
+        );
+      }
+
+      final remoteVersion = tag.replaceFirst(RegExp(r'^v'), '');
+      final remoteParts = remoteVersion.split('.');
+      final remoteBuild = remoteParts.length >= 3
+          ? (int.tryParse(remoteParts[2]) ?? 0)
+          : 0;
+
+      if (remoteBuild <= currentBuild) {
+        return UpdateCheckResponse(result: UpdateCheckResult.upToDate);
+      }
+
+      // Deterministic asset URL — the release APK names are fixed.
+      final apkUrl =
+          'https://github.com/$repoOwner/$repoName/releases/download/$tag/app-arm64-v8a-release.apk';
+
+      return UpdateCheckResponse(
+        result: UpdateCheckResult.available,
+        info: UpdateInfo(
+          versionCode: remoteBuild,
+          versionName: remoteVersion,
+          apkUrl: apkUrl,
+          releaseNotes: 'Makaw v$remoteVersion is available.',
+        ),
+      );
+    } on DioException catch (e) {
+      return UpdateCheckResponse(
+        result: UpdateCheckResult.error,
+        error: e.message ?? 'Network error',
+      );
+    } catch (e) {
+      return UpdateCheckResponse(
+        result: UpdateCheckResult.error,
+        error: e.toString(),
+      );
+    }
+  }
+
+  /// Extracts the most recent release tag from a GitHub Atom feed.
+  String? _latestTagFromAtom(String xml) {
+    // Example entry title: "Release Makaw v1.0.45" or the link contains the tag.
+    final linkMatch =
+        RegExp(r'<entry>[\s\S]*?<link[^>]*href="[^"]*/releases/tag/([^"]+)"')
+            .firstMatch(xml);
+    if (linkMatch != null) {
+      return linkMatch.group(1)?.split('?').first;
+    }
+    final titleMatch = RegExp(r'Makaw\s+v?(\d+\.\d+\.\d+)').firstMatch(xml);
+    if (titleMatch != null) {
+      return 'v${titleMatch.group(1)}';
+    }
+    return null;
   }
 
   UpdateCheckResponse _parseGitHubRelease(
