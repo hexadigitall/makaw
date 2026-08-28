@@ -29,26 +29,31 @@ header {
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 .nav { display: flex; align-items: center; justify-content: space-between; height: 60px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 19px; text-decoration: none; color: var(--text); }
-.brand-mark { width: 30px; height: 30px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 21px; text-decoration: none; }
+.brand-mark { width: 32px; height: 32px; border-radius: 8px; display: block; }
+.wordmark {
+  background: linear-gradient(90deg, #2B6BFF, #7A3CFF);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
 .nav-links { display: flex; gap: 22px; }
 .nav-links a { color: var(--muted); text-decoration: none; font-size: 14px; transition: color .15s; }
 .nav-links a:hover { color: var(--text); }
 
 /* Hero */
-.hero { padding: 56px 0 56px; text-align: center; }
-.hero h1 { font-size: clamp(38px, 6vw, 56px); font-weight: 800; letter-spacing: -1px; line-height: 1.05; }
+.hero { padding: 52px 0 56px; text-align: center; }
+.hero-logo { width: 120px; height: 120px; border-radius: 28px; margin-bottom: 18px; }
+.hero h1 { font-size: clamp(40px, 6vw, 60px); font-weight: 800; letter-spacing: -1px; line-height: 1.05; }
 .tagline { max-width: 520px; margin: 12px auto 30px; color: var(--muted); font-size: 17px; }
 
 .cta-row { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
 .btn-primary {
-  background: linear-gradient(90deg, var(--blue), var(--violet));
+  background: linear-gradient(90deg, #2B6BFF, #7A3CFF);
   color: #fff; border: none; padding: 15px 34px; border-radius: 999px;
   font-size: 16px; font-weight: 600; cursor: pointer; text-decoration: none;
   display: inline-flex; align-items: center; gap: 10px;
   transition: filter .15s;
 }
-.btn-primary:hover { filter: brightness(1.1); }
+.btn-primary:hover { filter: brightness(1.08); }
 .plat-sub { color: var(--faint); font-size: 13px; }
 
 /* Downloads */
