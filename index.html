@@ -3,282 +3,78 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Makaw — a full-featured browser, code studio and creative ecosystem for Android, Windows, macOS and Linux.">
+  <meta name="description" content="Makaw — browser, code studio and creative ecosystem for Android, Windows, macOS and Linux. Download now.">
   <meta name="theme-color" content="#0F172A">
-  <title>Makaw — Browser · Code Studio · Creative Ecosystem</title>
-  <link rel="icon" type="image/png" href="favicon.png">
-  <style>
-    :root {
-      --bg: #0F172A;
-      --bg-2: #0B1120;
-      --surface: #1E293B;
-      --surface-2: #334155;
-      --text: #F8FAFC;
-      --muted: #94A3B8;
-      --faint: rgba(255,255,255,0.45);
-      --accent: #38BDF8;
-      --violet: #8B5CF6;
-      --blue: #3B82F6;
-      --radius: 20px;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
-
-    /* Nav */
-    header {
-      position: sticky; top: 0; z-index: 50;
-      background: rgba(15,23,42,0.8);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-    }
-    .nav { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; letter-spacing: -0.3px; }
-    .brand img { width: 28px; height: 28px; }
-    .nav-links { display: flex; gap: 28px; align-items: center; }
-    .nav-links a { color: var(--muted); text-decoration: none; font-size: 14px; transition: color .15s; }
-    .nav-links a:hover { color: var(--text); }
-    .btn-dl {
-      background: linear-gradient(90deg, var(--blue), var(--violet));
-      color:#fff; border: none; padding: 9px 20px; border-radius: 999px;
-      font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none;
-      display: inline-flex; align-items: center; gap: 8px;
-    }
-    .btn-dl:hover { filter: brightness(1.1); }
-
-    /* Hero */
-    .hero { padding: 96px 0 72px; text-align: center; }
-    .hero .logo { width: 92px; height: 92px; margin-bottom: 28px; }
-    .hero h1 {
-      font-size: clamp(40px, 6vw, 64px);
-      font-weight: 800; letter-spacing: -1.5px; line-height: 1.05;
-    }
-    .hero h1 .grad {
-      background: linear-gradient(90deg, var(--accent), var(--violet));
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-    }
-    .hero p.tagline {
-      max-width: 620px; margin: 20px auto 36px;
-      color: var(--muted); font-size: 18px;
-    }
-    .cta-row { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
-    .btn-primary {
-      background: linear-gradient(90deg, var(--blue), var(--violet));
-      color:#fff; border: none; padding: 15px 32px; border-radius: 999px;
-      font-size: 16px; font-weight: 600; cursor: pointer; text-decoration: none;
-      display: inline-flex; align-items: center; gap: 10px;
-    }
-    .btn-primary:hover { filter: brightness(1.1); }
-    .btn-ghost {
-      background: var(--surface); color: var(--text); border: 1px solid var(--surface-2);
-      padding: 15px 28px; border-radius: 999px; font-size: 16px; font-weight: 500;
-      cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 10px;
-    }
-    .btn-ghost:hover { background: var(--surface-2); }
-    .platforms { margin-top: 32px; color: var(--faint); font-size: 14px; }
-
-    /* Sections */
-    section { padding: 72px 0; }
-    section.alt { background: var(--bg-2); border-top: 1px solid rgba(255,255,255,0.06); border-bottom: 1px solid rgba(255,255,255,0.06); }
-    .sec-head { text-align: center; margin-bottom: 48px; }
-    .sec-head h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 700; letter-spacing: -0.6px; }
-    .sec-head p { color: var(--muted); max-width: 560px; margin: 12px auto 0; }
-
-    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-    .feature {
-      background: var(--surface); border: 1px solid rgba(255,255,255,0.06);
-      border-radius: var(--radius); padding: 28px;
-    }
-    .feature .ic {
-      width: 48px; height: 48px; border-radius: 14px; background: var(--surface-2);
-      display: flex; align-items: center; justify-content: center; margin-bottom: 18px;
-    }
-    .feature h3 { font-size: 18px; margin-bottom: 8px; }
-    .feature p { color: var(--muted); font-size: 14px; }
-
-    /* Ecosystems */
-    .ecosystems { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-    .eco { background: var(--surface); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius); padding: 24px; }
-    .eco .row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-    .eco .ic { width: 42px; height: 42px; border-radius: 12px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 20px; }
-    .eco h3 { font-size: 18px; }
-    .eco ul { list-style: none; }
-    .eco li { color: var(--muted); font-size: 14px; padding: 3px 0; padding-left: 20px; position: relative; }
-    .eco li::before { content: "›"; position: absolute; left: 6px; color: var(--accent); }
-
-    /* Downloads */
-    .dl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-    .dl-card {
-      background: var(--surface); border: 1px solid rgba(255,255,255,0.06);
-      border-radius: var(--radius); padding: 28px; text-decoration: none; color: var(--text);
-      display: flex; align-items: center; gap: 18px; transition: border-color .15s, transform .15s;
-    }
-    .dl-card:hover { border-color: var(--accent); transform: translateY(-2px); }
-    .dl-card .ic { width: 52px; height: 52px; border-radius: 14px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink:0; }
-    .dl-card .ttl { font-size: 17px; font-weight: 600; }
-    .dl-card .sub { color: var(--muted); font-size: 13px; }
-
-    footer { border-top: 1px solid rgba(255,255,255,0.06); padding: 40px 0; text-align: center; color: var(--faint); font-size: 13px; }
-    footer a { color: var(--muted); text-decoration: none; }
-    footer a:hover { color: var(--text); }
-
-    @media (max-width: 720px) {
-      .features, .ecosystems, .dl-grid { grid-template-columns: 1fr; }
-      .nav-links { display: none; }
-      .hero { padding: 64px 0 48px; }
-    }
-  </style>
+  <title>Makaw — Download</title>
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header>
     <div class="wrap nav">
-      <div class="brand"><img src="favicon.png" alt="Makaw"> Makaw</div>
+      <a class="brand" href="#top">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#8B5CF6"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g)"/><path d="M8 22V10l4 8 4-8 4 8 4-8v12" fill="none" stroke="#0F172A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Makaw</span>
+      </a>
       <nav class="nav-links">
-        <a href="#features">Features</a>
-        <a href="#ecosystems">Ecosystems</a>
-        <a href="#download">Download</a>
-        <a class="btn-dl" href="#download">Get Makaw</a>
+        <a href="https://github.com/hexadigitall/makaw/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hexadigitall/makaw" target="_blank" rel="noopener">GitHub</a>
       </nav>
     </div>
   </header>
 
-  <!-- Hero -->
-  <section class="hero">
-    <div class="wrap">
-      <img class="logo" src="favicon.png" alt="Makaw logo">
-      <h1>One home for your<br><span class="grad">entire creative ecosystem</span></h1>
-      <p class="tagline">
-        Browser, code studio, terminal, media player and more — collected into a single
-        fast, private desktop experience for Android, Windows, macOS and Linux.
-      </p>
-      <div class="cta-row">
-        <a class="btn-primary" href="https://github.com/hexadigitall/makaw/releases/latest" target="_blank" rel="noopener">&#11015; Download Makaw</a>
-        <a class="btn-ghost" href="https://github.com/hexadigitall/makaw" target="_blank" rel="noopener">View on GitHub</a>
-      </div>
-      <div class="platforms">Android &middot; Windows &middot; macOS &middot; Linux</div>
-    </div>
-  </section>
+  <main id="top">
+    <!-- HERO + DOWNLOADS -->
+    <section class="hero">
+      <div class="wrap">
+        <h1>Makaw</h1>
+        <p class="tagline">Browser, code studio &amp; creative tools — one app for Android, Windows, macOS and Linux.</p>
 
-  <!-- Features -->
-  <section id="features" class="alt">
-    <div class="wrap">
-      <div class="sec-head">
-        <h2>Built around you</h2>
-        <p>Makaw brings together the tools you reach for every day into one cohesive, offline-first workspace.</p>
-      </div>
-      <div class="features">
-        <div class="feature">
-          <div class="ic">&#128279;</div>
-          <h3>Upgraded Browser</h3>
-          <p>Tabbed &amp; incognito browsing with built-in ad blocking, bookmarks, passwords, history and download manager.</p>
+        <div class="cta-row">
+          <a class="btn-primary" id="smart-dl" href="#" onclick="return smartDownload(event)">&#11015; Download for my device</a>
+          <span class="plat-sub" id="plat-sub">Detecting your OS&hellip;</span>
         </div>
-        <div class="feature">
-          <div class="ic">&#128187;</div>
-          <h3>Code Studio</h3>
-          <p>Monaco-powered code editor with projects, git, terminal, snippets and an integrated preview runner.</p>
-        </div>
-        <div class="feature">
-          <div class="ic">&#127911;</div>
-          <h3>Media &amp; Music</h3>
-          <p>Video player, gallery, music player and media sniffer with playlists, favorites and resume support.</p>
-        </div>
-        <div class="feature">
-          <div class="ic">&#128193;</div>
-          <h3>Documents &amp; Files</h3>
-          <p>Read PDF, EPUB, DOCX, HTML, TXT and more, with a file explorer and cloud sync for your workspace.</p>
-        </div>
-        <div class="feature">
-          <div class="ic">&#128274;</div>
-          <h3>Privacy First</h3>
-          <p>Local-first storage, stealth mode, incognito tabs and full control over your data — nothing leaves your device.</p>
-        </div>
-        <div class="feature">
-          <div class="ic">&#9889;</div>
-          <h3>One Hub to Rule Them</h3>
-          <p>Launch every ecosystem from a single root portal with a universal command palette.</p>
-        </div>
-      </div>
-    </div>
-  </section>
 
-  <!-- Ecosystems -->
-  <section id="ecosystems">
-    <div class="wrap">
-      <div class="sec-head">
-        <h2>Seven ecosystems, one home</h2>
-        <p>Every tool lives inside a hub you can reach from the Makaw root portal.</p>
-      </div>
-      <div class="ecosystems">
-        <div class="eco">
-          <div class="row"><div class="ic">&#128187;</div><h3>Code Studio</h3></div>
-          <ul><li>IDE</li><li>Projects</li><li>Git</li><li>Snippets</li><li>Cloud</li></ul>
-        </div>
-        <div class="eco">
-          <div class="row"><div class="ic">&#128444;</div><h3>Terminal</h3></div>
-          <ul><li>Local shell sessions</li><li>Real PTY support</li></ul>
-        </div>
-        <div class="eco">
-          <div class="row"><div class="ic">&#127909;</div><h3>Media Hub</h3></div>
-          <ul><li>Music</li><li>Video</li><li>Gallery</li><li>Media Sniffer</li></ul>
-        </div>
-        <div class="eco">
-          <div class="row"><div class="ic">&#127760;</div><h3>Browser Hub</h3></div>
-          <ul><li>Browser &amp; Incognito</li><li>Bookmarks</li><li>Downloads</li><li>History</li><li>Passwords</li></ul>
-        </div>
-        <div class="eco">
-          <div class="row"><div class="ic">&#128196;</div><h3>Documents</h3></div>
-          <ul><li>PDF · EPUB · DOCX · HTML · TXT</li><li>File Explorer</li></ul>
-        </div>
-        <div class="eco">
-          <div class="row"><div class="ic">&#9729;</div><h3>Cloud</h3></div>
-          <ul><li>Cloud Sync &amp; backups</li></ul>
+        <div class="dl-grid">
+          <a class="dl-card" data-asset="apk" data-label="Android APK">
+            <span class="ic">&#129302;</span>
+            <span><b>Android</b><em>APK</em></span>
+          </a>
+          <a class="dl-card" data-asset="win" data-label="Windows ZIP">
+            <span class="ic">&#128421;</span>
+            <span><b>Windows</b><em>ZIP</em></span>
+          </a>
+          <a class="dl-card" data-asset="mac" data-label="macOS ZIP">
+            <span class="ic">&#128187;</span>
+            <span><b>macOS</b><em>ZIP</em></span>
+          </a>
+          <a class="dl-card" data-asset="linux" data-label="Linux tarball">
+            <span class="ic">&#128241;</span>
+            <span><b>Linux</b><em>tar.gz</em></span>
+          </a>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Download -->
-  <section id="download" class="alt">
-    <div class="wrap">
-      <div class="sec-head">
-        <h2>Get Makaw</h2>
-        <p>Grab the latest release for your platform. Makaw is a native desktop/mobile app — download the installer for the full experience.</p>
+    <!-- FEATURES (compact) -->
+    <section class="features-section">
+      <div class="wrap">
+        <div class="features">
+          <div class="feature"><span class="ic">&#128279;</span><h3>Private Browser</h3><p>Tabs, incognito, ad blocking, bookmarks, passwords, history.</p></div>
+          <div class="feature"><span class="ic">&#128187;</span><h3>Code Studio</h3><p>Monaco editor, projects, git, terminal, snippets.</p></div>
+          <div class="feature"><span class="ic">&#127911;</span><h3>Media &amp; Music</h3><p>Player, gallery, lyrics, music &amp; media sniffer with resume.</p></div>
+          <div class="feature"><span class="ic">&#128196;</span><h3>Documents</h3><p>PDF, EPUB, DOCX, HTML, TXT &amp; a file explorer.</p></div>
+        </div>
       </div>
-      <div class="dl-grid">
-        <a class="dl-card" href="https://github.com/hexadigitall/makaw/releases/latest" target="_blank" rel="noopener">
-          <div class="ic">&#129302;</div>
-          <div><div class="ttl">Android</div><div class="sub">APK + App Bundle</div></div>
-        </a>
-        <a class="dl-card" href="https://github.com/hexadigitall/makaw/releases/latest" target="_blank" rel="noopener">
-          <div class="ic">&#128421;</div>
-          <div><div class="ttl">Windows</div><div class="sub">MSIX + Executable</div></div>
-        </a>
-        <a class="dl-card" href="https://github.com/hexadigitall/makaw/releases/latest" target="_blank" rel="noopener">
-          <div class="ic">&#128187;</div>
-          <div><div class="ttl">macOS</div><div class="sub">App Bundle</div></div>
-        </a>
-        <a class="dl-card" href="https://github.com/hexadigitall/makaw/releases/latest" target="_blank" rel="noopener">
-          <div class="ic">&#128241;</div>
-          <div><div class="ttl">Linux</div><div class="sub">Tarball</div></div>
-        </a>
-      </div>
-    </div>
-  </section>
+    </section>
+  </main>
 
   <footer>
     <div class="wrap">
       <p>Makaw &middot; <a href="https://github.com/hexadigitall/makaw" target="_blank" rel="noopener">GitHub</a> &middot; <a href="https://github.com/hexadigitall/makaw/releases" target="_blank" rel="noopener">Releases</a></p>
-      <p style="margin-top:8px;">&copy; <span id="yr"></span> hexadigitall. All rights reserved.</p>
     </div>
   </footer>
 
-  <script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
+  <script src="app.js"></script>
 </body>
 </html>
