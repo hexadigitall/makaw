@@ -66,6 +66,10 @@ import 'core/widgets/adaptive_container.dart';
 import 'core/widgets/adaptive_modal.dart';
 import 'core/widgets/adaptive_action_button.dart';
 import 'features/portal/presentation/pages/makaw_home_portal_page.dart';
+import 'features/portal/presentation/pages/universal_search_palette.dart';
+import 'features/portal/presentation/pages/desktop_portal_shell.dart';
+import 'features/portal/presentation/pages/ecosystem_hub_page.dart';
+import 'features/portal/domain/ecosystem.dart';
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 
@@ -370,6 +374,7 @@ class MakawHome extends ConsumerStatefulWidget {
 class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentView = 'browser';
+  Ecosystem? _activeEcosystem;
   ViewMode _viewMode = ViewMode.home;
   bool get _showHomeScreen => _viewMode == ViewMode.home || _viewMode == ViewMode.newTab;
   bool get _isMakawHome => _viewMode == ViewMode.home;
@@ -3155,47 +3160,52 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   // ─── Mobile Bottom Navigation Bar ──────────────────────────────────────────
   int _bottomNavIndex = 0;
-  static const _bottomNavItems = [
-    (Icons.grid_view_rounded, 'Home'),
-    (Icons.code, 'Studio'),
-    (Icons.folder_outlined, 'Files'),
-    (Icons.settings_outlined, 'Settings'),
-    (Icons.menu, 'More'),
-  ];
 
   Widget _buildBottomNavBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border(top: BorderSide(color: Theme.of(context).cardColor, width: 1)),
+    return NavigationBarTheme(
+      data: NavigationBarThemeData(
+        backgroundColor: const Color(0xFF0F172A),
+        indicatorColor: Colors.transparent,
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final isSelected = states.contains(WidgetState.selected);
+          return TextStyle(
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected ? const Color(0xFF38BDF8) : Colors.white38,
+          );
+        }),
       ),
-      child: SafeArea(
-        child: SizedBox(
-          height: 56,
-          child: Row(
-            children: List.generate(_bottomNavItems.length, (i) {
-              final item = _bottomNavItems[i];
-              final isActive = _bottomNavIndex == i;
-              return Expanded(
-                child: InkWell(
-                  onTap: () => _onBottomNavTap(i),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(item.$1, size: 22, color: isActive ? kAccentTeal : Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
-                      SizedBox(height: 2),
-                      Text(item.$2, style: TextStyle(
-                        fontSize: kTextMicro,
-                        fontWeight: isActive ? kWeightSemibold : kWeightRegular,
-                        color: isActive ? kAccentTeal : Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-                      )),
-                    ],
-                  ),
-                ),
-              );
-            }),
+      child: NavigationBar(
+        height: 60,
+        selectedIndex: _bottomNavIndex,
+        onDestinationSelected: (idx) => _onBottomNavTap(idx),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.grid_view_rounded, color: Colors.white38),
+            selectedIcon: Icon(Icons.grid_view_rounded, color: Color(0xFF38BDF8)),
+            label: 'Home',
           ),
-        ),
+          NavigationDestination(
+            icon: Icon(Icons.code_rounded, color: Colors.white38),
+            selectedIcon: Icon(Icons.code_rounded, color: Color(0xFF38BDF8)),
+            label: 'Studio',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.folder_outlined, color: Colors.white38),
+            selectedIcon: Icon(Icons.folder_outlined, color: Color(0xFF38BDF8)),
+            label: 'Files',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined, color: Colors.white38),
+            selectedIcon: Icon(Icons.settings_outlined, color: Color(0xFF38BDF8)),
+            label: 'Settings',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.menu_rounded, color: Colors.white38),
+            selectedIcon: Icon(Icons.menu_rounded, color: Color(0xFF38BDF8)),
+            label: 'More',
+          ),
+        ],
       ),
     );
   }
@@ -3205,14 +3215,84 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     switch (index) {
       case 0: _goToMakawHome(); break;
       case 1: _switchToView('studio'); break;
-      case 2: _scaffoldKey.currentState?.openDrawer(); break;
-      case 3: _switchToView('documents'); break;
+      case 2: _switchToView('files'); break;
+      case 3: _scaffoldKey.currentState?.openDrawer(); break;
       case 4: _scaffoldKey.currentState?.openDrawer(); break;
     }
   }
 
-  // ─── Desktop NavigationRail Scaffold ───────────────────────────────────────
+  // ─── Desktop Scaffold ───────────────────────────────────────────────────────
   Widget _buildDesktopScaffold() {
+    // Root Portal / Makaw Home on desktop gets its own collapsible main menu.
+    if (_isMakawHome) {
+      return _buildDesktopRootPortal();
+    }
+    return _buildDesktopEcosystemScaffold();
+  }
+
+  Widget _buildDesktopRootPortal() {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      body: DesktopPortalShell(
+        onOpenEcosystem: _openEcosystem,
+        onGoHome: _goToMakawHome,
+        child: SafeArea(
+          child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
+        ),
+      ),
+    );
+  }
+
+  /// Opens an ecosystem hub page (desktop + mobile).
+  void _openEcosystem(String ecosystemId) {
+    Ecosystem? ecosystem;
+    for (final e in Ecosystems.all) {
+      if (e.id == ecosystemId) {
+        ecosystem = e;
+        break;
+      }
+    }
+    if (ecosystem == null) return;
+    final hub = ecosystem;
+    Navigator.of(context).push(PageRouteBuilder(
+      pageBuilder: (_, __, ___) => EcosystemHubPage(
+        ecosystem: hub,
+        onOpenTool: (tool) => _openEcosystemTool(hub, tool),
+        onGoHome: _goToMakawHome,
+        isDesktopShell: Responsive.isDesktop(context) && !kIsWeb,
+      ),
+      transitionDuration: const Duration(milliseconds: 220),
+      reverseTransitionDuration: const Duration(milliseconds: 160),
+      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+    ));
+  }
+
+  /// Opens a tool page within an ecosystem, loading the tool behind the hub.
+  void _openEcosystemTool(Ecosystem ecosystem, EcosystemTool tool) {
+    _activeEcosystem = ecosystem;
+    if (tool.view == 'browser') {
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      _activeEcosystem = null;
+      _switchToView('browser');
+      _goHome();
+      return;
+    }
+    final page = _buildFeaturePage(tool.view);
+    if (page != null) {
+      Navigator.of(context).push(PageRouteBuilder(
+        pageBuilder: (_, __, ___) => page,
+        transitionDuration: const Duration(milliseconds: 200),
+        reverseTransitionDuration: const Duration(milliseconds: 150),
+        transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+      )).then((_) {
+        if (mounted) _activeEcosystem = null;
+      });
+    } else {
+      _activeEcosystem = null;
+    }
+  }
+
+  Widget _buildDesktopEcosystemScaffold() {
     final navItems = [
       (Icons.language, 'Browser'),
       (Icons.code, 'Code Studio'),
@@ -3767,12 +3847,31 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       child: Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
-          title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 20, color: kAccentTeal), SizedBox(width: 8), Text(title)]),
-          backgroundColor: Theme.of(context).colorScheme.surface,
           leading: IconButton(
             icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
             onPressed: () => Navigator.of(context).pop(),
+            tooltip: _activeEcosystem != null ? 'Back to ${_activeEcosystem!.name} Hub' : 'Back',
           ),
+          leadingWidth: _activeEcosystem != null ? 300 : kToolbarHeight,
+          titleSpacing: _activeEcosystem != null ? 0 : null,
+          title: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 20, color: kAccentTeal),
+            SizedBox(width: 8),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title, overflow: TextOverflow.ellipsis),
+                  if (_activeEcosystem != null)
+                    Text(
+                      'From ${_activeEcosystem!.name} Hub',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
+                    ),
+                ],
+              ),
+            ),
+          ]),
           actions: [
             IconButton(
               icon: Icon(Icons.system_update, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
@@ -4384,7 +4483,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
     return Column(
       children: [
-        if (!_isFullscreen) _buildBrowserHeader(),
+        if (!_isFullscreen && !_isMakawHome) _buildBrowserHeader(),
         if (!showHome && !isTypeView && progress != null && progress > 0 && progress < 100)
           ClipRRect(
             borderRadius: BorderRadius.circular(2),
@@ -4411,6 +4510,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   // ─── Web Content ────────────────────────────────────────────────────────
   Widget _buildWebContent() {
+    if (_isMakawHome) {
+      // Makaw Home Portal — responsive layout (covers mobile/tablet/desktop widths)
+      return _buildHomeContent();
+    }
     return Column(
       children: [
         _buildWebHeader(),
@@ -4902,10 +5005,51 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     // ─── Makaw Home Portal: master launcher hub ─────────────────────────────
     return MakawHomePortalPage(
       onNavigate: (route) => _switchToView(route),
+      onOpenSearch: _openUniversalSearch,
       onOpenQrScanner: () => _scanQRCode(),
       onToggleIncognito: () => _goIncognitoNtp(),
       onOpenAiAssistant: () => _showAIChat(),
     );
+  }
+
+  /// Opens the Universal Search & Command Palette — a distinct tools/files
+  /// explorer surface (not the browser omnibox / NTP). Only an explicit "Search
+  /// on the Web" action bridges into the browser.
+  void _openUniversalSearch() {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: true,
+        transitionDuration: const Duration(milliseconds: 220),
+        reverseTransitionDuration: const Duration(milliseconds: 160),
+        pageBuilder: (_, __, ___) {
+          return UniversalSearchPalette(
+            onOpenTool: (view) {
+              Navigator.of(context).pop();
+              _switchToView(view);
+            },
+            onOpenFile: (path) {
+              Navigator.of(context).pop();
+              _openFileExplorerAt(path);
+            },
+            onSearchWeb: (term) {
+              Navigator.of(context).pop();
+              _navigateOrOpenNewTab(term);
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  /// Opens a file/folder result from the Universal Search. For a file, opens
+  /// it directly in the document viewer; for a folder, opens the File Explorer.
+  void _openFileExplorerAt(String path) {
+    final isFile = File(path).existsSync();
+    if (isFile) {
+      _openFile(path);
+      return;
+    }
+    _switchToView('files');
   }
 
   Widget _buildIncognitoLandingPage() {

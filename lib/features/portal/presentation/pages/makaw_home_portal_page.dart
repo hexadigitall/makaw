@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/responsive.dart';
+import '../../../../core/widgets/adaptive_container.dart';
 import '../../domain/launcher_item.dart';
 
 class MakawHomePortalPage extends StatelessWidget {
@@ -6,6 +8,7 @@ class MakawHomePortalPage extends StatelessWidget {
   final VoidCallback onOpenQrScanner;
   final VoidCallback onToggleIncognito;
   final VoidCallback onOpenAiAssistant;
+  final VoidCallback onOpenSearch;
 
   const MakawHomePortalPage({
     Key? key,
@@ -13,6 +16,7 @@ class MakawHomePortalPage extends StatelessWidget {
     required this.onOpenQrScanner,
     required this.onToggleIncognito,
     required this.onOpenAiAssistant,
+    required this.onOpenSearch,
   }) : super(key: key);
 
   @override
@@ -20,41 +24,190 @@ class MakawHomePortalPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 12),
+        child: _buildContent(context),
+      ),
+    );
+  }
 
-              // 1. Center Wordmark
-              const Text(
-                'Makaw',
-                style: TextStyle(
-                  fontFamily: 'Outfit',
-                  fontSize: 38,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: -0.5,
+  Widget _buildContent(BuildContext context) {
+    return AdaptiveContainer(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.symmetric(
+          horizontal: Responsive.isMobile(context) ? 20 : 32,
+          vertical: Responsive.isMobile(context) ? 16 : 24,
+        ),
+        child: Responsive.isDesktop(context)
+            ? _buildDesktopLayout(context)
+            : _buildMobileLayout(context),
+      ),
+    );
+  }
+
+  // ─── Desktop / Tablet layout: two-column, centered, wide ─────────────────
+  Widget _buildDesktopLayout(BuildContext context) {
+    final isWide = Responsive.isDesktop(context);
+    final searchWidth = isWide ? Responsive.desktopMax * 0.55 : Responsive.desktopMax * 0.7;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+
+        // 1. Brand Identity Header
+        Row(
+          children: [
+            const Text(
+              'Makaw',
+              style: TextStyle(
+                fontFamily: 'Outfit',
+                fontSize: 44,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withOpacity(0.08)),
+              ),
+              child: const Text(
+                'Command Center',
+                style: TextStyle(color: Colors.white60, fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Browse · Build · Create — one hub for the entire Makaw ecosystem.',
+          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14),
+        ),
+        const SizedBox(height: 28),
+
+        // 2. Universal Search & Command Palette
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: searchWidth),
+          child: _buildUniversalSearchBar(context),
+        ),
+        const SizedBox(height: 28),
+
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Main column: Launcher Hub + AI banner
+            Expanded(
+              flex: 5,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildLauncherHub(context, desktopColumns: isWide ? 4 : 3),
+                  const SizedBox(height: 20),
+                  _buildAiAssistantBanner(context),
+                ],
+              ),
+            ),
+            const SizedBox(width: 24),
+            // Sidebar: Recent Activity + highlights
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildRecentActivitySection(),
+                  const SizedBox(height: 20),
+                  _buildFeatureHighlights(context),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  // ─── Mobile layout: single column per spec ───────────────────────────────
+  Widget _buildMobileLayout(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const SizedBox(height: 12),
+
+        // 1. Center Wordmark
+        const Text(
+          'Makaw',
+          style: TextStyle(
+            fontFamily: 'Outfit',
+            fontSize: 38,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // 2. Universal Search & Command Palette
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Search & Command Palette',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.6),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        _buildUniversalSearchBar(context),
+        const SizedBox(height: 20),
+
+        // 3. Launcher Hub Card
+        _buildLauncherHub(context),
+        const SizedBox(height: 16),
+
+        // 4. AI Assistant Banner (Gradient Action Pill)
+        _buildAiAssistantBanner(context),
+        const SizedBox(height: 16),
+
+        // 5. Recent Activity Card
+        _buildRecentActivitySection(),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  Widget _buildUniversalSearchBar(BuildContext context) {
+    return Material(
+      color: const Color(0xFF1E293B),
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        onTap: onOpenSearch,
+        borderRadius: BorderRadius.circular(28),
+        child: Container(
+          height: Responsive.isDesktop(context) ? 56 : 52,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.travel_explore, color: Colors.white54, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Search tools, files, and folders...',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.white.withOpacity(0.38), fontSize: 14),
                 ),
               ),
-              const SizedBox(height: 24),
-
-              // 2. Universal Search & Command Palette
-              _buildUniversalSearchBar(),
-              const SizedBox(height: 20),
-
-              // 3. Launcher Hub Card
-              _buildLauncherHub(context),
-              const SizedBox(height: 16),
-
-              // 4. AI Assistant Banner (Gradient Action Pill)
-              _buildAiAssistantBanner(),
-              const SizedBox(height: 16),
-
-              // 5. Recent Activity Card
-              _buildRecentActivitySection(),
-              const SizedBox(height: 20),
+              Icon(Icons.search, color: Colors.white.withOpacity(0.6), size: 20),
             ],
           ),
         ),
@@ -62,50 +215,12 @@ class MakawHomePortalPage extends StatelessWidget {
     );
   }
 
-  Widget _buildUniversalSearchBar() {
-    return Container(
-      height: 52,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          const Icon(Icons.search, color: Colors.white38, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              decoration: InputDecoration(
-                hintText: 'Search Tools, Files, and Web...',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 14),
-                border: InputBorder.none,
-                isDense: true,
-              ),
-            ),
-          ),
-          IconButton(
-            icon: Icon(Icons.qr_code_scanner_rounded, color: Colors.white.withOpacity(0.6), size: 20),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            onPressed: onOpenQrScanner,
-          ),
-          const SizedBox(width: 12),
-          IconButton(
-            icon: Icon(Icons.shield_outlined, color: Colors.white.withOpacity(0.6), size: 20),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            onPressed: onToggleIncognito,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLauncherHub(BuildContext context) {
+  Widget _buildLauncherHub(BuildContext context, {int? desktopColumns}) {
     final launcherItems = _launcherItems(context);
+    final isDesktop = Responsive.isDesktop(context);
+    final columns = isDesktop ? (desktopColumns ?? 3) : 3;
+    final tileSize = isDesktop ? 64.0 : 52.0;
+    final iconSize = isDesktop ? 28.0 : 24.0;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -118,14 +233,14 @@ class MakawHomePortalPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Text('🚀', style: TextStyle(fontSize: 14)),
-              SizedBox(width: 8),
+            children: [
+              Text('🚀', style: TextStyle(fontSize: isDesktop ? 18 : 14)),
+              const SizedBox(width: 8),
               Text(
                 'Launcher Hub',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 15,
+                  fontSize: isDesktop ? 17 : 15,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -133,15 +248,14 @@ class MakawHomePortalPage extends StatelessWidget {
           ),
           const SizedBox(height: 18),
 
-          // 2x3 Grid of Shortcuts
           GridView.count(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 3,
-            mainAxisSpacing: 16,
-            crossAxisSpacing: 12,
-            childAspectRatio: 0.95,
-            children: launcherItems.map((item) => _buildGridTile(item)).toList(),
+            crossAxisCount: columns,
+            mainAxisSpacing: 20,
+            crossAxisSpacing: 16,
+            childAspectRatio: 1.0,
+            children: launcherItems.map((item) => _buildGridTile(context, item, tileSize, iconSize)).toList(),
           ),
         ],
       ),
@@ -189,7 +303,7 @@ class MakawHomePortalPage extends StatelessWidget {
     ];
   }
 
-  Widget _buildGridTile(LauncherItem item) {
+  Widget _buildGridTile(BuildContext context, LauncherItem item, double tileSize, double iconSize) {
     return InkWell(
       onTap: item.onTap,
       borderRadius: BorderRadius.circular(16),
@@ -197,23 +311,23 @@ class MakawHomePortalPage extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 52,
-            height: 52,
+            width: tileSize,
+            height: tileSize,
             decoration: BoxDecoration(
               color: const Color(0xFF334155),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(item.icon, color: item.accentColor, size: 24),
+            child: Icon(item.icon, color: item.accentColor, size: iconSize),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             item.title,
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white70,
-              fontSize: 12,
+              fontSize: Responsive.isDesktop(context) ? 13 : 12,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -222,12 +336,12 @@ class MakawHomePortalPage extends StatelessWidget {
     );
   }
 
-  Widget _buildAiAssistantBanner() {
+  Widget _buildAiAssistantBanner(BuildContext context) {
     return InkWell(
       onTap: onOpenAiAssistant,
       borderRadius: BorderRadius.circular(24),
       child: Container(
-        height: 64,
+        height: Responsive.isDesktop(context) ? 72 : 64,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
@@ -315,6 +429,63 @@ class MakawHomePortalPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeatureHighlights(BuildContext context) {
+    final highlights = [
+      (Icons.bolt, 'Fast browsing', 'Blazing ad & tracker blocking'),
+      (Icons.security, 'Stealth mode', 'One-tap incognito browsing'),
+      (Icons.cloud_queue, 'Cloud sync', 'Projects & snippets everywhere'),
+    ];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Why Makaw',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ...highlights.map((h) => Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF334155),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(h.$1, color: const Color(0xFF38BDF8), size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(h.$2, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                      Text(h.$3, style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )),
         ],
       ),
     );
