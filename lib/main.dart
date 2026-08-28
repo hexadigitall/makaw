@@ -65,6 +65,7 @@ import 'core/widgets/responsive.dart';
 import 'core/widgets/adaptive_container.dart';
 import 'core/widgets/adaptive_modal.dart';
 import 'core/widgets/adaptive_action_button.dart';
+import 'features/portal/presentation/pages/makaw_home_portal_page.dart';
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 
@@ -529,6 +530,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       case 'media': return _buildMediaHubPage();
       case 'images': return _buildImagePage();
       case 'documents': return _buildDocumentPage();
+      case 'files': return _buildDocumentPage();
       default: return null;
     }
   }
@@ -3154,10 +3156,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   // ─── Mobile Bottom Navigation Bar ──────────────────────────────────────────
   int _bottomNavIndex = 0;
   static const _bottomNavItems = [
-    (Icons.language, 'Browser'),
+    (Icons.grid_view_rounded, 'Home'),
     (Icons.code, 'Studio'),
-    (Icons.music_note, 'Music'),
-    (Icons.videocam, 'Videos'),
+    (Icons.folder_outlined, 'Files'),
+    (Icons.settings_outlined, 'Settings'),
     (Icons.menu, 'More'),
   ];
 
@@ -3201,10 +3203,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   void _onBottomNavTap(int index) {
     setState(() => _bottomNavIndex = index);
     switch (index) {
-      case 0: _switchToView('browser'); break;
+      case 0: _goToMakawHome(); break;
       case 1: _switchToView('studio'); break;
-      case 2: _switchToView('music'); break;
-      case 3: _switchToView('player'); break;
+      case 2: _scaffoldKey.currentState?.openDrawer(); break;
+      case 3: _switchToView('documents'); break;
       case 4: _scaffoldKey.currentState?.openDrawer(); break;
     }
   }
@@ -4897,198 +4899,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ]),
       );
     }
-    // ─── Makaw Home: full landing with branding, omnibox, shortcuts, AI, media, news ─────
-    return RefreshIndicator(
-      onRefresh: _refreshNewsFeed,
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        child: Column(
-        children: [
-          SizedBox(height: 16),
-          Text('Makaw',
-            style: TextStyle(
-              fontFamily: 'Outfit',
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 42,
-              fontWeight: FontWeight.w500,
-              letterSpacing: -0.5,
-            )),
-          SizedBox(height: 24),
-          omnibox,
-          SizedBox(height: 20),
-          shortcuts,
-          SizedBox(height: 20),
-          // AI assistant
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: InkWell(
-              onTap: _showAIChat,
-              borderRadius: BorderRadius.circular(24),
-              child: Container(
-                width: double.infinity,
-                padding: EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF4285F4), Color(0xFF9B59B6)],
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.auto_awesome, color: Colors.white, size: 22),
-                    SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('AI Assistant', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                        Text('Powered by Gemini', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                      ],
-                    ),
-                    Spacer(),
-                    Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 14),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          SizedBox(height: 20),
-          // ─── Media Players on Home ─────────────────────────────────────
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _switchToView('music'),
-                    child: Container(
-                      padding: EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.music_note, color: kPrimaryBlue, size: 22),
-                              SizedBox(width: 8),
-                              Text('Music', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                            ],
-                          ),
-                          SizedBox(height: 10),
-                          if (_musicService.currentSong != null) ...[
-                            Text(_musicService.currentSong!.displayTitle,
-                              style: TextStyle(color: Colors.white70, fontSize: 12),
-                              overflow: TextOverflow.ellipsis, maxLines: 1),
-                            Text(_musicService.currentSong!.displayArtist,
-                              style: TextStyle(color: kTextTertiary, fontSize: 11),
-                              overflow: TextOverflow.ellipsis, maxLines: 1),
-                            SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children: [
-                                IconButton(
-                                  icon: Icon(Icons.skip_previous, color: kPrimaryBlue, size: 18),
-                                  constraints: BoxConstraints(minWidth: 28, minHeight: 28),
-                                  padding: EdgeInsets.zero,
-                                  onPressed: () => _musicService.previousSong(),
-                                ),
-                                IconButton(
-                                  icon: Icon(
-                                    _musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                    color: kPrimaryBlue, size: 24,
-                                  ),
-                                  constraints: BoxConstraints(minWidth: 28, minHeight: 28),
-                                  padding: EdgeInsets.zero,
-                                  onPressed: () => _musicService.togglePlayPause(),
-                                ),
-                                IconButton(
-                                  icon: Icon(Icons.skip_next, color: kPrimaryBlue, size: 18),
-                                  constraints: BoxConstraints(minWidth: 28, minHeight: 28),
-                                  padding: EdgeInsets.zero,
-                                  onPressed: () => _musicService.nextSong(),
-                                ),
-                              ],
-                            ),
-                          ] else ...[
-                            Text('No music playing',
-                              style: TextStyle(color: kTextTertiary, fontSize: 12)),
-                            SizedBox(height: 4),
-                            Text('${_musicService.allSongs.length} songs',
-                              style: TextStyle(color: kTextTertiary, fontSize: 11)),
-                            SizedBox(height: 8),
-                            Container(
-                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: kPrimaryBlue.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text('Open Player', style: TextStyle(color: kPrimaryBlue, fontSize: 11, fontWeight: FontWeight.w600)),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _switchToView('player'),
-                    child: Container(
-                      padding: EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.videocam, color: kDanger, size: 22),
-                              SizedBox(width: 8),
-                              Text('Videos', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                            ],
-                          ),
-                          SizedBox(height: 10),
-                          Text('${_videoService.allVideos.length} videos',
-                            style: TextStyle(color: kTextTertiary, fontSize: 12)),
-                          SizedBox(height: 4),
-                          Text('${_videoService.folders.length} folders',
-                            style: TextStyle(color: kTextTertiary, fontSize: 11)),
-                          SizedBox(height: 8),
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: kDanger.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text('Open Player', style: TextStyle(color: kDanger, fontSize: 11, fontWeight: FontWeight.w600)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(height: 8),
-          // News Feed
-          if (_newsFeedService != null)
-            NewsFeedWidget(
-              key: _newsFeedKey,
-              service: _newsFeedService!,
-              onNavigate: (url) => _navigateOrOpenNewTab(url),
-              scrollController: _newsFeedScrollController,
-            ),
-          SizedBox(height: 24),
-        ],
-      ),
-      ),
+    // ─── Makaw Home Portal: master launcher hub ─────────────────────────────
+    return MakawHomePortalPage(
+      onNavigate: (route) => _switchToView(route),
+      onOpenQrScanner: () => _scanQRCode(),
+      onToggleIncognito: () => _goIncognitoNtp(),
+      onOpenAiAssistant: () => _showAIChat(),
     );
   }
 

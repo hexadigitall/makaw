@@ -50,3 +50,6 @@ android/.kotlin/
 # Generated
 *.g.dart
 *.freezed.dart
+
+# Design mockups
+proj-imgs/
