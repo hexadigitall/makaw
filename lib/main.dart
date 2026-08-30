@@ -70,6 +70,18 @@ import 'features/portal/presentation/pages/universal_search_palette.dart';
 import 'features/portal/presentation/pages/desktop_portal_shell.dart';
 import 'features/portal/presentation/pages/ecosystem_hub_page.dart';
 import 'features/portal/domain/ecosystem.dart';
+import 'core/storage/makaw_manager_db.dart';
+import 'core/storage/bookmark_service.dart';
+import 'core/storage/settings_service.dart';
+import 'core/storage/lyric_service.dart';
+import 'core/storage/subtitle_service.dart';
+import 'core/storage/file_recents_service.dart';
+import 'features/manager/presentation/pages/bookmarks_page.dart';
+import 'features/manager/presentation/pages/passwords_page.dart';
+import 'features/manager/presentation/pages/downloads_page.dart';
+import 'features/manager/presentation/pages/settings_page.dart';
+import 'features/manager/presentation/pages/lyrics_page.dart';
+import 'features/manager/presentation/pages/subtitles_page.dart';
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 
@@ -529,13 +541,18 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       case 'git': return _buildFeatureScaffold('Git', Icons.account_tree, _buildGitTab());
       case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
       case 'terminal': return _buildFeatureScaffold('Terminal', Icons.terminal, _buildTerminalTab());
-      case 'downloads': return _buildFeatureScaffold('Downloads', Icons.download, _buildDownloadsTab());
+      case 'downloads': return const DownloadsPage();
       case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => Navigator.of(context).pop());
       case 'music': return _buildMusicPlayerPage();
       case 'media': return _buildMediaHubPage();
       case 'images': return _buildImagePage();
       case 'documents': return _buildDocumentPage();
       case 'files': return _buildDocumentPage();
+      case 'bookmarks': return const BookmarksPage();
+      case 'passwords': return const PasswordsPage();
+      case 'lyrics': return const LyricsPage();
+      case 'subtitles': return const SubtitlesPage();
+      case 'settings': return const SettingsPage();
       default: return null;
     }
   }
@@ -1218,10 +1235,40 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       },
     );
     HistoryService.init(_db!);
+    await _initManagerDb();
     _preseedGoogleConsentCookies();
     _loadProjects();
     _loadHistory();
     HistoryService.pruneOldEntries().catchError((_) {});
+  }
+
+  /// Initialize the centralized manager DB and register each manager service.
+  Future<void> _initManagerDb() async {
+    if (kIsWeb) return;
+    try {
+      await MakawManagerDb.init();
+      final mgr = MakawManagerDb.db;
+      BookmarkService.init(mgr);
+      SettingsService.init(mgr);
+      LyricService.init(mgr);
+      SubtitleService.init(mgr);
+      FileRecentsService.init(mgr);
+      await _migrateLegacyShortcuts();
+    } catch (_) {}
+  }
+
+  /// Migrate the legacy `browser_shortcuts` prefs into the bookmarks table,
+  /// running once and only when shortcuts exist that aren't yet bookmarked.
+  Future<void> _migrateLegacyShortcuts() async {
+    try {
+      await _loadShortcuts();
+      final anyBookmarks = (await BookmarkService.getAll(limit: 1)).isNotEmpty;
+      if (anyBookmarks) return;
+      final migrated = await BookmarkService.migrateShortcuts(_shortcuts);
+      if (migrated > 0) {
+        _showToast('Imported $migrated saved bookmarks');
+      }
+    } catch (_) {}
   }
 
   Future<void> _preseedGoogleConsentCookies() async {

@@ -9,6 +9,7 @@ import 'package:palette_generator/palette_generator.dart';
 import '../../data/services/music_player_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import 'music_playlist_page.dart';
+import '../../../../core/storage/lyric_service.dart';
 
 class _LrcLine {
   final Duration time;
@@ -139,6 +140,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
       final parsed = _parseLrc(raw);
       if (parsed.isNotEmpty) {
         setState(() { _lrcLines = parsed; _hasLrc = true; _lyricsLoading = false; });
+        _persistCurrentLyrics();
         return;
       }
     }
@@ -160,11 +162,13 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
           final parsed = _parseLrc(synced);
           if (parsed.isNotEmpty) {
             setState(() { _lrcLines = parsed; _hasLrc = true; _lyricsLoading = false; });
+            _persistCurrentLyrics();
             return;
           }
         }
         if (plain != null && plain.isNotEmpty) {
           setState(() { _lyricsText = plain; _lyricsLoading = false; });
+          _persistCurrentLyrics();
           return;
         }
       }
@@ -179,6 +183,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
         final lyrics = data['lyrics'] as String?;
         if (lyrics != null && lyrics.isNotEmpty) {
           setState(() { _lyricsText = lyrics; _lyricsLoading = false; });
+          _persistCurrentLyrics();
           return;
         }
       }
@@ -223,6 +228,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
               } else {
                 setState(() { _lyricsText = text; _lrcLines = []; _hasLrc = false; });
               }
+              _persistCurrentLyrics();
               Navigator.pop(ctx);
             },
             child: const Text('Save', style: TextStyle(color: Color(0xFF818CF8))),
@@ -230,6 +236,45 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
         ],
       ),
     );
+  }
+
+  /// Persist the currently-loaded lyrics into the Lyrics manager so they appear
+  /// in the Lyrics hub.
+  void _persistCurrentLyrics() {
+    final song = _service.currentSong;
+    if (song == null) return;
+    final songId = '${song.displayTitle} — ${song.displayArtist}';
+    if (_hasLrc && _lrcLines.isNotEmpty) {
+      try {
+        final lines = _lrcLines.map((l) => Lyric(
+              songId: songId,
+              songTitle: song.displayTitle,
+              artist: song.displayArtist,
+              text: l.text,
+              startMs: l.time.inMilliseconds,
+              endMs: _lrcLines.length > _lrcLines.indexOf(l)
+                  ? (_lrcLines[_lrcLines.indexOf(l) + 1].time.inMilliseconds - 1).clamp(l.time.inMilliseconds, 1 << 62)
+                  : l.time.inMilliseconds + 3000,
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            )).toList();
+        LyricService.saveTimedLyrics(
+          songId: songId,
+          songTitle: song.displayTitle,
+          artist: song.displayArtist,
+          lines: lines,
+        );
+      } catch (_) {}
+    } else if (!_hasLrc && _lyricsText.isNotEmpty && _lyricsText != 'No lyrics found' && _lyricsText != 'Could not fetch lyrics') {
+      try {
+        LyricService.saveFullLyric(
+          songId: songId,
+          songTitle: song.displayTitle,
+          artist: song.displayArtist,
+          text: _lyricsText,
+        );
+      } catch (_) {}
+    }
   }
 
   // ─── LRC-aware now-playing body ────────────────────────────────────────────

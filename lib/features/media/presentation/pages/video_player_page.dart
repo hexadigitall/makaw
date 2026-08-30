@@ -12,6 +12,7 @@ import 'package:video_player/video_player.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../data/services/video_player_service.dart';
 import '../../../../app/providers/service_providers.dart';
+import '../../../../core/storage/subtitle_service.dart';
 
 // ─── Subtitle data ───────────────────────────────────────────────────────────
 class _SubtitleEntry {
@@ -994,6 +995,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
             _subtitleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
               if (mounted) setState(() {});
             });
+            _persistSubtitles();
             return;
           }
         } catch (_) {}
@@ -1028,6 +1030,29 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
       _subtitleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
         if (mounted) setState(() {});
       });
+      _persistSubtitles();
+    } catch (_) {}
+  }
+
+  /// Persist the currently-loaded subtitles into the Subtitles manager so they
+  /// appear in the Subtitles hub.
+  void _persistSubtitles() {
+    final mediaId = widget.filePath ?? widget.url ?? (_subtitlePath.isNotEmpty ? _subtitlePath : null);
+    if (mediaId == null || mediaId.isEmpty || _subtitles.isEmpty) return;
+    final mediaTitle = widget.title.isNotEmpty
+        ? widget.title
+        : mediaId.split('\\').last.split('/').last.replaceAll(RegExp(r'\.[^.]+$'), '');
+    try {
+      final cues = _subtitles.map((s) => SubtitleCue(
+            mediaId: mediaId,
+            mediaTitle: mediaTitle,
+            text: s.text,
+            startMs: s.start.inMilliseconds,
+            endMs: s.end.inMilliseconds,
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          )).toList();
+      SubtitleService.saveCues(mediaId, mediaTitle, cues);
     } catch (_) {}
   }
 
@@ -1198,6 +1223,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
                           });
                           _subtitleTimer?.cancel();
                           _subtitleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) { if (mounted) setState(() {}); });
+                          _persistSubtitles();
                         } catch (e) {
                           _toast('Error: $e');
                         }
@@ -1397,6 +1423,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
           });
           _subtitleTimer?.cancel();
           _subtitleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) { if (mounted) setState(() {}); });
+          _persistSubtitles();
         }
         if (sheetCtx.mounted) Navigator.pop(sheetCtx);
         _toast('Subtitle downloaded');

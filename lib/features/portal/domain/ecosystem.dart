@@ -57,6 +57,8 @@ class Ecosystems {
       EcosystemTool('player', 'Video Player', Icons.play_circle_rounded, Color(0xFFF87171)),
       EcosystemTool('images', 'Gallery', Icons.photo_library_rounded, Color(0xFF38BDF8)),
       EcosystemTool('sniffer', 'Media Sniffer', Icons.wifi_tethering_rounded, Color(0xFF22D3EE)),
+      EcosystemTool('lyrics', 'Lyrics', Icons.lyrics_rounded, Color(0xFFF472B6)),
+      EcosystemTool('subtitles', 'Subtitles', Icons.subtitles_rounded, Color(0xFFF87171)),
     ],
   );
 
@@ -80,6 +82,8 @@ class Ecosystems {
       EcosystemTool('browser', 'Browser', Icons.language_rounded, Color(0xFF00A7C2)),
       EcosystemTool('history', 'History', Icons.history_rounded, Color(0xFF94A3B8)),
       EcosystemTool('downloads', 'Downloads', Icons.download_rounded, Color(0xFFFB923C)),
+      EcosystemTool('bookmarks', 'Bookmarks', Icons.bookmarks_rounded, Color(0xFFFBBF24)),
+      EcosystemTool('passwords', 'Passwords', Icons.password_rounded, Color(0xFFF472B6)),
     ],
   );
 
@@ -105,6 +109,17 @@ class Ecosystems {
     ],
   );
 
+  static const Ecosystem settings = Ecosystem(
+    'settings',
+    'Settings',
+    Icons.settings_rounded,
+    Color(0xFF94A3B8),
+    [
+      EcosystemTool('settings', 'Settings', Icons.settings_rounded, Color(0xFF94A3B8)),
+      EcosystemTool('cloud', 'Cloud Sync', Icons.cloud_sync_rounded, Color(0xFF60A5FA)),
+    ],
+  );
+
   static const List<Ecosystem> all = [
     codeStudio,
     terminal,
@@ -113,5 +128,6 @@ class Ecosystems {
     browser,
     cloud,
     files,
+    settings,
   ];
 }
