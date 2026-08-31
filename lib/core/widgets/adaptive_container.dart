@@ -41,7 +41,7 @@ class AdaptiveContainer extends StatelessWidget {
               : Padding(padding: pad, child: child),
         ),
       );
-      if (isDesktop && bg != null) {
+      if (isDesktop) {
         return Container(color: bg, child: content);
       }
       return content;

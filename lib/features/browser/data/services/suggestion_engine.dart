@@ -1,4 +1,3 @@
-import 'dart:math';
 import '../models/suggestion_item.dart';
 
 class SuggestionEngine {
@@ -7,7 +6,6 @@ class SuggestionEngine {
   static const double _titleMatchBonus = 100.0;
   static const double _urlMatchBonus = 80.0;
   static const double _bookmarkBonus = 50.0;
-  static const double _visitCountBonus = 30.0;
 
   static List<SuggestionItem> rank({
     required String query,

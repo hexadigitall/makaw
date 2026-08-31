@@ -1,6 +1,6 @@
 name: makaw
 description: Makaw — Full-featured hybrid browser, code studio & creative platform
-version: 1.0.46+46
+version: 1.0.47+47
 publish_to: 'none'
 
 environment:
@@ -53,7 +53,7 @@ msix_config:
   publisher_display_name: Hexadigitall
   identity_name: com.hexadigitall.makaw
   publisher: CN=Hexadigitall
-  msix_version: 1.0.4.0
+  msix_version: 1.0.47.0
   logo_path: assets/makaw_logo_transparent-correct.png
   capabilities:
     - internetClient

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -120,12 +120,6 @@ class DownloadService extends ChangeNotifier {
   int get activeCount => activeDownloads.length;
   int get maxSimultaneous => _maxParallel;
 
-  Future<String> _defaultDownloadDir() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final downloadDir = Directory(p.join(dir.path, 'makaw_downloads'));
-    await downloadDir.create(recursive: true);
-    return downloadDir.path;
-  }
 
   String _mimeFromUrl(String url) {
     final u = url.toLowerCase();
@@ -288,8 +282,8 @@ class DownloadService extends ChangeNotifier {
   void cancel(DownloadItem item) {
     item.cancelToken?.cancel('Cancelled by user');
     if (item.savePath != null) {
-      File('${item.savePath!}.part').delete().catchError((_) {});
-      File(item.savePath!).delete().catchError((_) {});
+      File('${item.savePath!}.part').delete().catchError((_) => Directory(''));
+      File(item.savePath!).delete().catchError((_) => Directory(''));
     }
     item.state = DownloadState.paused;
     item.receivedBytes = 0;
@@ -300,8 +294,8 @@ class DownloadService extends ChangeNotifier {
 
   void retry(DownloadItem item) {
     if (item.savePath != null) {
-      File('${item.savePath!}.part').delete().catchError((_) {});
-      File(item.savePath!).delete().catchError((_) {});
+      File('${item.savePath!}.part').delete().catchError((_) => Directory(''));
+      File(item.savePath!).delete().catchError((_) => Directory(''));
     }
     item.state = DownloadState.queued;
     item.progress = 0;
@@ -332,11 +326,13 @@ class DownloadService extends ChangeNotifier {
     }
   }
 
+  @override
   void dispose() {
     _speedTimer?.cancel();
     for (final d in _downloads.where((d) => d.state == DownloadState.downloading)) {
       d.cancelToken?.cancel('Disposed');
     }
+    super.dispose();
   }
 
   Future<void> _saveHistory() async {

@@ -25,27 +25,10 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
   double _progress = 0;
   bool _isLoading = true;
   double _currentFontSize = 16;
-  bool _restoredPosition = false;
 
   @override
   void initState() {
     super.initState();
-    _loadPosition();
-  }
-
-  Future<void> _loadPosition() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final data = prefs.getString('doc_pos_${widget.filePath.hashCode}');
-      if (data != null) {
-        final map = jsonDecode(data) as Map<String, dynamic>;
-        final cfi = map['cfi'] as String?;
-        if (cfi != null && cfi.isNotEmpty) {
-          // Restore to saved CFI position after epub loads
-          _restoredPosition = false;
-        }
-      }
-    } catch (_) {}
   }
 
   Future<void> _savePosition() async {
@@ -144,7 +127,7 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
                 setState(() => _isLoading = false);
               },
               onRelocated: (value) {
-                final p = value?.progress ?? 0;
+                final p = value.progress;
                 setState(() => _progress = p);
                 // Save position periodically (every ~5% change)
                 if ((p * 100).round() % 5 == 0) _savePosition();

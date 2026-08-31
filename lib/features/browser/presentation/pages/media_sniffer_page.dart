@@ -262,7 +262,6 @@ class _MediaSnifferPageState extends State<MediaSnifferPage> {
                       spacing: 6,
                       runSpacing: 4,
                       children: item.formats.map((f) {
-                        const selected = false;
                         return GestureDetector(
                           onTap: () {
                             widget.onDownload(MediaItem(url: f.url, type: item.type, title: item.title));
@@ -271,11 +270,11 @@ class _MediaSnifferPageState extends State<MediaSnifferPage> {
                           child: Container(
                             padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: selected ? _kAccentTeal.withValues(alpha: 0.3) : Color(0xFF374151),
+                              color: Color(0xFF374151),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: selected ? _kAccentTeal : Color(0xFF4B5563), width: 0.5),
+                              border: Border.all(color: Color(0xFF4B5563), width: 0.5),
                             ),
-                            child: Text(f.label, style: TextStyle(fontSize: 11, color: selected ? _kAccentTeal : Color(0xFF93C5FD))),
+                            child: Text(f.label, style: TextStyle(fontSize: 11, color: Color(0xFF93C5FD))),
                           ),
                         );
                       }).toList(),

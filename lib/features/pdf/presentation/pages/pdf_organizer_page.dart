@@ -120,14 +120,6 @@ class _PdfOrganizerPageState extends State<PdfOrganizerPage> {
     });
   }
 
-  void _extractSelected() {
-    if (_selectedPages.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Extracting ${_selectedPages.length} page(s)...')),
-    );
-    // Extraction would require native PDF writing — show placeholder
-  }
-
   Future<void> _saveChanges() async {
     if (!_isModified) return;
     ScaffoldMessenger.of(context).showSnackBar(

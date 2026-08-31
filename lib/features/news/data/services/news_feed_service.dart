@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
@@ -29,6 +30,7 @@ class NewsFeedService {
   String? _countryCode;
   final Map<String, List<FeedCard>> _cardCache = {};
   final Map<String, DateTime> _lastFetch = {};
+  final Map<String, String> _etags = {};
   final Map<String, StreamController<List<FeedCard>>> _feedControllers = {};
   final List<_AnalyticsEvent> _pendingAnalytics = [];
   Timer? _analyticsTimer;
@@ -43,7 +45,7 @@ class NewsFeedService {
     final path = p.join(dbPath, 'makaw_feed.db');
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE IF NOT EXISTS feed_cards (
@@ -73,9 +75,28 @@ class NewsFeedService {
             timestamp INTEGER NOT NULL
           )
         ''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS feed_metadata (
+            feed_url TEXT PRIMARY KEY,
+            etag TEXT,
+            last_fetched INTEGER NOT NULL
+          )
+        ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS feed_metadata (
+              feed_url TEXT PRIMARY KEY,
+              etag TEXT,
+              last_fetched INTEGER NOT NULL
+            )
+          ''');
+        }
       },
     );
     await _loadCardsFromDb();
+    await _loadEtagsFromDb();
     await _deleteExpiredCards();
     _startAnalyticsTimer();
   }
@@ -146,6 +167,47 @@ class NewsFeedService {
       'fetched_at': fetchedAt,
       'expires_at': expiresAt,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> _loadEtagsFromDb() async {
+    final db = _db;
+    if (db == null) return;
+    try {
+      final rows = await db.query('feed_metadata');
+      for (final row in rows) {
+        final url = row['feed_url'] as String?;
+        final etag = row['etag'] as String?;
+        if (url != null && etag != null && etag.isNotEmpty) _etags[url] = etag;
+      }
+    } catch (_) {}
+  }
+
+  Future<String?> _storedEtag(String feedUrl) async {
+    if (_etags.containsKey(feedUrl)) return _etags[feedUrl];
+    final db = _db;
+    if (db == null) return null;
+    try {
+      final rows = await db.query('feed_metadata',
+          where: 'feed_url = ?', whereArgs: [feedUrl], limit: 1);
+      final etag = rows.firstOrNull?['etag'] as String?;
+      if (etag != null && etag.isNotEmpty) _etags[feedUrl] = etag;
+      return etag;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _storeEtag(String feedUrl, String etag) async {
+    _etags[feedUrl] = etag;
+    final db = _db;
+    if (db == null) return;
+    try {
+      await db.insert('feed_metadata', {
+        'feed_url': feedUrl,
+        'etag': etag,
+        'last_fetched': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    } catch (_) {}
   }
 
   Future<void> _deleteExpiredCards() async {
@@ -292,50 +354,37 @@ class NewsFeedService {
     );
     if (cat == null) return;
     try {
-      final response = await http.get(Uri.parse(cat.feedUrl));
+      final headers = <String, String>{'User-Agent': 'MakawBrowser/1.0'};
+      final etag = await _storedEtag(cat.feedUrl);
+      if (etag != null) headers['If-None-Match'] = etag;
+      final response = await http.get(Uri.parse(cat.feedUrl), headers: headers).timeout(const Duration(seconds: 8));
+      if (response.statusCode == 304) {
+        _lastFetch[categoryName] = DateTime.now();
+        return;
+      }
       if (response.statusCode != 200) return;
-      final feed = RssFeed.parse(response.body);
+      final newEtag = response.headers['etag'];
+      if (newEtag != null && newEtag.isNotEmpty) {
+        await _storeEtag(cat.feedUrl, newEtag);
+      }
       final newCards = <FeedCard>[];
       final existingIds = _cardCache[categoryName]?.map((c) => c.id).toSet() ?? {};
       final now = DateTime.now();
-      for (final item in feed.items ?? []) {
-        final cardId = FeedCard.generateId(item.link ?? '', categoryName, item.title?.trim() ?? '');
+      final rawItems = await Isolate.run(() => _parseFeedItems(response.body));
+      for (final raw in rawItems) {
+        final title = raw['title'] as String? ?? '';
+        final link = raw['link'] as String? ?? '';
+        if (title.isEmpty || link.isEmpty) continue;
+        final cardId = FeedCard.generateId(link, categoryName, title);
         if (existingIds.contains(cardId)) continue;
-        String? imageUrl;
-        if (item.media?.contents != null && item.media!.contents!.isNotEmpty) {
-          imageUrl = item.media!.contents!.first.url;
-        }
-        if (imageUrl == null && item.media?.thumbnails != null && item.media!.thumbnails!.isNotEmpty) {
-          imageUrl = item.media!.thumbnails!.first.url;
-        }
-        if (imageUrl == null && item.enclosure != null) {
-          final enc = item.enclosure!;
-          if (enc.url != null && (enc.type == null || enc.type!.startsWith('image/'))) {
-            imageUrl = enc.url;
-          }
-        }
-        if (imageUrl == null && item.description != null) {
-          final imgMatch = RegExp(r'<img[^>]+src="([^"]+)"').firstMatch(item.description!);
-          if (imgMatch != null) {
-            imageUrl = imgMatch.group(1);
-            if (imageUrl!.startsWith('//')) imageUrl = 'https:$imageUrl';
-          }
-          if (imageUrl == null) {
-            final imgMatch2 = RegExp(r"<img[^>]+src='([^']+)'").firstMatch(item.description!);
-            if (imgMatch2 != null) {
-              imageUrl = imgMatch2.group(1);
-              if (imageUrl!.startsWith('//')) imageUrl = 'https:$imageUrl';
-            }
-          }
-        }
         final data = <String, dynamic>{
-          'title': item.title?.trim() ?? 'Untitled',
-          'url': item.link ?? '',
-          'summary': item.description?.trim(),
-          'imageUrl': imageUrl,
+          'title': title,
+          'url': link,
+          'summary': raw['description'],
+          'imageUrl': raw['imageUrl'],
           'source': categoryName,
           'publisher': categoryName,
-          'pub_date': item.pubDate?.toIso8601String(),
+          'pub_date': raw['pubDate'],
         };
         final card = FeedCard(
           id: cardId,
@@ -371,6 +420,52 @@ class NewsFeedService {
     if (db != null) await db.delete('feed_cards');
     _lastFetch.clear();
     await refreshAll();
+  }
+
+  /// Parses an RSS/Atom XML body into primitive maps. Runs inside an isolate
+  /// so large buffers never jank the UI; the result only contains sendable
+  /// primitives (strings / nullable strings).
+  static List<Map<String, Object?>> _parseFeedItems(String body) {
+    final out = <Map<String, Object?>>[];
+    try {
+      final feed = RssFeed.parse(body);
+      for (final item in feed.items ?? []) {
+        String? imageUrl;
+        if (item.media?.contents != null && item.media!.contents!.isNotEmpty) {
+          imageUrl = item.media!.contents!.first.url;
+        }
+        if (imageUrl == null && item.media?.thumbnails != null && item.media!.thumbnails!.isNotEmpty) {
+          imageUrl = item.media!.thumbnails!.first.url;
+        }
+        if (imageUrl == null && item.enclosure != null) {
+          final enc = item.enclosure!;
+          if (enc.url != null && (enc.type == null || enc.type!.startsWith('image/'))) {
+            imageUrl = enc.url;
+          }
+        }
+        if (imageUrl == null && item.description != null) {
+          for (final pattern in [
+            RegExp(r'<img[^>]+src="([^"]+)"'),
+            RegExp(r"<img[^>]+src='([^']+)'"),
+          ]) {
+            final m = pattern.firstMatch(item.description!);
+            if (m != null) {
+              imageUrl = m.group(1);
+              if (imageUrl!.startsWith('//')) imageUrl = 'https:$imageUrl';
+              break;
+            }
+          }
+        }
+        out.add({
+          'title': item.title?.trim() ?? '',
+          'link': item.link ?? '',
+          'description': item.description?.trim(),
+          'pubDate': item.pubDate?.toIso8601String(),
+          'imageUrl': imageUrl,
+        });
+      }
+    } catch (_) {}
+    return out;
   }
 
   // ---- Legacy API (backwards compat) ----

@@ -146,19 +146,6 @@ class MusicPlayerService extends ChangeNotifier {
 
   static const _metadataChannel = MethodChannel('com.hexadigitall.makaw/metadata');
 
-  Future<Map<String, dynamic>?> _extractFileMetadata(String filePath) async {
-    try {
-      final result = await _metadataChannel.invokeMethod<List<dynamic>>(
-        'extractMetadataBatch',
-        {'paths': [filePath]},
-      );
-      if (result != null && result.isNotEmpty) {
-        return Map<String, dynamic>.from(result[0] as Map);
-      }
-    } catch (_) {}
-    return null;
-  }
-
   String _cleanTitle(String raw) {
     final name = raw.split('.').first.trim();
     return name.replaceAll(RegExp(r'^[\d\s\-\_\.]+'), '').trim();

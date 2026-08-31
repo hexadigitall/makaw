@@ -14,7 +14,6 @@ class AdBlockerService {
   // ── Domain sets (Set for O(1) lookup) ──────────────────────────────────────
   final Set<String> _hardcodedDomains = {};
   final Set<String> _dynamicDomains = {};
-  final Set<String> _pathPatterns = {};
   bool _loaded = false;
   bool get loaded => _loaded;
 
@@ -22,60 +21,6 @@ class AdBlockerService {
   void Function()? onBlacklistUpdated;
 
   // ── Hardcoded ad network domains (full domain only, no bare substrings) ───
-  static const _rawHardcodedDomains = [
-    // Pop-under / pop-up networks
-    'popads.net', 'popcash.net', 'popmyads.com', 'propu.sh',
-    'exoclick.com', 'exdynsrv.com', 'exoclicktoolbar.com',
-    'adsterra.com', 'propellerads.com', 'juicyads.com',
-    'hilltopads.com', 'clickadu.com', 'clickaine.com',
-    'ad-maven.com', 'popunder.net', 'plugrush.com',
-    'revenuehits.com', 'adcash.com', 'adspirit.de',
-    'bidvertiser.com', 'bidgear.com', 'admixer.com',
-    'traffichunt.com', 'trafficstars.com', 'trafficforce.com',
-    'trafficfactory.com', 'trafficjunky.com',
-    'galaksion.com', 'monetag.com', 'clickadilla.com',
-    // DSP / RTB / ad exchanges
-    'adnxs.com', 'criteo.com', 'pubmatic.com',
-    'rubiconproject.com', 'casalemedia.com', 'openx.net',
-    'bidswitch.net', 'smartadserver.com', 'indexww.com',
-    'sharethrough.com', 'connatix.com', 'moatads.com',
-    'doubleverify.com', 'adsafeprotected.com', 'spotx.tv',
-    'outbrain.com', 'taboola.com', 'revcontent.com', 'mgid.com',
-    'teads.tv', 'teads.com', 'adform.net', 'adform.com',
-    'serving-sys.com', 'doubleclick.net', 'googlesyndication.com',
-    'googleadservices.com', 'pagead2.googlesyndication.com',
-    'adsrvr.org', 'demdex.net', 'fastclick.net',
-    'mediaforge.net', 'mathtag.com', 'turn.com', 'lijit.com',
-    'adskeeper.com', 'viralcpx.net', 'crwdcntrl.net',
-    'mediaplex.com', 'adlog.com',
-    // Mobile ad SDKs (in-app)
-    'adcolony.com', 'inmobi.com', 'smaato.net', 'mopub.com',
-    'startapp.com', 'applovin.com', 'leadbolt.com',
-    'chartboost.com', 'vungle.com', 'fyber.com',
-    'inner-active.com', 'matomy.com', 'belboon.com',
-    'adbutler.com', 'bannersbroker.com',
-    // Push notification / malvert adware
-    'notifpush.com', 'pushwoosh.com', 'cdn.pushame.com', 'pusham.pro',
-    'onesignal.com', 'cdn.pnotop.com',
-    // Obscure / rotating domains from filter lists
-    'ufiler.pro', 'bngpt.com', 'trklp.com',
-    'dpirw.com', 'mekadr.com', 'bcsrot.ru',
-    'runtic.com', 'adfox.ru', 'begun.ru', 'ruboard.ru',
-    'monuanceli.com', 'surmounttemperbooklet.com',
-    'lievestcrasser.com', 'responservbzh.icu',
-    'acscdn.com', 'aclib.js',
-    'd33f51dyacx7bd.cloudfront.net', 'dpjf9a2rbjbvp.cloudfront.net',
-    'softonixs.xyz', 'dolepl.com', 'vaost.net', 'bemobtrk.com',
-    'adsteroid.pro', 'adspend001.net',
-    // Betting / gambling
-    '1xbet.com', '1xbet.co', '1xbet.ng',
-    'bet9ja.com', 'betway.com', 'bet365.com',
-    'sportybet.com', 'merrybet.com', 'nairabet.com',
-    // Adult
-    'pornhub.com', 'xvideos.com', 'xhamster.com',
-    'redtube.com', 'youporn.com', 'spankbang.com',
-  ];
-
   // ── Path-based patterns (require full URL match, not just domain) ─────────
   static const _rawPathPatterns = [
     '/redirect?', '/out.php', '/go.php', '/click?',

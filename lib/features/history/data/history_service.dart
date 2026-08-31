@@ -4,7 +4,6 @@ import '../domain/history_item.dart';
 class HistoryService {
   static Database? _db;
 
-  static const int _maxEntries = 2000;
   static const int _pruneDays = 90;
 
   static void init(Database db) {

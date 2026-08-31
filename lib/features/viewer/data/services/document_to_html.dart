@@ -29,13 +29,6 @@ class DocumentToHtml {
 
   static String _e(String s) => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
-  static XmlElement? _f(XmlElement p, String n) {
-    for (final c in p.childElements) {
-      if (c.name.local == n) return c;
-    }
-    return null;
-  }
-
   static List<XmlElement> _fs(XmlElement p, String n) {
     final r = <XmlElement>[];
     for (final c in p.childElements) {
@@ -45,56 +38,12 @@ class DocumentToHtml {
     return r;
   }
 
-  static List<XmlElement> _dc(XmlElement p, String n) {
-    final r = <XmlElement>[];
-    for (final c in p.childElements) {
-      if (c.name.local == n) r.add(c);
-    }
-    return r;
-  }
-
-  static String? _a(XmlElement? e, String n) => e?.getAttribute('w:$n') ?? e?.getAttribute(n);
-
-  static int? _ai(XmlElement? e, String n) => int.tryParse(_a(e, n) ?? '');
-
-  static String _twips(String? v) => '${((int.tryParse(v ?? '') ?? 0) / 15).round()}px';
-
-  static String _align(String? v) {
-    switch (v?.toLowerCase()) {
-      case 'center': return 'center';
-      case 'right': return 'right';
-      case 'both': case 'distribute': return 'justify';
-      default: return 'left';
-    }
-  }
-
   static String _imgMime(String path) {
     if (path.endsWith('.png')) return 'image/png';
     if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg';
     if (path.endsWith('.gif')) return 'image/gif';
     if (path.endsWith('.bmp')) return 'image/bmp';
     return 'image/png';
-  }
-
-  static String _roman(int n) {
-    if (n <= 0 || n > 3999) return '$n';
-    final v = [1000,900,500,400,100,90,50,40,10,9,5,4,1];
-    final s = ['M','CM','D','CD','C','XC','L','XL','X','IX','V','IV','I'];
-    final buf = StringBuffer();
-    for (var i = 0; i < v.length; i++) { while (n >= v[i]) { buf.write(s[i]); n -= v[i]; } }
-    return buf.toString();
-  }
-
-  static String _numFmt(int n, String? fmt) {
-    switch (fmt) {
-      case 'decimal': return '$n';
-      case 'lowerLetter': return String.fromCharCode(96 + ((n - 1) % 26) + 1);
-      case 'upperLetter': return String.fromCharCode(64 + ((n - 1) % 26) + 1);
-      case 'lowerRoman': return _roman(n).toLowerCase();
-      case 'upperRoman': return _roman(n);
-      case 'bullet': return '•';
-      default: return '$n';
-    }
   }
 
   // ── DOCX via Mammoth.js ───────────────────────────────────────
@@ -194,8 +143,8 @@ class DocumentToHtml {
     final arc = ZipDecoder().decodeBytes(bytes);
     final images = <String, Uint8List>{};
     for (final f in arc) {
-      if (f.name.startsWith('Pictures/') && f.content is List<int>) {
-        images[f.name] = Uint8List.fromList(f.content as List<int>);
+      if (f.name.startsWith('Pictures/')) {
+        images[f.name] = Uint8List.fromList(f.content);
       }
     }
     final cf = arc.files.where((f) => f.name == 'content.xml').firstOrNull;

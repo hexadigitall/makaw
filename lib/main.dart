@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'features/browser/data/services/password_service.dart';
 import 'features/browser/data/services/import_service.dart';
 import 'features/browser/data/services/ad_blocker_service.dart';
@@ -13,7 +12,6 @@ import 'features/viewer/presentation/pages/document_viewer_page.dart';
 import 'features/history/data/history_service.dart';
 import 'features/history/domain/history_item.dart';
 import 'features/history/presentation/pages/makaw_history_page.dart';
-import 'features/news/data/services/news_feed_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
@@ -35,12 +33,10 @@ import 'package:share_plus/share_plus.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'features/browser/data/services/content_blocker_service.dart';
 import 'features/browser/presentation/providers/download_service.dart';
 import 'core/services/update_service.dart';
 import 'core/services/media_notification_service.dart';
-import 'features/news/presentation/pages/news_feed_page.dart';
 import 'features/media/presentation/pages/video_player_page.dart';
 import 'features/pdf/presentation/pages/pdf_viewer_page.dart';
 import 'features/viewer/presentation/pages/epub_viewer_page.dart';
@@ -56,15 +52,14 @@ import 'features/documents/presentation/pages/document_page.dart';
 import 'features/browser/domain/entities/entities.dart';
 import 'features/browser/presentation/pages/tab_tray_page.dart';
 import 'features/browser/presentation/pages/qr_scanner_page.dart';
-import 'features/viewer/presentation/pages/folder_video_player_page.dart';
+import 'features/browser/presentation/pages/browser_active_page.dart';
+import 'features/browser/presentation/pages/browser_dashboard_page.dart';
+import 'features/browser/presentation/pages/browser_new_tab_view.dart';
+import 'features/news/data/services/news_feed_service.dart';
 import 'features/browser/presentation/providers/download_manager_provider.dart';
 import 'app/providers/service_providers.dart';
 import 'features/browser/presentation/pages/media_sniffer_page.dart';
-import 'features/browser/presentation/widgets/downloads_widget.dart' as feature;
 import 'core/widgets/responsive.dart';
-import 'core/widgets/adaptive_container.dart';
-import 'core/widgets/adaptive_modal.dart';
-import 'core/widgets/adaptive_action_button.dart';
 import 'features/portal/presentation/pages/makaw_home_portal_page.dart';
 import 'features/portal/presentation/pages/universal_search_palette.dart';
 import 'features/portal/presentation/pages/desktop_portal_shell.dart';
@@ -175,6 +170,14 @@ const kRadiusFull = 999.0;
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 enum ViewMode { home, newTab, typeView, browsing }
+
+/// Top-level browser state machine for the Browser ecosystem home layer.
+///
+/// - [dashboard]: the Browser Hub (Browser Dashboard) — the place the top-left
+///   Home icon always returns to, never the Makaw root portal.
+/// - [newTab]: the idle/focused/typing New Tab surface.
+/// - [browsing]: the live webview browsing surface (omnibox + page).
+enum BrowserSubView { dashboard, newTab, browsing }
 
 class ConflictPart {
   String ours = '';
@@ -384,14 +387,14 @@ class MakawHome extends ConsumerStatefulWidget {
 }
 
 class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserver {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _currentView = 'browser';
   Ecosystem? _activeEcosystem;
   ViewMode _viewMode = ViewMode.home;
+  BrowserSubView _browserSubView = BrowserSubView.dashboard;
+  bool get _isBrowserDashboard => _browserSubView == BrowserSubView.dashboard;
+  bool get _isBrowserNewTab => _browserSubView == BrowserSubView.newTab;
   bool get _showHomeScreen => _viewMode == ViewMode.home || _viewMode == ViewMode.newTab;
   bool get _isMakawHome => _viewMode == ViewMode.home;
-  bool get _isNewTabView => _viewMode == ViewMode.newTab;
-  bool _showMediaHub = false;
   bool _ready = false;
   bool _miniPlayerDismissed = false;
   InAppWebViewController? _monacoController;
@@ -424,14 +427,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   final Map<int, InAppWebViewController> _tabControllers = {};
   PullToRefreshController? _pullToRefreshController;
   final Map<int, int> _tabProgress = {};
+  final Map<int, String> _tabErrorUrls = {};
+  final Map<int, String> _tabErrorMessages = {};
   final Map<int, Uint8List?> _tabSnapshots = {};
   List<(String, String)> _shortcuts = [];
   bool _shortcutsLoaded = false;
   bool _homeInitialized = false;
   bool _typeViewFromHome = false;
-  bool _isWebViewLoading = false;
   DateTime? _lastPopupToast;
-  bool _showPasswordDialog = false;
   String _pendingPasswordUrl = '';
   String _pendingPasswordUsername = '';
   String _pendingPasswordPassword = '';
@@ -440,30 +443,16 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   // Browser history
   List<Map<String, dynamic>> _browserHistory = [];
-  List<Map<String, dynamic>> _urlSuggestions = [];
   List<String> _searchSuggestions = [];
   List<SuggestionItem> _suggestions = [];
   bool _ignoreUrlChanges = false;
   Timer? _suggestDebounce;
-  int _historyPage = 0;
-  static const int _historyPageSize = 50;
 
   bool _desktopSite = false;
   final TextEditingController _findController = TextEditingController();
   final List<Map<String, String>> _recentTabs = [];
   static const int _maxRecentTabs = 20;
 
-  NewsFeedService? _newsFeedService;
-  final GlobalKey<NewsFeedWidgetState> _newsFeedKey = GlobalKey<NewsFeedWidgetState>();
-  final ScrollController _newsFeedScrollController = ScrollController();
-
-  Future<void> _refreshNewsFeed() async {
-    if (_newsFeedService == null) return;
-    final state = _newsFeedKey.currentState;
-    if (state != null) {
-      await state.refresh();
-    }
-  }
   MusicPlayerService _musicService = globalMusicService;
   ImageViewerService _imageService = ImageViewerService();
 
@@ -484,51 +473,35 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   }
 
   void _switchToView(String view) {
-    if (_scaffoldKey.currentState?.isDrawerOpen == true) {
-      Navigator.of(context).pop();
-    }
     if (view == 'browser') {
       setState(() => _currentView = view);
-    } else {
-      final mediaViews = {'music', 'player', 'images', 'documents'};
-      final page = _buildFeaturePage(view);
-      if (page != null) {
-        final wasBrowsing = !_showHomeScreen;
-        if (mediaViews.contains(view)) {
-          Navigator.of(context).push(PageRouteBuilder(
-            pageBuilder: (_, __, ___) => _buildMediaHubPage(),
-            transitionDuration: Duration(milliseconds: 200),
-            reverseTransitionDuration: Duration(milliseconds: 150),
-            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-          )).then((_) {
-            if (mounted) {
-              _urlController.clear();
-              setState(() { _viewMode = wasBrowsing ? ViewMode.browsing : ViewMode.newTab; });
-              if (wasBrowsing) _syncUrlController();
-            }
-          });
-          Navigator.of(context).push(PageRouteBuilder(
-            pageBuilder: (_, __, ___) => page,
-            transitionDuration: Duration(milliseconds: 200),
-            reverseTransitionDuration: Duration(milliseconds: 150),
-            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-          ));
-        } else {
-          Navigator.of(context).push(PageRouteBuilder(
-            pageBuilder: (_, __, ___) => page,
-            transitionDuration: Duration(milliseconds: 200),
-            reverseTransitionDuration: Duration(milliseconds: 150),
-            transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-          )).then((_) {
-            if (mounted) {
-              _urlController.clear();
-              setState(() { _viewMode = wasBrowsing ? ViewMode.browsing : ViewMode.newTab; });
-              if (wasBrowsing) _syncUrlController();
-            }
-          });
-        }
-      }
+      return;
     }
+    final page = _buildFeaturePage(view);
+    if (page == null) return;
+    final wasBrowsing = !_showHomeScreen;
+    Navigator.of(context).push(PageRouteBuilder(
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: Duration(milliseconds: 200),
+      reverseTransitionDuration: Duration(milliseconds: 150),
+      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+    )).then((_) {
+      if (mounted) {
+        _urlController.clear();
+        setState(() {
+          // Return to whichever sub-view was active before the pushed page.
+          switch (_browserSubView) {
+            case BrowserSubView.dashboard:
+              _viewMode = ViewMode.home;
+            case BrowserSubView.newTab:
+              _viewMode = ViewMode.newTab;
+            case BrowserSubView.browsing:
+              _viewMode = ViewMode.browsing;
+          }
+        });
+        if (wasBrowsing) _syncUrlController();
+      }
+    });
   }
 
   Widget? _buildFeaturePage(String view) {
@@ -544,7 +517,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       case 'downloads': return const DownloadsPage();
       case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => Navigator.of(context).pop());
       case 'music': return _buildMusicPlayerPage();
-      case 'media': return _buildMediaHubPage();
       case 'images': return _buildImagePage();
       case 'documents': return _buildDocumentPage();
       case 'files': return _buildDocumentPage();
@@ -570,10 +542,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   final ContentBlockerService _contentBlocker = ContentBlockerService();
   final AdBlockerService _adBlocker = AdBlockerService();
   DownloadService? _downloadManager;
+  NewsFeedService? _newsService;
+  bool _ntpAutofocus = false;
   UpdateService? _updateService;
   String? _pendingNavigationUrl;
-  String? _playVideoUrl;
-  String? _playVideoTitle;
   VideoPlayerService _videoService = VideoPlayerService();
   DocumentService _documentService = DocumentService();
   bool _isFullscreen = false;
@@ -584,9 +556,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool _vpnEnabled = false;
   String _proxyHost = '';
   int _proxyPort = 1080;
-  bool _proxyUseAuth = false;
-  String _proxyUsername = '';
-  String _proxyPassword = '';
 
   Future<void> _loadProxySettings() async {
     final prefs = await SharedPreferences.getInstance();
@@ -594,23 +563,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _vpnEnabled = prefs.getBool('vpn_enabled') ?? false;
       _proxyHost = prefs.getString('proxy_host') ?? '';
       _proxyPort = prefs.getInt('proxy_port') ?? 1080;
-      _proxyUseAuth = prefs.getBool('proxy_use_auth') ?? false;
-      _proxyUsername = prefs.getString('proxy_username') ?? '';
-      _proxyPassword = prefs.getString('proxy_password') ?? '';
     });
     if (_vpnEnabled && _proxyHost.isNotEmpty) {
       _applyProxy();
     }
-  }
-
-  Future<void> _saveProxySettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('vpn_enabled', _vpnEnabled);
-    await prefs.setString('proxy_host', _proxyHost);
-    await prefs.setInt('proxy_port', _proxyPort);
-    await prefs.setBool('proxy_use_auth', _proxyUseAuth);
-    await prefs.setString('proxy_username', _proxyUsername);
-    await prefs.setString('proxy_password', _proxyPassword);
   }
 
   Future<void> _applyProxy() async {
@@ -630,138 +586,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     } catch (e) {
       print('Proxy error: $e');
     }
-  }
-
-  Future<void> _clearProxy() async {
-    try {
-      await ProxyController.instance().clearProxyOverride();
-    } catch (e) {
-      print('Clear proxy error: $e');
-    }
-  }
-
-  void _toggleProxy() {
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        final hostCtrl = TextEditingController(text: _proxyHost);
-        final portCtrl = TextEditingController(text: '$_proxyPort');
-        final userCtrl = TextEditingController(text: _proxyUsername);
-        final passCtrl = TextEditingController(text: _proxyPassword);
-        bool useAuth = _proxyUseAuth;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return AlertDialog(
-              backgroundColor: kSurfaceElevated,
-              title: Row(
-                children: [
-                  Icon(Icons.vpn_lock, color: _vpnEnabled ? Colors.greenAccent : Colors.white54, size: 26),
-                  SizedBox(width: 8),
-                  Text(_vpnEnabled ? 'VPN: Connected' : 'VPN: Disabled', style: TextStyle(color: Colors.white, fontSize: 17)),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SwitchListTile(
-                      title: Text('Enable Proxy', style: TextStyle(color: Colors.white, fontSize: 15)),
-                      value: _vpnEnabled,
-                      activeColor: Colors.greenAccent,
-                      onChanged: (v) => setState(() => _vpnEnabled = v),
-                    ),
-                    SizedBox(height: 8),
-                    TextField(
-                      controller: hostCtrl,
-                      style: TextStyle(color: Colors.white, fontSize: 15),
-                      decoration: InputDecoration(
-                        labelText: 'Proxy Host',
-                        hintText: '127.0.0.1',
-                        labelStyle: TextStyle(color: Colors.white54, fontSize: 15),
-                        hintStyle: TextStyle(color: Colors.white30, fontSize: 15),
-                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.greenAccent)),
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    TextField(
-                      controller: portCtrl,
-                      style: TextStyle(color: Colors.white, fontSize: 15),
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: 'Port',
-                        hintText: '1080',
-                        labelStyle: TextStyle(color: Colors.white54, fontSize: 15),
-                        hintStyle: TextStyle(color: Colors.white30, fontSize: 15),
-                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.greenAccent)),
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    SwitchListTile(
-                      title: Text('Require Authentication', style: TextStyle(color: Colors.white, fontSize: 15)),
-                      value: useAuth,
-                      activeColor: Colors.greenAccent,
-                      onChanged: (v) => setDialogState(() => useAuth = v),
-                    ),
-                    if (useAuth) ...[
-                      SizedBox(height: 8),
-                      TextField(
-                        controller: userCtrl,
-                        style: TextStyle(color: Colors.white, fontSize: 15),
-                        decoration: InputDecoration(
-                          labelText: 'Username',
-                          labelStyle: TextStyle(color: Colors.white54, fontSize: 15),
-                          enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                          focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.greenAccent)),
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      TextField(
-                        controller: passCtrl,
-                        style: TextStyle(color: Colors.white, fontSize: 15),
-                        obscureText: true,
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          labelStyle: TextStyle(color: Colors.white54, fontSize: 15),
-                          enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                          focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.greenAccent)),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text('Cancel', style: TextStyle(color: Colors.white54)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.greenAccent.shade700),
-                  onPressed: () {
-                    setState(() {
-                      _proxyHost = hostCtrl.text.trim();
-                      _proxyPort = int.tryParse(portCtrl.text.trim()) ?? 1080;
-                      _proxyUseAuth = useAuth;
-                      _proxyUsername = userCtrl.text.trim();
-                      _proxyPassword = passCtrl.text.trim();
-                    });
-                    if (_vpnEnabled && _proxyHost.isNotEmpty) {
-                      _applyProxy();
-                    } else {
-                      _clearProxy();
-                    }
-                    Navigator.pop(ctx);
-                  },
-                  child: Text('Apply', style: TextStyle(color: Colors.white)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    ).then((_) => _saveProxySettings());
   }
 
   // AI
@@ -808,7 +632,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     _searchController = TextEditingController();
     _terminalInputController = TextEditingController();
     _terminalFocusNode = FocusNode();
-    _newsFeedService = NewsFeedService();
     _urlController.addListener(_onUrlChanged);
     _urlFocusNode.addListener(_onUrlFocusChanged);
     _musicService.addListener(_onMusicChanged);
@@ -817,22 +640,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_homeInitialized) return;
       _homeInitialized = true;
-      if (!kIsWeb) {
-      try {
-        await _newsFeedService!.init();
-      } catch (_) {}
-      try {
-        await _newsFeedService!.ensureLocationReady().timeout(Duration(seconds: 5));
-      } catch (_) {}
-      try {
-        _newsFeedService!.loadTaps();
-      } catch (_) {}
-      }
       try {
         await _loadSavedSession();
       } catch (_) {}
       try {
         await _loadShortcuts();
+      } catch (_) {}
+      try {
+        _newsService = NewsFeedService()..init();
       } catch (_) {}
       if (mounted) setState(() => _ready = true);
       if (!kIsWeb) {
@@ -997,37 +812,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     }
     if (toRequest.isNotEmpty) {
       await toRequest.request();
-    }
-  }
-
-  Future<void> _requestFileAccess() async {
-    if (Platform.isAndroid) {
-      final sdk = int.tryParse(Platform.operatingSystemVersion.split(' ').first) ?? 0;
-      if (sdk >= 30) {
-        final status = await Permission.manageExternalStorage.status;
-        if (status.isGranted) {
-          _showToast('Storage access already granted');
-          return;
-        }
-        final result = await Permission.manageExternalStorage.request();
-        if (result.isGranted) {
-          _showToast('Storage access granted');
-        } else if (result.isPermanentlyDenied) {
-          _showToast('Open Settings to grant All Files access');
-          openAppSettings();
-        } else {
-          _showToast('Storage access denied');
-        }
-      } else {
-        final status = await Permission.storage.request();
-        if (status.isGranted) {
-          _showToast('Storage access granted');
-        } else {
-          _showToast('Storage access denied');
-        }
-      }
-    } else {
-      _showToast('File access not needed on this platform');
     }
   }
 
@@ -1396,7 +1180,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     try {
       final uri = Uri.parse(url);
       if (uri.host.isNotEmpty) {
-        InternetAddress.lookup(uri.host).catchError((_) {});
+        InternetAddress.lookup(uri.host).then((_) {}, onError: (_) {});
       }
     } catch (_) {}
   }
@@ -1408,7 +1192,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _browserTabs.add(tab);
       _activeBrowserTabId = id;
       _tabProgress[id] = 0;
-      _viewMode = url != null && url.isNotEmpty ? ViewMode.browsing : ViewMode.newTab;
+      final enteringBrowsing = url != null && url.isNotEmpty;
+      _browserSubView = enteringBrowsing ? BrowserSubView.browsing : BrowserSubView.newTab;
+      _viewMode = enteringBrowsing ? ViewMode.browsing : ViewMode.newTab;
     });
     _urlController.clear();
     _syncUrlController();
@@ -1440,17 +1226,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     } catch (_) {}
   }
 
-  void _showBrowsingView() {
-    setState(() {
-      _viewMode = ViewMode.typeView;
-    });
-  }
-
   Future<void> _switchBrowserTab(int id) async {
     if (id == _activeBrowserTabId) {
       final tab = _browserTabs.firstWhere((t) => t.id == id, orElse: () => _browserTabs.first);
       if (!tab.isEmpty && _showHomeScreen) {
-        setState(() { _viewMode = ViewMode.browsing; });
+        setState(() {
+          _browserSubView = BrowserSubView.browsing;
+          _viewMode = ViewMode.browsing;
+        });
         _syncUrlController();
       }
       return;
@@ -1460,11 +1243,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     final tab = _browserTabs.firstWhere((t) => t.id == id, orElse: () => _browserTabs.first);
     setState(() {
       _activeBrowserTabId = id;
-      if (!tab.isEmpty) {
-        _viewMode = ViewMode.browsing;
-      } else {
-        _viewMode = ViewMode.newTab;
-      }
+      _browserSubView = tab.isEmpty ? BrowserSubView.newTab : BrowserSubView.browsing;
+      _viewMode = tab.isEmpty ? ViewMode.newTab : ViewMode.browsing;
     });
     _syncUrlController();
   }
@@ -1490,6 +1270,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       } else if (_activeBrowserTabId == id) {
         final next = _browserTabs[idx > 0 ? idx - 1 : 0];
         _activeBrowserTabId = next.id;
+        _browserSubView = next.isEmpty ? BrowserSubView.newTab : BrowserSubView.browsing;
         _viewMode = !next.isEmpty ? ViewMode.browsing : ViewMode.newTab;
       }
     });
@@ -1511,8 +1292,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     _addHistoryEntry(url, url);
     _saveSession();
     setState(() {
+      _browserSubView = BrowserSubView.browsing;
       _viewMode = ViewMode.browsing;
-      _urlSuggestions = [];
       _searchSuggestions = [];
       _suggestions = [];
     });
@@ -1528,7 +1309,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     }
     _ignoreUrlChanges = false;
     setState(() {
-      _urlSuggestions = [];
       _searchSuggestions = [];
       _suggestions = [];
     });
@@ -1558,54 +1338,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     final idx = _browserHistory.indexWhere((e) => e['url'] == url);
     if (idx >= 0) _browserHistory[idx]['title'] = title;
     HistoryService.updateTitle(url, title).catchError((_) {});
-  }
-
-  void _navigateToUrl(String raw) {
-    String url;
-    if (raw.contains(' ') || (!raw.contains('.') && !raw.contains('://'))) {
-      url = 'https://www.google.com/search?q=${Uri.encodeComponent(raw)}';
-    } else {
-      url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : 'https://$raw';
-    }
-
-    _suggestDebounce?.cancel();
-    _warmUpDns(url);
-    if (_browserTabs.isEmpty) {
-      final id = ++_browserTabIdCounter;
-      final tab = BrowserTab(id: id, url: url, incognito: false);
-      tab.pushHistory(url);
-      _ignoreUrlChanges = true;
-      _urlController.text = url;
-      _ignoreUrlChanges = false;
-      setState(() {
-        _browserTabs.add(tab);
-        _activeBrowserTabId = id;
-        _viewMode = ViewMode.browsing;
-        _urlSuggestions = [];
-        _searchSuggestions = [];
-        _suggestions = [];
-      });
-    } else {
-      final tab = _activeTab;
-      tab.url = url;
-      tab.title = url;
-      tab.pushHistory(url);
-      _ignoreUrlChanges = true;
-      _urlController.text = url;
-      _ignoreUrlChanges = false;
-      setState(() {
-        _viewMode = ViewMode.browsing;
-        _urlSuggestions = [];
-        _searchSuggestions = [];
-        _suggestions = [];
-      });
-    }
-    _addHistoryEntry(url, url);
-    _saveSession();
-    final c = _activeWebview;
-    if (c != null) {
-      c.loadUrl(urlRequest: URLRequest(url: WebUri(url))).catchError((_) {});
-    }
   }
 
   void _typeViewNavigate(String raw) {
@@ -1638,8 +1370,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     tab.pushHistory(url);
     _warmUpDns(url);
     setState(() {
+      _browserSubView = BrowserSubView.browsing;
       _viewMode = ViewMode.browsing;
-      _urlSuggestions = [];
       _searchSuggestions = [];
       _suggestions = [];
     });
@@ -1672,8 +1404,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _ignoreUrlChanges = false;
       _warmUpDns(url);
       setState(() {
+        _browserSubView = BrowserSubView.browsing;
         _viewMode = ViewMode.browsing;
-        _urlSuggestions = [];
         _searchSuggestions = [];
       });
       _addHistoryEntry(url, url);
@@ -1695,8 +1427,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _ignoreUrlChanges = false;
       _warmUpDns(url);
       setState(() {
+        _browserSubView = BrowserSubView.browsing;
         _viewMode = ViewMode.browsing;
-        _urlSuggestions = [];
         _searchSuggestions = [];
       });
       _addHistoryEntry(url, url);
@@ -1716,8 +1448,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _ignoreUrlChanges = false;
       _warmUpDns(url);
       setState(() {
+        _browserSubView = BrowserSubView.browsing;
         _viewMode = ViewMode.browsing;
-        _urlSuggestions = [];
         _searchSuggestions = [];
       });
       _addHistoryEntry(url, url);
@@ -1769,12 +1501,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   }
 
   // ─── Media Sniffer ──────────────────────────────────────────────────────────
-
-  void _onMediaDetected(String url, String type) {
-    setState(() {
-      _pendingMedia.add(MediaItem(url: url, type: type));
-    });
-  }
 
   void _showMediaSnifferPage() {
     if (_pendingMedia.isEmpty) return;
@@ -1837,7 +1563,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       return;
     }
     final result = await _updateService!.checkForUpdate();
-    if (!mounted || result == null) return;
+    if (!mounted) return;
     switch (result.result) {
       case UpdateCheckResult.available:
         _showUpdateDialog(result.info!);
@@ -1918,7 +1644,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     double progress = 0;
     final progressController = StreamController<double>.broadcast();
 
-    final dialogCtx = showDialog(
+    showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
@@ -2801,314 +2527,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   // ─── Downloads Tab ──────────────────────────────────────────────────────────
 
-  Widget _buildDownloadsTab() {
-    return feature.DownloadsWidget(
-      onOpenDownload: (url, filename, savePath) {
-        if (savePath != null && savePath.isNotEmpty) {
-          _openFile(savePath);
-        } else {
-          setState(() {
-            _playVideoUrl = url;
-            _playVideoTitle = filename;
-          });
-          _switchToView('player');
-        }
-      },
-    );
-  }
-
   // ─── Player Tab ─────────────────────────────────────────────────────────────
-
-  Widget _buildPlayerTab() {
-    if (_videoBrowserItems.isEmpty && !_videoBrowserLoading) {
-      _loadVideoBrowserDir(_getStorageRoot());
-    }
-
-    if (_playVideoUrl != null) {
-      // Show full-screen player immediately by pushing a new page
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => DirectVideoPlayer(
-              url: _playVideoUrl,
-              title: _playVideoTitle ?? 'Video',
-              onDownload: _playVideoUrl != null ? () {
-                final url = _playVideoUrl!;
-                final filename = url.split('/').last.split('?').first;
-                _downloadManager?.enqueue(url, filename: filename.isNotEmpty ? filename : 'video_${DateTime.now().millisecondsSinceEpoch}.mp4');
-                _showToast('Downloading: $filename');
-              } : null,
-            ),
-          )).then((_) {
-            setState(() { _playVideoUrl = null; _playVideoTitle = null; });
-          });
-        }
-      });
-      // Show nothing while navigating
-      return SizedBox.shrink();
-    }
-
-    return Column(
-      children: [
-        // Top bar with path breadcrumb
-        Container(
-          color: Theme.of(context).colorScheme.surface,
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              Icon(Icons.videocam, color: kPrimaryBlue, size: 20),
-              SizedBox(width: 8),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => _loadVideoBrowserDir(_getStorageRoot()),
-                  child: Text(
-                    _videoBrowserPath.replaceAll(_getStorageRoot(), '~').replaceAll('/', ' / '),
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-              SizedBox(width: 4),
-              if (_videoBrowserPath != _getStorageRoot())
-                IconButton(
-                  icon: Icon(Icons.arrow_upward, color: kPrimaryBlue, size: 20),
-                  onPressed: () {
-                    final parent = p.dirname(_videoBrowserPath);
-                    if (parent != _videoBrowserPath) _loadVideoBrowserDir(parent);
-                  },
-                  tooltip: 'Go up',
-                ),
-              IconButton(
-                icon: Icon(Icons.refresh, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
-                onPressed: () => _loadVideoBrowserDir(),
-                tooltip: 'Refresh',
-              ),
-            ],
-          ),
-        ),
-        Divider(height: 1, color: Theme.of(context).cardColor),
-        Expanded(
-          child: _videoBrowserLoading
-              ? Center(child: CircularProgressIndicator(color: kPrimaryBlue))
-              : _videoBrowserItems.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.video_file, size: 48, color: Colors.grey),
-                          SizedBox(height: 12),
-                          Text('Nothing here', style: TextStyle(color: Colors.grey)),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: _videoBrowserItems.length,
-                      itemBuilder: (ctx, i) {
-                        final entity = _videoBrowserItems[i];
-                        final isDir = entity is Directory;
-                        final name = entity.path.split('\\').last.split('/').last;
-                        final ext = name.split('.').last.toLowerCase();
-                        final isVideo = !isDir && ['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp'].contains(ext);
-
-                        if (!isDir && !isVideo) return SizedBox.shrink();
-
-                        return ListTile(
-                          leading: Icon(
-                            isDir ? Icons.folder : Icons.videocam,
-                            color: isDir ? Color(0xFFFBBF24) : kPrimaryBlue,
-                            size: 20,
-                          ),
-                          title: Text(name, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13)),
-                          onTap: () {
-                            if (isDir) {
-                              _loadVideoBrowserDir(entity.path);
-                            } else if (isVideo) {
-                              setState(() {
-                                _playVideoUrl = entity.path;
-                                _playVideoTitle = name;
-                              });
-                            }
-                          },
-                          dense: true,
-                        );
-                      },
-                    ),
-        ),
-      ],
-    );
-  }
 
   // ─── Folder Video Player ────────────────────────────────────────────────────
 
-  Widget _buildFolderVideoPlayer(List<String> files) {
-    return FolderVideoPlayerWidget(
-      files: files,
-      onClose: () => Navigator.of(context).pop(),
-    );
-  }
-
   // ─── Music Player Tab ──────────────────────────────────────────────────────
-
-  // Video file browser state
-  String _videoBrowserPath = '/storage/emulated/0/';
-  List<FileSystemEntity> _videoBrowserItems = [];
-  bool _videoBrowserLoading = false;
-
-  String _getStorageRoot() => Platform.isAndroid ? '/storage/emulated/0/' : '/';
-
-  Future<void> _loadVideoBrowserDir([String? path]) async {
-    setState(() => _videoBrowserLoading = true);
-    if (path != null) _videoBrowserPath = path;
-    try {
-      final dir = Directory(_videoBrowserPath);
-      if (await dir.exists()) {
-        final entities = await dir.list().toList();
-        entities.sort((a, b) {
-          final aIsDir = a is Directory;
-          final bIsDir = b is Directory;
-          if (aIsDir && !bIsDir) return -1;
-          if (!aIsDir && bIsDir) return 1;
-          return a.path.toLowerCase().compareTo(b.path.toLowerCase());
-        });
-        setState(() => _videoBrowserItems = entities);
-      } else {
-        setState(() => _videoBrowserItems = []);
-      }
-    } catch (_) {
-      setState(() => _videoBrowserItems = []);
-    }
-    setState(() => _videoBrowserLoading = false);
-  }
-
-  // ─── Media Hub ───────────────────────────────────────────────────────────────
-
-  Widget _buildMediaHubPage() {
-    final nowPlaying = _musicService.currentSong != null;
-    final hasVideoUrl = _playVideoUrl != null;
-
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.movie, size: 20, color: kAccentTeal), SizedBox(width: 8), Text('Media Hub')]),
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: () => Navigator.of(context).pop()),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.system_update, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-            onPressed: () => _checkForUpdatesManual(),
-            tooltip: 'Check for updates',
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: EdgeInsets.all(16),
-          children: [
-            // Continue playing section
-            if (nowPlaying || hasVideoUrl) ...[
-              Text('Continue Playing', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-              SizedBox(height: 8),
-              if (nowPlaying)
-                _buildMediaCard(
-                  icon: Icons.music_note,
-                  iconColor: kAccentTeal,
-                  title: _musicService.currentSong?.displayTitle ?? 'Unknown',
-                  subtitle: 'Music Player',
-                  onTap: () => _switchToView('music'),
-                ),
-              SizedBox(height: 8),
-              if (hasVideoUrl)
-                _buildMediaCard(
-                  icon: Icons.videocam,
-                  iconColor: kPrimaryBlue,
-                  title: _playVideoTitle ?? 'Video',
-                  subtitle: 'Video Player',
-                  onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => VideoPlayerWidget(onOpenMusic: () { Navigator.of(context).pop(); _switchToView('music'); }, onHome: () => Navigator.of(context).pop()),
-                    ));
-                  },
-                ),
-              SizedBox(height: 20),
-            ],
-            // Browse section
-            Text('Browse', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-            SizedBox(height: 8),
-            _buildMediaCard(
-              icon: Icons.music_note, iconColor: kAccentTeal,
-              title: 'Music Player', subtitle: 'Browse and play audio files',
-              onTap: () => _switchToView('music'),
-            ),
-            SizedBox(height: 8),
-            _buildMediaCard(
-              icon: Icons.videocam, iconColor: kPrimaryBlue,
-              title: 'Video Player', subtitle: 'Browse and watch video files',
-              onTap: () => _switchToView('player'),
-            ),
-            SizedBox(height: 8),
-            _buildMediaCard(
-              icon: Icons.image, iconColor: Color(0xFF34D399),
-              title: 'Image Viewer', subtitle: 'View images from your device',
-              onTap: () => _switchToView('images'),
-            ),
-            SizedBox(height: 8),
-            _buildMediaCard(
-              icon: Icons.description, iconColor: kDanger,
-              title: 'Documents', subtitle: 'PDF, EPUB, DOCX, TXT and more',
-              onTap: () => _switchToView('documents'),
-            ),
-            SizedBox(height: 20),
-            // Go to browser
-            Text('Actions', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-            SizedBox(height: 8),
-            _buildMediaCard(
-              icon: Icons.language, iconColor: kAccentTeal,
-              title: 'Go to Makaw Home', subtitle: 'Return to the app home screen',
-              onTap: _goToMakawHome,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMediaCard({required IconData icon, required Color iconColor, required String title, required String subtitle, required VoidCallback onTap}) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        padding: EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: iconColor, size: 24),
-            ),
-            SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 15, fontWeight: FontWeight.w500)),
-                  SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12)),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
-          ],
-        ),
-      ),
-    );
-  }
 
   // ─── Build ──────────────────────────────────────────────────────────────────
 
@@ -3134,10 +2557,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       return _buildDesktopScaffold();
     }
     return Scaffold(
-      key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      drawer: _viewMode == ViewMode.home ? _buildDrawer(context) : null,
-      bottomNavigationBar: (!kIsWeb && Responsive.isMobile(context)) ? _buildBottomNavBar() : null,
       body: Stack(
         children: [
           PopScope(
@@ -3145,16 +2565,25 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             onPopInvokedWithResult: (didPop, _) async {
               if (didPop) return;
               if (_currentView == 'browser') {
+                // Browser home layers: back from the hub or New Tab surface.
+                if (_browserSubView == BrowserSubView.dashboard) {
+                  _moveTaskToBack();
+                  return;
+                }
+                if (_browserSubView == BrowserSubView.newTab) {
+                  if (_browserTabs.length > 1) {
+                    _closeBrowserTab(_activeBrowserTabId);
+                  } else {
+                    _moveTaskToBack();
+                  }
+                  return;
+                }
+                // Live browsing surface (typeView suggestion overlay).
                 if (_viewMode == ViewMode.typeView) {
                   _urlFocusNode.unfocus();
                   _suggestDebounce?.cancel();
                   if (_browserTabs.isEmpty) {
-                    setState(() {
-                      _viewMode = ViewMode.home;
-                      _urlSuggestions = [];
-                      _searchSuggestions = [];
-                      _suggestions = [];
-                    });
+                    _showBrowserDashboard();
                     return;
                   }
                   final tab = _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.first);
@@ -3163,9 +2592,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     _urlController.text = tab.url.isEmpty ? '' : tab.url;
                   }
                   _ignoreUrlChanges = false;
-                  setState(() {
+                   setState(() {
+                    _browserSubView = _typeViewFromHome ? BrowserSubView.newTab : BrowserSubView.browsing;
                     _viewMode = _typeViewFromHome ? ViewMode.newTab : ViewMode.browsing;
-                    _urlSuggestions = [];
                     _searchSuggestions = [];
                   });
                   return;
@@ -3178,7 +2607,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     return;
                   }
                 }
-                // No back history: if browsing, go to NTP. If on NTP with no tabs, minimize.
+                // No back history: if browsing, go to New Tab. If on New Tab with
+                // no extra tabs, go Home (dashboard) then minimize.
                 if (_viewMode == ViewMode.browsing) {
                   _goToNtp();
                   return;
@@ -3197,7 +2627,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               if (context.mounted) Navigator.of(context).pop();
             },
             child: SafeArea(
-              child: kIsWeb ? _buildWebContent() : (_currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink()),
+              child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
             ),
           ),
         ],
@@ -3205,76 +2635,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
-  // ─── Mobile Bottom Navigation Bar ──────────────────────────────────────────
-  int _bottomNavIndex = 0;
-
-  Widget _buildBottomNavBar() {
-    return NavigationBarTheme(
-      data: NavigationBarThemeData(
-        backgroundColor: const Color(0xFF0F172A),
-        indicatorColor: Colors.transparent,
-        labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          final isSelected = states.contains(WidgetState.selected);
-          return TextStyle(
-            fontSize: 11,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? const Color(0xFF38BDF8) : Colors.white38,
-          );
-        }),
-      ),
-      child: NavigationBar(
-        height: 60,
-        selectedIndex: _bottomNavIndex,
-        onDestinationSelected: (idx) => _onBottomNavTap(idx),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.grid_view_rounded, color: Colors.white38),
-            selectedIcon: Icon(Icons.grid_view_rounded, color: Color(0xFF38BDF8)),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.code_rounded, color: Colors.white38),
-            selectedIcon: Icon(Icons.code_rounded, color: Color(0xFF38BDF8)),
-            label: 'Studio',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.folder_outlined, color: Colors.white38),
-            selectedIcon: Icon(Icons.folder_outlined, color: Color(0xFF38BDF8)),
-            label: 'Files',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined, color: Colors.white38),
-            selectedIcon: Icon(Icons.settings_outlined, color: Color(0xFF38BDF8)),
-            label: 'Settings',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.menu_rounded, color: Colors.white38),
-            selectedIcon: Icon(Icons.menu_rounded, color: Color(0xFF38BDF8)),
-            label: 'More',
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _onBottomNavTap(int index) {
-    setState(() => _bottomNavIndex = index);
-    switch (index) {
-      case 0: _goToMakawHome(); break;
-      case 1: _switchToView('studio'); break;
-      case 2: _switchToView('files'); break;
-      case 3: _scaffoldKey.currentState?.openDrawer(); break;
-      case 4: _scaffoldKey.currentState?.openDrawer(); break;
-    }
-  }
-
   // ─── Desktop Scaffold ───────────────────────────────────────────────────────
   Widget _buildDesktopScaffold() {
-    // Root Portal / Makaw Home on desktop gets its own collapsible main menu.
-    if (_isMakawHome) {
-      return _buildDesktopRootPortal();
-    }
-    return _buildDesktopEcosystemScaffold();
+    // Desktop always uses the Root Portal (collapsible main menu) which routes
+    // to ecosystem hubs. The browser/content area is hosted inside it.
+    return _buildDesktopRootPortal();
   }
 
   Widget _buildDesktopRootPortal() {
@@ -3300,6 +2665,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       }
     }
     if (ecosystem == null) return;
+    if (ecosystem.id == 'browser') {
+      _openBrowserDashboard();
+      return;
+    }
     final hub = ecosystem;
     Navigator.of(context).push(PageRouteBuilder(
       pageBuilder: (_, __, ___) => EcosystemHubPage(
@@ -3314,14 +2683,22 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     ));
   }
 
+  /// Opens the Browser Ecosystem Hub (Browser Dashboard) as a standalone page.
+  /// Opens the Browser Ecosystem Hub (Browser Dashboard) in place — the top
+  /// Home target for the browser ecosystem.
+  void _openBrowserDashboard() {
+    if (_currentView != 'browser') {
+      setState(() => _currentView = 'browser');
+    }
+    _showBrowserDashboard();
+  }
+
   /// Opens a tool page within an ecosystem, loading the tool behind the hub.
   void _openEcosystemTool(Ecosystem ecosystem, EcosystemTool tool) {
     _activeEcosystem = ecosystem;
     if (tool.view == 'browser') {
-      Navigator.of(context).popUntil((r) => r.isFirst);
       _activeEcosystem = null;
-      _switchToView('browser');
-      _goHome();
+      _openBrowserDashboard();
       return;
     }
     final page = _buildFeaturePage(tool.view);
@@ -3337,223 +2714,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     } else {
       _activeEcosystem = null;
     }
-  }
-
-  Widget _buildDesktopEcosystemScaffold() {
-    final navItems = [
-      (Icons.language, 'Browser'),
-      (Icons.code, 'Code Studio'),
-      (Icons.terminal, 'Terminal'),
-      (Icons.music_note, 'Music'),
-      (Icons.videocam, 'Videos'),
-      (Icons.photo_library, 'Gallery'),
-      (Icons.description, 'Documents'),
-      (Icons.content_paste, 'Snippets'),
-      (Icons.cloud, 'Cloud Sync'),
-      (Icons.history, 'History'),
-    ];
-    final navKeys = ['browser', 'studio', 'terminal', 'music', 'player', 'images', 'documents', 'snippets', 'cloud', 'history'];
-    final currentIndex = navKeys.indexOf(_currentView);
-    final effectiveIndex = currentIndex >= 0 ? currentIndex : 0;
-
-    return Row(
-      children: [
-        NavigationRail(
-          selectedIndex: effectiveIndex,
-          onDestinationSelected: (i) => _switchToView(navKeys[i]),
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          indicatorColor: kAccentTeal.withOpacity(0.15),
-          selectedIconTheme: IconThemeData(color: kAccentTeal, size: 24),
-          unselectedIconTheme: IconThemeData(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), size: 22),
-          selectedLabelTextStyle: TextStyle(color: kAccentTeal, fontSize: kTextMicro, fontWeight: kWeightSemibold),
-          unselectedLabelTextStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: kTextMicro),
-          labelType: NavigationRailLabelType.all,
-          leading: Padding(
-            padding: EdgeInsets.symmetric(vertical: kSpaceSM),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset('assets/makaw_logo_28.png', width: 28, height: 28),
-                SizedBox(width: kSpaceSM),
-                Text('Makaw', style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextBody, fontWeight: kWeightBold, color: Theme.of(context).colorScheme.onSurface)),
-              ],
-            ),
-          ),
-          trailing: Expanded(
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: EdgeInsets.only(bottom: kSpaceBase),
-                child: IconButton(
-                  icon: Icon(widget.themeMode == 'dark' ? Icons.light_mode : Icons.dark_mode, size: 22),
-                  onPressed: _cycleTheme,
-                  tooltip: 'Theme: ${widget.themeMode}',
-                ),
-              ),
-            ),
-          ),
-          destinations: navItems.map((item) => NavigationRailDestination(
-            icon: Icon(item.$1),
-            selectedIcon: Icon(item.$1),
-            label: Text(item.$2),
-          )).toList(),
-        ),
-        VerticalDivider(width: 1, thickness: 1, color: Theme.of(context).cardColor),
-        Expanded(
-          child: Scaffold(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            body: PopScope(
-              canPop: false,
-              onPopInvokedWithResult: (didPop, _) async {
-                if (didPop) return;
-                if (_currentView == 'browser') {
-                  if (_viewMode == ViewMode.typeView) {
-                    _urlFocusNode.unfocus();
-                    _suggestDebounce?.cancel();
-                    if (_browserTabs.isEmpty) {
-                      setState(() { _viewMode = ViewMode.home; });
-                      return;
-                    }
-                    final lastUrl = _browserTabs.isNotEmpty ? _browserTabs.last.url : '';
-                    setState(() { _viewMode = lastUrl.isEmpty ? ViewMode.home : ViewMode.browsing; });
-                    return;
-                  }
-                  if (_viewMode == ViewMode.browsing) {
-                    final controller = _tabControllers[_activeBrowserTabId];
-                    if (controller != null && await controller.canGoBack()) {
-                      controller.goBack();
-                      return;
-                    }
-                    setState(() { _viewMode = _urlController.text.isNotEmpty ? ViewMode.browsing : ViewMode.home; });
-                    return;
-                  }
-                }
-              },
-              child: SafeArea(
-                child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildWebLandingPage() {
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          SizedBox(height: 48),
-          Image.asset('assets/makaw_logo_64.png', width: 80, height: 80, fit: BoxFit.contain),
-          SizedBox(height: 16),
-          Text('Makaw',
-            style: TextStyle(fontFamily: 'Outfit', fontSize: 42, fontWeight: FontWeight.w500, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
-          SizedBox(height: 8),
-          Text('Browser · Code Studio · Creative Platform',
-            style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
-          SizedBox(height: 32),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24),
-            child: Text('Download Makaw for the full experience — browsing, code editing, media playback, and more.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), height: 1.5)),
-          ),
-          SizedBox(height: 32),
-          _buildDownloadCard('Android', Icons.android, 'APK + AAB', 'https://github.com/hexadigitall/makaw/releases/latest'),
-          _buildDownloadCard('Windows', Icons.desktop_windows, 'MSIX + Exe', 'https://github.com/hexadigitall/makaw/releases/latest'),
-          _buildDownloadCard('macOS', Icons.laptop_mac, 'App Bundle', 'https://github.com/hexadigitall/makaw/releases/latest'),
-          _buildDownloadCard('Linux', Icons.computer, 'Tarball', 'https://github.com/hexadigitall/makaw/releases/latest'),
-          SizedBox(height: 32),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24),
-            child: Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Column(
-                children: [
-                  Text('Features', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-                  SizedBox(height: 16),
-                  Wrap(
-                    spacing: 12, runSpacing: 12,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      _buildFeatureChip(Icons.language, 'Browser'),
-                      _buildFeatureChip(Icons.code, 'Code Studio'),
-                      _buildFeatureChip(Icons.terminal, 'Terminal'),
-                      _buildFeatureChip(Icons.music_note, 'Music Player'),
-                      _buildFeatureChip(Icons.videocam, 'Video Player'),
-                      _buildFeatureChip(Icons.photo_library, 'Gallery'),
-                      _buildFeatureChip(Icons.description, 'Documents'),
-                      _buildFeatureChip(Icons.download, 'Downloads'),
-                      _buildFeatureChip(Icons.auto_awesome, 'AI Assistant'),
-                      _buildFeatureChip(Icons.newspaper, 'News Feed'),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SizedBox(height: 24),
-          Text('Open Source · Built with Flutter', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3))),
-          SizedBox(height: 48),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDownloadCard(String platform, IconData icon, String format, String url) {
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      child: InkWell(
-        onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          width: double.infinity,
-          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Theme.of(context).colorScheme.surface, width: 1),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44, height: 44,
-                decoration: BoxDecoration(color: kAccentTeal.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
-                child: Icon(icon, color: kAccentTeal, size: 24),
-              ),
-              SizedBox(width: 16),
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(platform, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-                  Text(format, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-                ])),
-              Icon(Icons.download, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4), size: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFeatureChip(IconData icon, String label) {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 16, color: kAccentTeal),
-        SizedBox(width: 6),
-        Text(label, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))),
-      ]),
-    );
   }
 
   Widget _buildMiniMusicPlayer() {
@@ -3694,7 +2854,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 itemCount: _musicService.queueLength,
                 itemBuilder: (ctx, i) {
                   final track = _musicService.queue[i];
-                  if (track == null) return SizedBox.shrink();
                   final isCurrent = i == _musicService.currentIndex;
                   return ListTile(
                     leading: Container(
@@ -3712,126 +2871,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDrawer(BuildContext context) {
-    final items = kIsWeb ? [
-      ('Code Studio', Icons.code, 'studio'),
-      ('Terminal', Icons.terminal, 'terminal'),
-      ('Music Player', Icons.music_note, 'music'),
-      ('Video Player', Icons.videocam, 'player'),
-      ('Image Viewer', Icons.photo_library, 'images'),
-      ('Documents', Icons.description, 'documents'),
-      ('Snippets', Icons.content_paste, 'snippets'),
-      ('Cloud Sync', Icons.cloud, 'cloud'),
-      ('History', Icons.history, 'history'),
-    ] : [
-      ('Browser', Icons.language, 'browser'),
-      ('Code Studio', Icons.code, 'studio'),
-      ('Terminal', Icons.terminal, 'terminal'),
-      ('Media Hub', Icons.movie, 'media'),
-      ('Media Sniffer', Icons.wifi_tethering, 'sniffer'),
-      ('Video Player', Icons.videocam, 'player'),
-      ('Music Player', Icons.music_note, 'music'),
-      ('Image Viewer', Icons.photo_library, 'images'),
-      ('Documents', Icons.description, 'documents'),
-      ('Git', Icons.account_tree, 'git'),
-      ('Downloads', Icons.download, 'downloads'),
-      ('Snippets', Icons.content_paste, 'snippets'),
-      ('Projects', Icons.folder, 'projects'),
-      ('Cloud Sync', Icons.cloud, 'cloud'),
-    ];
-    return Drawer(
-      child: SafeArea(
-        child: Container(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              DrawerHeader(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [kAccentTeal, kAccentOrange],
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Image.asset('assets/makaw_logo_28.png', width: 40, height: 40, fit: BoxFit.contain),
-                    SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text('Makaw', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                        Text('Code Studio', style: TextStyle(fontSize: 12, color: Colors.white70)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              ...items.map((item) {
-                final label = item.$1;
-                final icon = item.$2;
-                final view = item.$3;
-                final active = _currentView == view;
-                return ListTile(
-                  leading: Icon(icon, color: active ? kAccentTeal : Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                  title: Text(label, style: TextStyle(color: active ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontWeight: active ? FontWeight.w600 : FontWeight.normal)),
-                  selected: active,
-                  selectedTileColor: Theme.of(context).colorScheme.surface,
-                  onTap: () => _switchToView(view),
-                );
-              }),
-              Divider(color: Theme.of(context).cardColor),
-              ListTile(
-                leading: Icon(Icons.system_update, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                title: Text('Check for Updates', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _checkForUpdatesManual();
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                title: Text('About Makaw', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _showAboutMakaw();
-                },
-              ),
-              Divider(color: Theme.of(context).cardColor),
-              ListTile(
-                leading: Icon(widget.themeMode == 'system' ? Icons.brightness_auto : widget.themeMode == 'dark' ? Icons.dark_mode : Icons.light_mode, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                title: Text(widget.themeMode == 'system' ? 'System Theme' : widget.themeMode == 'dark' ? 'Dark Theme' : 'Light Theme', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _cycleTheme();
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.auto_awesome, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                title: Text('AI Settings', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
-                subtitle: Text('Configure Gemini API', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11)),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _showAISettings();
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.storage, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                title: Text('Storage Access', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
-                subtitle: Text('Manage file permissions', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11)),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _requestFileAccess();
-                },
-              ),
-            ],
-          ),
         ),
       ),
     );
@@ -3862,7 +2901,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()));
+          Navigator.of(context).pop();
         }
       },
       child: ImageViewerWidget(),
@@ -3874,7 +2913,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _buildMediaHubPage()));
+          Navigator.of(context).pop();
         }
       },
       child: DocumentWidget(
@@ -3883,7 +2922,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
-  Widget _buildFeatureScaffold(String title, IconData icon, Widget body, {bool backToMediaHub = false}) {
+  Widget _buildFeatureScaffold(String title, IconData icon, Widget body) {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -4179,15 +3218,13 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       return IconButton(icon: Icon(Icons.more_horiz, color: iconColor), onPressed: _showEllipsisMenu);
     }
 
-    // Makaw Home: hamburger menu (left) | spacer | overflow (right). NO tab counter, NO omnibox pill.
+    // Makaw Home: incognito toggle (left) | spacer | overflow (right). NO tab counter, NO omnibox pill.
     if (_isMakawHome) {
       return Container(
         color: headerBg,
         padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Row(children: [
-          if (!inc)
-            IconButton(icon: Icon(Icons.menu, color: iconColor), onPressed: () => _scaffoldKey.currentState?.openDrawer())
-          else
+          if (inc)
             IconButton(icon: Icon(Icons.visibility_off, color: iconColor), onPressed: _goHome),
           Spacer(),
         IconButton(
@@ -4478,10 +3515,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                       setState(() => _browserHistory.clear());
                     }
                     if (clearCookies) {
-                      CookieManager.instance().deleteAllCookies().catchError((_) {});
+                      CookieManager.instance().deleteAllCookies().then((_) {}, onError: (_) {});
                     }
                     if (clearCache) {
-                      _activeWebview?.clearCache().catchError((_) {});
+                      _activeWebview?.clearCache().then((_) {}, onError: (_) {});
                     }
                     _showToast('Browsing data cleared');
                   },
@@ -4524,30 +3561,121 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   // ─── Browser Content ──────────────────────────────────────────────────────
 
   Widget _buildBrowserContent() {
+    if (_isBrowserDashboard) return _buildBrowserDashboardSurface();
+    if (_isBrowserNewTab) return _buildBrowserNewTabSurface();
+    return _buildBrowsingSurface();
+  }
+
+  /// In-place Browser Hub (dashboard) — the Home target for the browser.
+  Widget _buildBrowserDashboardSurface() {
+    if (_isIncognitoActive) return _buildIncognitoLandingPage();
+    return BrowserDashboardPage(
+      onBackToMakawHome: _goToMakawHome,
+      onNewTab: () {
+        _enterBrowserSubView(BrowserSubView.newTab);
+        _createBrowserTab(incognito: _isIncognitoActive);
+      },
+      onOpenBookmarks: _showBookmarksDialog,
+      onOpenHistory: () => _switchToView('history'),
+      onOpenDownloads: () => _switchToView('downloads'),
+      onOpenPasswords: () => _switchToView('passwords'),
+      onOpenSettings: _showBrowserSettings,
+      onAskAiAboutPage: _showAIChat,
+      onSearchOrNavigate: _navigateOrOpenNewTab,
+      onSearchFocused: _goToNtp,
+      onOpenQrScanner: _scanQRCode,
+      onToggleShield: () {
+        final shield = !_contentBlocker.isEnabled;
+        _contentBlocker.enabled = shield;
+        _showToast(shield ? 'Content blocking enabled' : 'Content blocking disabled');
+        _activeWebview?.reload().catchError((_) {});
+      },
+      recentPages: _browserHistory
+          .take(5)
+          .map((e) => RecentPageItem(
+                title: (e['title'] as String? ?? e['url'] as String? ?? '').toString(),
+                url: (e['url'] as String? ?? '').toString(),
+                visitedAt: DateTime.tryParse(e['time'] as String? ?? '') ?? DateTime.now(),
+              ))
+          .toList(),
+    );
+  }
+
+  /// In-place New Tab surface (idle / focused / typing).
+  Widget _buildBrowserNewTabSurface() {
+    if (_isIncognitoActive) return _buildIncognitoLandingPage();
+    return BrowserNewTabView(
+      onOpenDashboard: _showBrowserDashboard,
+      onOpenMenu: _showEllipsisMenu,
+      onShowTabs: _showTabSwitcher,
+      onNewTab: () => _createBrowserTab(incognito: _isIncognitoActive),
+      onNavigate: _navigateOrOpenNewTab,
+      onOpenBookmarks: _showBookmarksDialog,
+      onEditShortcuts: _showEditShortcutsDialog,
+      autofocus: _ntpAutofocus,
+      newsFeedService: _newsService,
+      recentPages: _browserHistory
+          .take(4)
+          .map((e) => RecentPageItem(
+                title: (e['title'] as String? ?? e['url'] as String? ?? '').toString(),
+                url: (e['url'] as String? ?? '').toString(),
+                visitedAt: DateTime.tryParse(e['time'] as String? ?? '') ?? DateTime.now(),
+              ))
+          .toList(),
+      shortcuts: _shortcuts,
+      tabCount: _browserTabs.length,
+    );
+  }
+
+  /// Retries the failed page load: clears the error state then reloads.
+  void _retryActiveTab() {
+    final id = _activeBrowserTabId;
+    setState(() {
+      _tabErrorUrls.remove(id);
+      _tabErrorMessages.remove(id);
+      _tabProgress[id] = 0;
+    });
+    _activeWebview?.reload().catchError((_) {});
+  }
+
+  /// Live browsing surface: header + webview + suggestions + mini player.
+  Widget _buildBrowsingSurface() {
     final showHome = _showHomeScreen;
-    final progress = _tabProgress[_activeBrowserTabId];
+    final progress = _tabProgress[_activeBrowserTabId] ?? 0;
     final isTypeView = _viewMode == ViewMode.typeView;
+    final activeId = _activeBrowserTabId;
+    final tab = _activeBrowserTab;
+    final isLoading = !showHome && !isTypeView && progress > 0 && progress < 100;
 
     return Column(
       children: [
         if (!_isFullscreen && !_isMakawHome) _buildBrowserHeader(),
-        if (!showHome && !isTypeView && progress != null && progress > 0 && progress < 100)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(2),
-            child: LinearProgressIndicator(
-              value: progress / 100.0,
-              backgroundColor: _isIncognitoActive ? kIncognitoBg : Theme.of(context).colorScheme.surface,
-              valueColor: AlwaysStoppedAnimation(_isIncognitoActive ? kIncognitoPurple : kAccentTeal),
-              minHeight: 2,
-            ),
-          ),
         Expanded(
-          child: Stack(
-            children: [
-              if (!showHome && !(isTypeView && _typeViewFromHome)) _buildWebviewArea(),
-              if (showHome && !isTypeView) _buildHomeContent(),
-              if (isTypeView) _buildTypeView(),
-            ],
+          child: BrowserActivePage(
+            progress: progress / 100.0,
+            isLoading: isLoading,
+            hasError: _tabErrorMessages.containsKey(activeId),
+            failedUrl: _tabErrorUrls[activeId] ?? tab.url,
+            errorMessage: _tabErrorMessages[activeId] ?? '',
+            mediaCount: _pendingMedia.length,
+            tabCount: _currentModeTabCount,
+            canGoBack: tab.canGoBack,
+            canGoForward: tab.canGoForward,
+            onBack: () => _activeWebview?.goBack(),
+            onForward: () => _activeWebview?.goForward(),
+            onHome: _showBrowserDashboard,
+            onTabs: _showTabSwitcher,
+            onMenu: _showEllipsisMenu,
+            onStop: () => _activeWebview?.stopLoading(),
+            onReload: _retryActiveTab,
+            onMediaTap: _showMediaSnifferPage,
+            child: Stack(
+              children: [
+                if (!showHome && !isTypeView) _buildWebviewArea(),
+                if (showHome && !isTypeView) _buildHomeContent(),
+                if (isTypeView) _buildTypeView(),
+              ],
+            ),
           ),
         ),
         if (!showHome && !isTypeView && _musicService.currentSong != null) _buildMiniMusicPlayer(),
@@ -4555,317 +3683,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
-  // ─── Web Content ────────────────────────────────────────────────────────
-  Widget _buildWebContent() {
-    if (_isMakawHome) {
-      // Makaw Home Portal — responsive layout (covers mobile/tablet/desktop widths)
-      return _buildHomeContent();
-    }
-    return Column(
-      children: [
-        _buildWebHeader(),
-        Expanded(
-          child: _buildWebHomeContent(),
-        ),
-        if (_musicService.currentSong != null) _buildMiniMusicPlayer(),
-      ],
-    );
-  }
-
-  Widget _buildWebHeader() {
-    return Container(
-      color: Theme.of(context).colorScheme.surface,
-      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(children: [
-        IconButton(
-          icon: Icon(Icons.menu, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-        ),
-        Spacer(),
-        IconButton(
-          icon: Icon(Icons.more_horiz, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: _showEllipsisMenu,
-        ),
-      ]),
-    );
-  }
-
-  Widget _buildWebHomeContent() {
-    final isWide = Responsive.isDesktop(context);
-    return RefreshIndicator(
-      onRefresh: _refreshNewsFeed,
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: isWide ? Responsive.wideDesktop : Responsive.desktopMax),
-            child: Column(
-              children: [
-                SizedBox(height: kSpaceXXL),
-                Image.asset('assets/makaw_logo_64.png', width: 64, height: 64, fit: BoxFit.contain),
-                SizedBox(height: kSpaceMD),
-                Text('Makaw',
-                  style: TextStyle(fontFamily: kFontDisplay, fontSize: kTextHero, fontWeight: kWeightMedium, letterSpacing: -0.5, color: Theme.of(context).colorScheme.onSurface)),
-                SizedBox(height: kSpaceXS),
-                Text('Code Studio · Creative Platform',
-                  style: TextStyle(fontSize: kTextSubtitle, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-                SizedBox(height: kSpaceXL),
-                // ─── Feature Grid ─────────────────────────────────────
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: kSpaceBase),
-                  child: _buildWebFeatureGrid(isWide),
-                ),
-                SizedBox(height: kSpaceLG),
-                // ─── AI Assistant ─────────────────────────────────────
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: kSpaceBase),
-                    child: InkWell(
-                    onTap: _showAIChat,
-                    borderRadius: BorderRadius.circular(kRadiusXL),
-                    child: Container(
-                      width: double.infinity,
-                      padding: EdgeInsets.symmetric(vertical: 14, horizontal: kSpaceBase),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF4285F4), Color(0xFF9B59B6)],
-                          begin: Alignment.topLeft, end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(kRadiusXL),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.auto_awesome, color: Colors.white, size: 22),
-                          SizedBox(width: kSpaceMD),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('AI Assistant', style: TextStyle(color: Colors.white, fontSize: kTextBody, fontWeight: kWeightSemibold)),
-                              Text('Powered by Gemini', style: TextStyle(color: Colors.white70, fontSize: kTextCaption)),
-                            ],
-                          ),
-                          Spacer(),
-                          Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 14),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: 20),
-                // ─── Media Players ────────────────────────────────────
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _switchToView('music'),
-                          child: Container(
-                            padding: EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(children: [
-                                  Icon(Icons.music_note, color: kPrimaryBlue, size: 22),
-                                  SizedBox(width: 8),
-                                  Text('Music', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                                ]),
-                                SizedBox(height: 10),
-                                if (_musicService.currentSong != null) ...[
-                                  Text(_musicService.currentSong!.displayTitle,
-                                    style: TextStyle(color: Colors.white70, fontSize: 12), overflow: TextOverflow.ellipsis, maxLines: 1),
-                                  Text(_musicService.currentSong!.displayArtist,
-                                    style: TextStyle(color: kTextTertiary, fontSize: 11), overflow: TextOverflow.ellipsis, maxLines: 1),
-                                  SizedBox(height: 8),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                    children: [
-                                      IconButton(icon: Icon(Icons.skip_previous, color: kPrimaryBlue, size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.previousSong()),
-                                      IconButton(icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: kPrimaryBlue, size: 24), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.togglePlayPause()),
-                                      IconButton(icon: Icon(Icons.skip_next, color: kPrimaryBlue, size: 18), constraints: BoxConstraints(minWidth: 28, minHeight: 28), padding: EdgeInsets.zero, onPressed: () => _musicService.nextSong()),
-                                    ],
-                                  ),
-                                ] else ...[
-                                  Text('No music playing', style: TextStyle(color: kTextTertiary, fontSize: 12)),
-                                  SizedBox(height: 4),
-                                  Text('${_musicService.allSongs.length} songs', style: TextStyle(color: kTextTertiary, fontSize: 11)),
-                                  SizedBox(height: 8),
-                                  Container(
-                                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(color: kPrimaryBlue.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                                    child: Text('Open Player', style: TextStyle(color: kPrimaryBlue, fontSize: 11, fontWeight: FontWeight.w600)),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _switchToView('player'),
-                          child: Container(
-                            padding: EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(children: [
-                                  Icon(Icons.videocam, color: kDanger, size: 22),
-                                  SizedBox(width: 8),
-                                  Text('Videos', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                                ]),
-                                SizedBox(height: 10),
-                                Text('${_videoService.allVideos.length} videos', style: TextStyle(color: kTextTertiary, fontSize: 12)),
-                                SizedBox(height: 4),
-                                Text('${_videoService.folders.length} folders', style: TextStyle(color: kTextTertiary, fontSize: 11)),
-                                SizedBox(height: 8),
-                                Container(
-                                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(color: kDanger.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                                  child: Text('Open Player', style: TextStyle(color: kDanger, fontSize: 11, fontWeight: FontWeight.w600)),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(height: 20),
-                // ─── Download Cards ───────────────────────────────────
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      children: [
-                        Text('Download Makaw', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-                        SizedBox(height: 4),
-                        Text('Get the full native experience with all features',
-                          style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-                        SizedBox(height: 16),
-                        Wrap(
-                          spacing: 12, runSpacing: 12,
-                          alignment: WrapAlignment.center,
-                          children: [
-                            _buildDownloadChip('Android', Icons.android),
-                            _buildDownloadChip('Windows', Icons.desktop_windows),
-                            _buildDownloadChip('macOS', Icons.laptop_mac),
-                            _buildDownloadChip('Linux', Icons.computer),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                SizedBox(height: 20),
-                // ─── News Feed ────────────────────────────────────────
-                if (_newsFeedService != null)
-                  NewsFeedWidget(
-                    key: _newsFeedKey,
-                    service: _newsFeedService!,
-                    onNavigate: (url) => _navigateOrOpenNewTab(url),
-                    scrollController: _newsFeedScrollController,
-                  ),
-                SizedBox(height: 24),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWebFeatureGrid(bool isDesktop) {
-    final features = [
-      (Icons.code, 'Code Studio', 'studio', kStudioAccent),
-      (Icons.terminal, 'Terminal', 'terminal', kTerminalAccent),
-      (Icons.music_note, 'Music Player', 'music', kMusicAccent),
-      (Icons.videocam, 'Video Player', 'player', kVideoAccent),
-      (Icons.photo_library, 'Gallery', 'images', kImageAccent),
-      (Icons.description, 'Documents', 'documents', kDocumentAccent),
-      (Icons.content_paste, 'Snippets', 'snippets', kSnippetAccent),
-      (Icons.cloud, 'Cloud Sync', 'cloud', kCloudAccent),
-      (Icons.history, 'History', 'history', kHistoryAccent),
-    ];
-    final crossAxisCount = Responsive.gridColumns(context);
-    final childAspectRatio = crossAxisCount <= 2 ? 2.6 : 2.2;
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: NeverScrollableScrollPhysics(),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        childAspectRatio: childAspectRatio,
-        crossAxisSpacing: kSpaceMD,
-        mainAxisSpacing: kSpaceMD,
-      ),
-      itemCount: features.length,
-      itemBuilder: (ctx, i) {
-        final f = features[i];
-        return InkWell(
-          onTap: () => _switchToView(f.$3),
-          borderRadius: BorderRadius.circular(kRadiusLG),
-          child: Container(
-            padding: EdgeInsets.all(kSpaceBase),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(kRadiusLG),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(color: f.$4.withOpacity(0.15), borderRadius: BorderRadius.circular(kRadiusMD)),
-                  child: Icon(f.$1, color: f.$4, size: 22),
-                ),
-                SizedBox(width: kSpaceMD),
-                Expanded(child: Text(f.$2, style: TextStyle(fontSize: kTextBody, fontWeight: kWeightSemibold, color: Theme.of(context).colorScheme.onSurface))),
-                Icon(Icons.arrow_forward_ios, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3), size: 14),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildDownloadChip(String platform, IconData icon) {
-    return InkWell(
-      onTap: () => launchUrl(Uri.parse('https://github.com/hexadigitall/makaw/releases/latest'), mode: LaunchMode.externalApplication),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 18, color: kAccentTeal),
-          SizedBox(width: 8),
-          Text(platform, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-        ]),
-      ),
-    );
-  }
 
   Widget _buildWebviewArea() {
     final activeIndex = _browserTabs.indexWhere((t) => t.id == _activeBrowserTabId);
-    final activeTab = activeIndex >= 0 ? _browserTabs[activeIndex] : null;
-    final isLoading = activeTab != null && (_tabProgress[activeTab.id] ?? 0) < 100;
     return Container(
       color: kSurfaceBase,
       child: Stack(
@@ -4874,30 +3694,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             IndexedStack(
               index: activeIndex,
               children: _browserTabs.map((tab) => _buildTabWebView(tab)).toList(),
-            ),
-          if (isLoading)
-            Container(
-              color: kSurfaceBase,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 28, height: 28,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: kAccentTeal,
-                        value: (_tabProgress[activeTab!.id] ?? 0) / 100.0,
-                      ),
-                    ),
-                    SizedBox(height: 12),
-                    Text(
-                      '${_tabProgress[activeTab.id] ?? 0}%',
-                      style: TextStyle(color: Colors.white38, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
             ),
           if (_isFullscreen)
             Positioned(
@@ -4912,62 +3708,61 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 child: Icon(Icons.fullscreen_exit, color: Colors.white, size: 20),
               ),
             ),
-          if (_pendingMedia.isNotEmpty)
-            Positioned(
-              right: 16,
-              bottom: 16 + MediaQuery.of(context).padding.bottom,
-              child: FloatingActionButton(
-                mini: true,
-                backgroundColor: kAccentTeal,
-                onPressed: _showMediaSnifferPage,
-                child: Stack(
-                  children: [
-                    Icon(Icons.wifi_tethering, color: Colors.white),
-                    Positioned(
-                      right: 0, top: 0,
-                      child: Container(
-                        padding: EdgeInsets.all(2),
-                        decoration: BoxDecoration(color: kAccentOrange, shape: BoxShape.circle),
-                        constraints: BoxConstraints(minWidth: 16, minHeight: 16),
-                        child: Text(
-                          '${_pendingMedia.length}',
-                          style: TextStyle(fontSize: 10, color: Colors.white),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
         ],
       ),
     );
   }
 
-  int _homeScreenKey = 0;
+  /// Central state-machine transition for the Browser ecosystem home layer.
+  void _enterBrowserSubView(BrowserSubView view) {
+    _searchSuggestions = [];
+    _suggestions = [];
+    setState(() {
+      _browserSubView = view;
+      switch (view) {
+        case BrowserSubView.dashboard:
+          _viewMode = ViewMode.home;
+        case BrowserSubView.newTab:
+          _viewMode = ViewMode.newTab;
+        case BrowserSubView.browsing:
+          _viewMode = ViewMode.browsing;
+      }
+      _urlController.clear();
+    });
+  }
+
+  /// Returns to the Browser Hub (dashboard). The top-left Home icon always
+  /// lands here — never the Makaw root portal.
+  void _showBrowserDashboard() {
+    _enterBrowserSubView(BrowserSubView.dashboard);
+  }
+
   void _goHome() {
-    _homeScreenKey++;
-    _urlController.clear();
-    setState(() { _viewMode = ViewMode.home; });
+    _showBrowserDashboard();
   }
 
   void _goToNtp() {
-    _homeScreenKey++;
-    _urlController.clear();
-    setState(() { _viewMode = ViewMode.newTab; });
+    _ntpAutofocus = true;
+    _enterBrowserSubView(BrowserSubView.newTab);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ntpAutofocus = false;
+    });
   }
 
   void _goIncognitoNtp() {
-    _homeScreenKey++;
-    _urlController.clear();
-    setState(() { _viewMode = ViewMode.newTab; });
+    _enterBrowserSubView(BrowserSubView.newTab);
   }
 
   void _goToMakawHome() {
     Navigator.of(context).popUntil((r) => r.isFirst);
     _switchToView('browser');
-    _goHome();
+    setState(() {
+      // The Makaw Root Portal (launcher hub) renders via the Makaw-home branch
+      // of the browsing surface; the sub-view must not intercept it.
+      _viewMode = ViewMode.home;
+      _browserSubView = BrowserSubView.browsing;
+      _urlController.clear();
+    });
   }
 
   // ─── Home Screen ───────────────────────────────────────────────────────────
@@ -4975,83 +3770,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   Widget _buildHomeContent() {
     if (_isIncognitoActive) return _buildIncognitoLandingPage();
     if (_showHomeScreen) _urlController.clear();
-    // Shared omnibox widget used by both Makaw Home and Browser NTP
-    final omnibox = Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(32),
-        ),
-        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 4),
-        child: Row(
-          children: [
-            Container(
-              width: 32, height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [Color(0xFF4285F4), Color(0xFF34A853), Color(0xFFFBBC05), Color(0xFFEA4335)],
-                ),
-              ),
-              child: Center(child: Text('G', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
-            ),
-            SizedBox(width: 14),
-            Expanded(
-                child: TextField(
-                  controller: _urlController,
-                  focusNode: _urlFocusNode,
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 17),
-                  decoration: InputDecoration(
-                    hintText: 'Search or enter address',
-                    hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 17),
-                    border: InputBorder.none,
-                    isDense: true,
-                  ),
-                  keyboardType: TextInputType.url,
-                  textInputAction: TextInputAction.go,
-                  onSubmitted: _navigateOrOpenNewTab,
-                ),
-            ),
-            SizedBox(width: 14),
-            GestureDetector(
-              onTap: _scanQRCode,
-              child: Icon(Icons.qr_code_scanner, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 26),
-            ),
-            SizedBox(width: 12),
-            Icon(Icons.shield_outlined, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 26),
-          ],
-        ),
-      ),
-    );
-    // Shared shortcuts widget
-    final shortcuts = Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-        child: _buildShortcutsGrid(),
-      ),
-    );
-    // ─── Browser NTP: omnibox + shortcuts only (no branding/media/news) ─────
-    if (_isNewTabView) {
-      return SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        child: Column(children: [
-          SizedBox(height: 40),
-          omnibox,
-          SizedBox(height: 24),
-          shortcuts,
-          SizedBox(height: 24),
-        ]),
-      );
-    }
-    // ─── Makaw Home Portal: master launcher hub ─────────────────────────────
+    // ─── Makaw Root Portal: master launcher hub ──────────────────────────────
     return MakawHomePortalPage(
       onNavigate: (route) => _switchToView(route),
+      onOpenEcosystem: (id) => _openEcosystem(id),
       onOpenSearch: _openUniversalSearch,
       onOpenQrScanner: () => _scanQRCode(),
       onToggleIncognito: () => _goIncognitoNtp(),
@@ -5202,84 +3924,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
-  // ─── Shortcuts Grid ────────────────────────────────────────────────────────
-
-  Widget _buildShortcutsGrid() {
-    final items = List<(String, String)?>.of(_shortcuts);
-    items.add(null);
-    return SizedBox(
-      height: 84,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.symmetric(horizontal: 4),
-        itemCount: items.length,
-        separatorBuilder: (_, __) => SizedBox(width: 16),
-        itemBuilder: (ctx, i) {
-          final s = items[i];
-          return s != null ? _buildShortcutItem(s.$1, s.$2) : _buildShortcutItem(null, null);
-        },
-      ),
-    );
-  }
-
-  Widget _buildShortcutItem(String? label, String? url) {
-    if (label == null) {
-      return GestureDetector(
-        onTap: _showEditShortcutsDialog,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 52, height: 52,
-              decoration: BoxDecoration(
-                color: kIconBgColor,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 22),
-            ),
-            SizedBox(height: 6),
-            Text('Edit', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12)),
-          ],
-        ),
-      );
-    }
-    final domain = url != null ? Uri.tryParse(url)?.host ?? url : '';
-    final faviconUrl = domain.isNotEmpty ? 'https://www.google.com/s2/favicons?domain=$domain&sz=64' : '';
-    return GestureDetector(
-      onTap: () {
-        if (url != null && url.isNotEmpty) _navigateOrOpenNewTab(url);
-      },
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 52, height: 52,
-            decoration: BoxDecoration(
-              color: kIconBgColor,
-              shape: BoxShape.circle,
-            ),
-                child: ClipOval(
-                  child: faviconUrl.isNotEmpty
-                      ? Image.network(faviconUrl, width: 52, height: 52,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Center(
-                            child: Text(label != null && label.isNotEmpty ? label[0].toUpperCase() : '?',
-                              style: TextStyle(color: kAccentTeal, fontSize: 20, fontWeight: FontWeight.bold)),
-                          ),
-                        )
-                  : Center(
-                      child: Text(label != null && label.isNotEmpty ? label[0].toUpperCase() : '?',
-                        style: TextStyle(color: kAccentTeal, fontSize: 20, fontWeight: FontWeight.bold)),
-                    ),
-            ),
-          ),
-          SizedBox(height: 6),
-          Text(label!, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 12)),
-        ],
-      ),
-    );
-  }
-
   // ─── Content Discovery ─────────────────────────────────────────────────────
 
   Future<void> _showEditShortcutsDialog() async {
@@ -5407,82 +4051,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     }
   }
 
-  Widget _buildContentDiscovery() {
-    final lastUrl = _activeBrowserTab.url;
-    final hasContent = lastUrl != 'about:blank';
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: EdgeInsets.only(left: 4, bottom: 12),
-            child: Text('Continue with your Tab',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w600)),
-          ),
-          if (hasContent)
-            Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              padding: EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Container(
-                    width: 56, height: 56,
-                    decoration: BoxDecoration(
-                      color: kAccentTeal.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(Icons.language, color: kAccentTeal, size: 28),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          lastUrl.replaceAll(RegExp(r'^https?://'), '').split('/').first,
-                          style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.w500),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        SizedBox(height: 2),
-                        Text(lastUrl,
-                          style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => _typeViewNavigate(lastUrl),
-                    child: Icon(Icons.arrow_forward_ios, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 16),
-                  ),
-                ],
-              ),
-            )
-          else
-            Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              padding: EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Icon(Icons.travel_explore, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 24),
-                  SizedBox(width: 12),
-                  Text('Start browsing to see your tabs here',
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 13)),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
   void _showBrowserSettings() {
     final cb = _contentBlocker;
     showDialog(
@@ -5575,47 +4143,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
-  void _showAboutMakaw() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: kSurfaceElevated,
-        title: Row(mainAxisSize: MainAxisSize.min, children: [
-          Image.asset('assets/makaw_logo_28.png', width: 28, height: 28),
-          SizedBox(width: 8),
-          Text('Makaw', style: TextStyle(color: Colors.white)),
-        ]),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Code Studio + Hybrid Browser', style: TextStyle(color: kTextSecondary, fontSize: 13)),
-            SizedBox(height: 12),
-            Text('Version 1.0.0', style: TextStyle(color: kTextSecondary, fontSize: 12)),
-            SizedBox(height: 4),
-            Text('Powered by Flutter, InAppWebView, Gemini', style: TextStyle(color: kTextSecondary, fontSize: 12)),
-            SizedBox(height: 12),
-            GestureDetector(
-              onTap: () => launchUrl(Uri.parse('https://hexadigitall.com')),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Developed by ', style: TextStyle(color: kTextSecondary, fontSize: 12)),
-                  Text('Hexadigitall', style: TextStyle(color: kPrimaryBlue, fontSize: 12, fontWeight: FontWeight.w600)),
-                  SizedBox(width: 4),
-                  Icon(Icons.open_in_new, size: 12, color: kPrimaryBlue),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('Close', style: TextStyle(color: kTextSecondary))),
-        ],
-      ),
-    );
-  }
-
   // ─── File Opener ────────────────────────────────────────────────────────────
 
   void _playAudioFileFromIntent(String path) {
@@ -5704,7 +4231,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     if (_ignoreUrlChanges) return;
     final text = _urlController.text.trim();
     if (text.isEmpty) {
-      setState(() { _suggestions = []; _urlSuggestions = []; _searchSuggestions = []; });
+      setState(() { _suggestions = []; _searchSuggestions = []; });
       return;
     }
     final results = SuggestionEngine.rank(
@@ -5754,24 +4281,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   // ─── Browsing View ─────────────────────────────────────────────────────────
-
-  Widget _buildSuggestionItem(String display, String url, IconData icon) {
-    return InkWell(
-      onTap: () => _typeViewNavigate(url),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        child: Row(
-          children: [
-            Icon(icon, size: 22, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-            SizedBox(width: 14),
-            Expanded(
-              child: Text(display, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 15), overflow: TextOverflow.ellipsis),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildTypeView() {
     if (_suggestions.isEmpty) return SizedBox.shrink();
@@ -5889,112 +4398,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ),
       ),
     );
-  }
-
-  Widget _buildBrowsingView() {
-    return SizedBox.shrink();
-  }
-
-  // ─── History Tab ────────────────────────────────────────────────────────────
-
-  Widget _buildHistoryTab() {
-    if (_browserHistory.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.history, size: 64, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-            SizedBox(height: 16),
-            Text('No browsing history', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 16)),
-            SizedBox(height: 8),
-            Text('Visit some websites to see history here',
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 13)),
-          ],
-        ),
-      );
-    }
-    return Column(
-      children: [
-        Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: TextField(
-            controller: _searchController,
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
-            decoration: InputDecoration(
-              hintText: 'Search history',
-              hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 14),
-              prefixIcon: Icon(Icons.search, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
-              filled: true,
-              fillColor: Theme.of(context).cardColor,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              contentPadding: EdgeInsets.symmetric(vertical: 10),
-              isDense: true,
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-        ),
-        SizedBox(height: 8),
-        Expanded(
-          child: ListView.builder(
-            itemCount: _browserHistory.length,
-            itemBuilder: (_, i) {
-              final entry = _browserHistory[i];
-              final url = entry['url'] as String;
-              final title = entry['title'] as String;
-              final query = _searchController.text.toLowerCase();
-              if (query.isNotEmpty && !url.toLowerCase().contains(query) && !title.toLowerCase().contains(query)) {
-                return SizedBox.shrink();
-              }
-              return ListTile(
-                leading: Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.public, color: kAccentTeal, size: 20),
-                ),
-                title: Text(title == 'about:blank' || title == url ? _friendlyTitle(url) : title,
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(_friendlyUrl(url),
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: IconButton(
-                  icon: Icon(Icons.close, size: 18, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                  onPressed: () {
-                    setState(() => _browserHistory.removeAt(i));
-                  },
-                ),
-                onTap: () {
-                  _navigateInCurrentTab(url);
-                  Navigator.of(context).pop();
-                },
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _friendlyTitle(String url) {
-    try {
-      final uri = Uri.parse(url);
-      return uri.host.replaceFirst('www.', '');
-    } catch (_) {
-      return url;
-    }
-  }
-
-  String _friendlyUrl(String url) {
-    try {
-      return url.replaceAll(RegExp(r'^https?://'), '').split('/').first;
-    } catch (_) {
-      return url;
-    }
   }
 
   String _cleanDisplayUrl(String rawUrl) {
@@ -6401,9 +4804,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         final urlStr = url.toString();
         final tabId = tab.id;
         _tabProgress[tabId] = 0;
+        _tabErrorUrls.remove(tabId);
+        _tabErrorMessages.remove(tabId);
         if (tabId == _activeBrowserTabId) {
           _pendingMedia.clear();
-          if (urlStr != 'about:blank') _isWebViewLoading = true;
           if (urlStr == 'about:blank') return;
           _onBrowserNavigation(urlStr);
         }
@@ -6416,9 +4820,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         if (urlStr == 'about:blank') return;
         if (tabId == _activeBrowserTabId) {
           _pullToRefreshController?.endRefreshing();
-          _isWebViewLoading = false;
           setState(() {
-            _urlSuggestions = [];
             _searchSuggestions = [];
             _suggestions = [];
           });
@@ -6477,6 +4879,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       },
       onReceivedError: (ctrl, request, error) {
         if ((request.isForMainFrame ?? false) && tab.id == _activeBrowserTabId) {
+          _tabErrorUrls[tab.id] = request.url.toString();
+          _tabErrorMessages[tab.id] = error.description;
+          _tabProgress[tab.id] = 100;
           _showToast('${error.description} (${error.type})');
           setState(() {});
         }
@@ -7036,11 +5441,6 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
 ''').catchError((_) {});
   }
 
-  void _handleDownload(String url) {
-    _downloadManager?.enqueue(url);
-    _showToast('Download added: ${url.split('/').last.length > 40 ? '...' : url.split('/').last}');
-  }
-
   void _showSavePasswordDialog() {
     final domain = Uri.tryParse(_pendingPasswordUrl)?.host ?? _pendingPasswordUrl;
     showDialog(
@@ -7544,10 +5944,6 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                                     IconButton(
                                       icon: Icon(Icons.play_arrow, size: 16, color: Colors.green),
                                       onPressed: () {
-                                        setState(() {
-                                          _playVideoUrl = item.url;
-                                          _playVideoTitle = item.title.isNotEmpty ? item.title : item.url.split('/').last.split('?').first;
-                                        });
                                         _switchToView('player');
                                       },
                                       tooltip: 'Play',

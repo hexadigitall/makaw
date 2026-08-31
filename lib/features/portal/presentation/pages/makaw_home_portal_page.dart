@@ -5,6 +5,7 @@ import '../../domain/launcher_item.dart';
 
 class MakawHomePortalPage extends StatelessWidget {
   final Function(String route) onNavigate;
+  final void Function(String ecosystemId) onOpenEcosystem;
   final VoidCallback onOpenQrScanner;
   final VoidCallback onToggleIncognito;
   final VoidCallback onOpenAiAssistant;
@@ -13,6 +14,7 @@ class MakawHomePortalPage extends StatelessWidget {
   const MakawHomePortalPage({
     Key? key,
     required this.onNavigate,
+    required this.onOpenEcosystem,
     required this.onOpenQrScanner,
     required this.onToggleIncognito,
     required this.onOpenAiAssistant,
@@ -268,37 +270,37 @@ class MakawHomePortalPage extends StatelessWidget {
         title: 'Code Studio',
         icon: Icons.code_rounded,
         accentColor: const Color(0xFF818CF8),
-        onTap: () => onNavigate('studio'),
+        onTap: () => onOpenEcosystem('code_studio'),
       ),
       LauncherItem(
         title: 'Terminal',
         icon: Icons.terminal_rounded,
         accentColor: const Color(0xFF22D3EE),
-        onTap: () => onNavigate('terminal'),
+        onTap: () => onOpenEcosystem('terminal'),
       ),
       LauncherItem(
         title: 'Documents',
         icon: Icons.edit_document,
         accentColor: const Color(0xFFFBBF24),
-        onTap: () => onNavigate('documents'),
+        onTap: () => onOpenEcosystem('documents'),
       ),
       LauncherItem(
         title: 'Media Hub',
         icon: Icons.video_collection_outlined,
         accentColor: const Color(0xFFF87171),
-        onTap: () => onNavigate('media'),
+        onTap: () => onOpenEcosystem('media'),
       ),
       LauncherItem(
         title: 'Web Browser',
         icon: Icons.language_rounded,
         accentColor: const Color(0xFF00A7C2),
-        onTap: () => onNavigate('browser'),
+        onTap: () => onOpenEcosystem('browser'),
       ),
       LauncherItem(
         title: 'File Explorer',
         icon: Icons.folder_outlined,
         accentColor: const Color(0xFF34D399),
-        onTap: () => onNavigate('files'),
+        onTap: () => onOpenEcosystem('files'),
       ),
     ];
   }

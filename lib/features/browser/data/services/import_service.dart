@@ -87,7 +87,6 @@ class ImportService {
     final headerLine = lines[0].trim().toLowerCase();
     final headers = headerLine.split(',').map((s) => s.trim().replaceAll('"', '')).toList();
 
-    final nameIdx = headers.indexOf('name');
     final urlIdx = headers.indexWhere((h) => h == 'url' || h == 'site');
     final usernameIdx = headers.indexWhere((h) => h.contains('user'));
     final passwordIdx = headers.indexWhere((h) => h.contains('pass'));

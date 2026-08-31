@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
+
 import '../providers/download_manager_provider.dart';
 import '../providers/download_service.dart';
 
@@ -145,7 +145,6 @@ class _DownloadsWidgetState extends ConsumerState<DownloadsWidget> {
   }
 
   Widget _buildDownloadItem(BuildContext context, DownloadItem item, DownloadService mgr) {
-    final isActive = item.state == DownloadState.downloading || item.state == DownloadState.queued;
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(

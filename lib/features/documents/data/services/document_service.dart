@@ -23,10 +23,6 @@ class DocumentService extends ChangeNotifier {
   bool _isScanning = false;
   bool get isScanning => _isScanning;
 
-  static const _skipDocDirs = {'Android', 'data', 'obb', 'cache', 'tmp', 'app',
-    'media', 'Music', 'music', 'Alarms', 'Notifications', 'Ringtones',
-    'DCIM', 'Pictures', 'Screenshots'};
-
   static const Map<String, String> _extCategory = {
     'pdf': 'pdf', 'epub': 'epub',
     'doc': 'doc', 'docx': 'doc', 'odt': 'doc', 'rtf': 'doc', 'pages': 'doc',
@@ -34,13 +30,6 @@ class DocumentService extends ChangeNotifier {
     'html': 'html', 'htm': 'html', 'xhtml': 'html',
     'json': 'code', 'xml': 'code', 'yaml': 'code', 'yml': 'code',
   };
-
-  static const List<String> _allExts = [
-    '.pdf', '.epub', '.doc', '.docx', '.odt', '.rtf', '.pages',
-    '.txt', '.md', '.csv', '.log', '.ini', '.cfg',
-    '.html', '.htm', '.xhtml',
-    '.json', '.xml', '.yaml', '.yml',
-  ];
 
   static const List<String> _scanDirs = [
     '/storage/emulated/0/Documents',

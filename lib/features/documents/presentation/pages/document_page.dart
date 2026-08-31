@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
@@ -15,14 +14,12 @@ class DocumentWidget extends ConsumerStatefulWidget {
 class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
   String _page = 'home';
   String _homeTab = 'all';
-  String _browseSection = 'favourites';
   String? _selectedFolder;
   String _searchQuery = '';
   final _searchCtrl = TextEditingController();
   final _kDark = const Color(0xFF0F0F1A);
   final _kAccent = const Color(0xFF818CF8);
   final _kCard = const Color(0xFF1A1A2E);
-  final _kMuted = const Color(0xFF666680);
 
   DocumentService get _service => ref.read(documentServiceProvider) ?? DocumentService();
 

@@ -122,7 +122,6 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   double _dragStartY = 0;
   double _dragStartX = 0;
   String _dragSide = '';
-  DateTime? _lastTapTime;
   String _doubleTapSide = '';
   Timer? _doubleTapTimer;
 
@@ -767,34 +766,6 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
           ],
         ]),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close', style: TextStyle(color: Color(0xFF818CF8))))],
-      ),
-    );
-  }
-
-  void _jumpToTimeDialog() {
-    final ctrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('Jump to time', style: TextStyle(color: Colors.white, fontSize: 15)),
-        content: TextField(
-          controller: ctrl, autofocus: true,
-          style: const TextStyle(color: Colors.white, fontSize: 13),
-          decoration: const InputDecoration(hintText: 'MM:SS or HH:MM:SS', hintStyle: TextStyle(color: Color(0xFF666680)), border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.white70))),
-          TextButton(
-            onPressed: () {
-              final parts = ctrl.text.trim().split(':').map((e) => int.tryParse(e) ?? 0).toList();
-              if (parts.length == 2) _controller!.seekTo(Duration(minutes: parts[0], seconds: parts[1]));
-              else if (parts.length == 3) _controller!.seekTo(Duration(hours: parts[0], minutes: parts[1], seconds: parts[2]));
-              Navigator.pop(ctx);
-            },
-            child: const Text('Jump', style: TextStyle(color: Color(0xFF818CF8))),
-          ),
-        ],
       ),
     );
   }
@@ -1567,7 +1538,6 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   }
 
   void _showVideoSettings() {
-    const accent = Color(0xFF818CF8);
     const card = Color(0xFF1A1A2E);
     showModalBottomSheet(
       context: context, backgroundColor: card, isScrollControlled: true,
@@ -1988,7 +1958,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   String _page = 'home';
   String _homeTab = 'videos';
   String _browseSection = 'favourites';
-  String? _selectedFolder;
   String _searchQuery = '';
   int _playIndex = 0;
   String _displayMode = 'grid';
@@ -2011,31 +1980,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
 
   void _onServiceChanged() {
     if (mounted) setState(() {});
-  }
-
-  List<VideoFileInfo> get _sortedVideos {
-    final list = List<VideoFileInfo>.from(_service.allVideos);
-    switch (_sortMode) {
-      case 'name_az':
-        list.sort((a, b) => a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase()));
-        break;
-      case 'name_za':
-        list.sort((a, b) => b.fileName.toLowerCase().compareTo(a.fileName.toLowerCase()));
-        break;
-      case 'date_new':
-        list.sort((a, b) => (b.dateTime ?? DateTime.now()).compareTo(a.dateTime ?? DateTime.now()));
-        break;
-      case 'date_old':
-        list.sort((a, b) => (a.dateTime ?? DateTime.now()).compareTo(b.dateTime ?? DateTime.now()));
-        break;
-      case 'size_largest':
-        list.sort((a, b) => b.fileSize.compareTo(a.fileSize));
-        break;
-      case 'size_smallest':
-        list.sort((a, b) => a.fileSize.compareTo(b.fileSize));
-        break;
-    }
-    return list;
   }
 
   void _showSortMenu() {
