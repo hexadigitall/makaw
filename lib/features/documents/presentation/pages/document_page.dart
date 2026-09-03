@@ -4,16 +4,24 @@ import 'package:share_plus/share_plus.dart';
 import '../../data/services/document_service.dart';
 import '../../../../app/providers/service_providers.dart';
 
+/// The Documents ecosystems tool. Tabs:
+///   Folders | All | PDF | EPUB | DOC | TXT | XLS | HTML
+///
+/// "All" and the per-type tabs list document files (file level) from every
+/// folder together in alphabetical order, with search. "Folders" shows the
+/// folders that contain documents (folder level); tapping a folder drills into
+/// its files.
 class DocumentWidget extends ConsumerStatefulWidget {
   final void Function(String filePath) openFile;
-  const DocumentWidget({super.key, required this.openFile});
+  final String initialTab;
+  const DocumentWidget({super.key, required this.openFile, this.initialTab = 'all'});
+
   @override
   ConsumerState<DocumentWidget> createState() => _DocumentWidgetState();
 }
 
 class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
-  String _page = 'home';
-  String _homeTab = 'all';
+  late String _homeTab = widget.initialTab;
   String? _selectedFolder;
   String _searchQuery = '';
   final _searchCtrl = TextEditingController();
@@ -21,11 +29,25 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
   final _kAccent = const Color(0xFF818CF8);
   final _kCard = const Color(0xFF1A1A2E);
 
+  static const List<String> _tabs = ['folders', 'all', 'pdf', 'epub', 'doc', 'txt', 'xls', 'html'];
+
+  /// Map tab id -> document category (as stored on DocumentFileInfo).
+  static const Map<String, String?> _tabCategory = {
+    'all': null,
+    'pdf': 'pdf',
+    'epub': 'epub',
+    'doc': 'doc',
+    'txt': 'text',
+    'xls': 'xls',
+    'html': 'html',
+  };
+
   DocumentService get _service => ref.read(documentServiceProvider) ?? DocumentService();
 
   @override
   void initState() {
     super.initState();
+    if (!_tabs.contains(_homeTab)) _homeTab = 'all';
     final service = ref.read(documentServiceProvider);
     service?.addListener(_onServiceChanged);
   }
@@ -48,6 +70,7 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
     'doc': Icons.description,
     'txt': Icons.text_fields,
     'html': Icons.language,
+    'xls': Icons.grid_on,
     'code': Icons.code,
   };
 
@@ -57,7 +80,8 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
     'doc': Color(0xFF3B82F6),
     'txt': Color(0xFF94A3B8),
     'html': Color(0xFFF59E0B),
-    'code': Color(0xFF10B981),
+    'xls': Color(0xFF10B981),
+    'code': Color(0xFF14B8A6),
   };
 
   String _ext(String path) => path.split('.').last.toLowerCase();
@@ -68,62 +92,62 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _kDark,
-      appBar: _page == 'viewer' ? null : _buildAppBar(),
-      body: _buildBody(),
+      appBar: _selectedFolder != null ? _buildFolderAppBar() : _buildAppBar(),
+      body: _selectedFolder != null ? _buildFolderContents() : _buildBody(),
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
+  PreferredSizeWidget? _buildAppBar() {
     return AppBar(
       backgroundColor: _kDark,
-      title: Text(_appBarTitle(), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+      title: const Text('Documents', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, color: Colors.white),
-        onPressed: () {
-          if (_selectedFolder != null) {
-            setState(() { _selectedFolder = null; _page = 'home'; });
-          } else {
-            Navigator.of(context).pop();
-          }
-        },
+        onPressed: () => Navigator.of(context).pop(),
       ),
-      actions: [
-        if (_page == 'home')
-          IconButton(
-            icon: const Icon(Icons.search, color: Colors.white),
-            onPressed: () => setState(() { _page = 'search'; _searchCtrl.text = _searchQuery; }),
-          ),
-      ],
     );
   }
 
-  String _appBarTitle() {
-    if (_page == 'search') return 'Search';
-    if (_selectedFolder != null) return DocumentService.folderDisplayName(_selectedFolder!);
-    return 'Documents';
+  PreferredSizeWidget _buildFolderAppBar() {
+    return AppBar(
+      backgroundColor: _kDark,
+      title: Text(DocumentService.folderDisplayName(_selectedFolder!),
+          style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back, color: Colors.white),
+        onPressed: () => setState(() => _selectedFolder = null),
+      ),
+    );
+  }
+
+  String _tabLabel(String t) {
+    switch (t) {
+      case 'folders': return 'Folders';
+      case 'all': return 'All';
+      case 'doc': return 'DOC';
+      case 'html': return 'HTML';
+      default: return t.toUpperCase();
+    }
   }
 
   Widget _buildBody() {
-    if (_page == 'search') return _buildSearchPage();
-    if (_selectedFolder != null) return _buildFolderContents();
     return Column(
       children: [
-        _buildHomeTabs(),
-        Expanded(child: _buildHomeContent()),
+        _buildTabs(),
+        if (_homeTab != 'folders') _buildSearchBar(),
+        Expanded(child: _buildTabContent()),
       ],
     );
   }
 
-  Widget _buildHomeTabs() {
-    final tabs = ['all', 'pdf', 'epub', 'doc', 'txt', 'html'];
+  Widget _buildTabs() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: tabs.map((t) {
+          children: _tabs.map((t) {
             final active = _homeTab == t;
-            final label = t == 'all' ? 'All' : t == 'doc' ? 'DOC' : t == 'html' ? 'HTML' : t.toUpperCase();
             return GestureDetector(
               onTap: () => setState(() => _homeTab = t),
               child: Container(
@@ -133,7 +157,7 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
                   color: active ? _kAccent : _kCard,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Text(label,
+                child: Text(_tabLabel(t),
                     style: TextStyle(color: active ? Colors.black : Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
               ),
             );
@@ -143,28 +167,42 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
     );
   }
 
-  List<DocumentFileInfo> _filteredDocs() {
-    final docs = _service.allDocuments;
-    if (_homeTab == 'all') return docs;
-    if (_homeTab == 'doc') {
-      return docs.where((d) {
-        final ext = _ext(d.filePath);
-        return ['doc', 'docx', 'odt', 'rtf', 'pages'].contains(ext);
-      }).toList();
-    }
-    return docs.where((d) => _ext(d.filePath) == _homeTab).toList();
+  Widget _buildSearchBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: TextField(
+        controller: _searchCtrl,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          hintText: 'Search documents...',
+          hintStyle: const TextStyle(color: Color(0xFF666680)),
+          prefixIcon: const Icon(Icons.search, color: Color(0xFF666680)),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(icon: const Icon(Icons.clear, color: Color(0xFF666680)), onPressed: () { _searchCtrl.clear(); setState(() => _searchQuery = ''); })
+              : null,
+          filled: true,
+          fillColor: _kCard,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        ),
+        onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
+      ),
+    );
   }
 
-  Widget _buildHomeContent() {
-    final filtered = _filteredDocs();
-    if (filtered.isEmpty) {
+  Widget _buildTabContent() {
+    if (_homeTab == 'folders') return _buildFoldersView();
+    final docs = _filteredDocs(_homeTab);
+    if (docs.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.description_outlined, color: Color(0xFF666680), size: 48),
             const SizedBox(height: 12),
-            Text(_service.isScanning ? 'Scanning for documents...' : 'No documents found', style: const TextStyle(color: Color(0xFF666680))),
+            Text(_service.isScanning ? 'Scanning for documents...' : 'No documents found',
+                style: const TextStyle(color: Color(0xFF666680))),
             if (_service.isScanning) ...[
               const SizedBox(height: 12),
               SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: _kAccent)),
@@ -173,23 +211,60 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
         ),
       );
     }
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: docs.length,
+      itemBuilder: (_, i) => _buildDocItem(docs[i]),
+    );
+  }
 
-    // Group by folder (using full path)
+  /// File-level list for a tab (All or a specific type), alphabetical by name,
+  /// optionally filtered by the search query.
+  List<DocumentFileInfo> _filteredDocs(String tab) {
+    final category = _tabCategory[tab];
+    var docs = category == null
+        ? _service.allDocuments
+        : _service.allDocuments.where((d) => d.category == category).toList();
+    if (_searchQuery.isNotEmpty) {
+      docs = docs.where((d) => d.fileName.toLowerCase().contains(_searchQuery)).toList();
+    }
+    docs.sort((a, b) => a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase()));
+    return docs;
+  }
+
+  /// Folder-level view: folders grouped, sorted by file count desc.
+  Widget _buildFoldersView() {
+    final all = _service.allDocuments;
+    if (all.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.folder_outlined, color: Color(0xFF666680), size: 48),
+            const SizedBox(height: 12),
+            Text(_service.isScanning ? 'Scanning for documents...' : 'No folders found',
+                style: const TextStyle(color: Color(0xFF666680))),
+            if (_service.isScanning) ...[
+              const SizedBox(height: 12),
+              SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: _kAccent)),
+            ],
+          ],
+        ),
+      );
+    }
     final byFolder = <String, List<DocumentFileInfo>>{};
-    for (final d in filtered) {
+    for (final d in all) {
       byFolder.putIfAbsent(d.folder, () => []).add(d);
     }
     final folderEntries = byFolder.entries.toList()..sort((a, b) => b.value.length.compareTo(a.value.length));
-
     return ListView.builder(
       padding: const EdgeInsets.all(12),
       itemCount: folderEntries.length,
       itemBuilder: (_, i) {
         final entry = folderEntries[i];
-        final displayName = DocumentService.folderDisplayName(entry.key);
         final docs = entry.value;
         return GestureDetector(
-          onTap: () => setState(() { _selectedFolder = entry.key; }),
+          onTap: () => setState(() => _selectedFolder = entry.key),
           child: Container(
             margin: const EdgeInsets.only(bottom: 8),
             decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(12)),
@@ -199,13 +274,29 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
                 decoration: BoxDecoration(color: _kAccent.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
                 child: const Icon(Icons.folder, color: Color(0xFF818CF8), size: 24),
               ),
-              title: Text(displayName, style: const TextStyle(color: Colors.white, fontSize: 14), overflow: TextOverflow.ellipsis),
-              subtitle: Text('${docs.length} file${docs.length == 1 ? '' : 's'}', style: const TextStyle(color: Color(0xFF666680), fontSize: 11)),
+              title: Text(DocumentService.folderDisplayName(entry.key),
+                  style: const TextStyle(color: Colors.white, fontSize: 14), overflow: TextOverflow.ellipsis),
+              subtitle: Text('${docs.length} file${docs.length == 1 ? '' : 's'}',
+                  style: const TextStyle(color: Color(0xFF666680), fontSize: 11)),
               trailing: const Icon(Icons.chevron_right, color: Color(0xFF666680)),
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildFolderContents() {
+    final docs = _service.folders[_selectedFolder] ?? [];
+    if (docs.isEmpty) {
+      return const Center(child: Text('Folder is empty', style: TextStyle(color: Color(0xFF666680))));
+    }
+    final sorted = List<DocumentFileInfo>.from(docs)
+      ..sort((a, b) => a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase()));
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: sorted.length,
+      itemBuilder: (_, i) => _buildDocItem(sorted[i]),
     );
   }
 
@@ -223,7 +314,8 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
             child: Icon(_icon(doc.filePath), color: _color(doc.filePath), size: 24),
           ),
           title: Text(doc.fileName, style: const TextStyle(color: Colors.white, fontSize: 14), overflow: TextOverflow.ellipsis),
-          subtitle: Text(_ext(doc.filePath).toUpperCase(), style: const TextStyle(color: Color(0xFF666680), fontSize: 11)),
+          subtitle: Text('${_ext(doc.filePath).toUpperCase()} · ${DocumentService.folderDisplayName(doc.folder)}',
+              style: const TextStyle(color: Color(0xFF666680), fontSize: 11)),
           trailing: PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Color(0xFF666680), size: 20),
             onSelected: (v) {
@@ -263,60 +355,6 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
         duration: const Duration(seconds: 3),
         backgroundColor: const Color(0xFF1E293B),
       ),
-    );
-  }
-
-  Widget _buildFolderContents() {
-    if (_selectedFolder == null) return const SizedBox();
-    final docs = _service.folders[_selectedFolder] ?? [];
-    if (docs.isEmpty) {
-      return const Center(child: Text('Folder is empty', style: TextStyle(color: Color(0xFF666680))));
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: docs.length,
-      itemBuilder: (_, i) => _buildDocItem(docs[i]),
-    );
-  }
-
-  Widget _buildSearchPage() {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          child: TextField(
-            controller: _searchCtrl,
-            autofocus: true,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'Search documents...',
-              hintStyle: const TextStyle(color: Color(0xFF666680)),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFF666680)),
-              suffixIcon: _searchCtrl.text.isNotEmpty
-                  ? IconButton(icon: const Icon(Icons.clear, color: Color(0xFF666680)), onPressed: () { _searchCtrl.clear(); setState(() => _searchQuery = ''); })
-                  : null,
-              filled: true,
-              fillColor: _kCard,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-            ),
-            onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
-          ),
-        ),
-        Expanded(child: _buildSearchResults()),
-      ],
-    );
-  }
-
-  Widget _buildSearchResults() {
-    if (_searchQuery.isEmpty) return const SizedBox();
-    final results = _service.allDocuments.where((d) => d.fileName.toLowerCase().contains(_searchQuery)).toList();
-    if (results.isEmpty) {
-      return const Center(child: Text('No results', style: TextStyle(color: Color(0xFF666680))));
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: results.length,
-      itemBuilder: (_, i) => _buildDocItem(results[i]),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../domain/entities/document_file_info.dart';
+import '../../../../core/storage/file_recents_service.dart';
 export '../../domain/entities/document_file_info.dart';
 
 class DocumentService extends ChangeNotifier {
@@ -28,6 +29,7 @@ class DocumentService extends ChangeNotifier {
     'doc': 'doc', 'docx': 'doc', 'odt': 'doc', 'rtf': 'doc', 'pages': 'doc',
     'txt': 'text', 'md': 'text', 'csv': 'text', 'log': 'text', 'ini': 'text', 'cfg': 'text',
     'html': 'html', 'htm': 'html', 'xhtml': 'html',
+    'xls': 'xls', 'xlsx': 'xls',
     'json': 'code', 'xml': 'code', 'yaml': 'code', 'yml': 'code',
   };
 
@@ -89,6 +91,7 @@ class DocumentService extends ChangeNotifier {
     'doc': 'doc', 'docx': 'doc',
     'txt': 'text', 'md': 'text', 'csv': 'text', 'log': 'text', 'ini': 'text', 'cfg': 'text',
     'html': 'html', 'htm': 'html', 'xhtml': 'html',
+    'xls': 'xls', 'xlsx': 'xls',
     'json': 'code', 'xml': 'code', 'yaml': 'code', 'yml': 'code',
   };
 
@@ -96,6 +99,7 @@ class DocumentService extends ChangeNotifier {
     '.pdf', '.epub', '.doc', '.docx',
     '.txt', '.md', '.csv', '.log', '.ini', '.cfg',
     '.html', '.htm', '.xhtml',
+    '.xls', '.xlsx',
     '.json', '.xml', '.yaml', '.yml',
   ];
 
@@ -207,6 +211,34 @@ class DocumentService extends ChangeNotifier {
     final data = prefs.getString(key);
     if (data != null) return jsonDecode(data) as Map<String, dynamic>;
     return null;
+  }
+
+  /// Record an "open" of a document file so it surfaces in recent activity.
+  Future<void> recordRecentOpen(String filePath) async {
+    try {
+      await FileRecentsService.record(filePath);
+    } catch (_) {}
+  }
+
+  /// Recently-opened document files (intersected with the scanned document list),
+  /// most recently opened first.
+  Future<List<DocumentFileInfo>> recentDocuments() async {
+    try {
+      final recents = await FileRecentsService.getRecents(limit: 50);
+      final byPath = <String, DocumentFileInfo>{};
+      for (final d in _allDocuments) {
+        byPath[d.filePath] = d;
+      }
+      final result = <DocumentFileInfo>[];
+      for (final r in recents) {
+        if (r.isDirectory) continue;
+        final doc = byPath[r.path];
+        if (doc != null) result.add(doc);
+      }
+      return result;
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// Display-friendly folder name (extracts basename from full path).

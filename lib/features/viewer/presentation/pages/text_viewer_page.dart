@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../../../core/services/text_action_service.dart';
 
 class TextViewerPage extends StatefulWidget {
   final String filePath;
@@ -61,6 +63,13 @@ class _TextViewerPageState extends State<TextViewerPage> {
         ),
         actions: [
           IconButton(
+            icon: Icon(Icons.record_voice_over, color: Theme.of(context).colorScheme.onSurface, size: 20),
+            onPressed: _content == null
+                ? null
+                : () => showReadAloudDialog(context, _content!),
+            tooltip: 'Read Aloud',
+          ),
+          IconButton(
             icon: Icon(_wrap ? Icons.wrap_text : Icons.compare_arrows, color: Theme.of(context).colorScheme.onSurface, size: 20),
             onPressed: () => setState(() => _wrap = !_wrap),
             tooltip: _wrap ? 'No wrap' : 'Word wrap',
@@ -88,6 +97,7 @@ class _TextViewerPageState extends State<TextViewerPage> {
                   padding: const EdgeInsets.all(16),
                   child: SelectableText(
                     _content!,
+                    contextMenuBuilder: buildLearningSelectionToolbar,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onSurface,
                       fontSize: _fontSize,

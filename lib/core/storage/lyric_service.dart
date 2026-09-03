@@ -127,8 +127,8 @@ class LyricService {
     try {
       final rows = await _database.query(
         'lyrics',
-        where: 'song_title LIKE ? OR artist LIKE ? OR text LIKE ?',
-        whereArgs: [q, q, q],
+        where: 'song_id LIKE ? OR song_title LIKE ? OR artist LIKE ? OR text LIKE ?',
+        whereArgs: [q, q, q, q],
         orderBy: 'updated_at DESC',
         limit: limit,
       );

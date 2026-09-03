@@ -73,14 +73,14 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
           IconButton(
-            icon: const Icon(Icons.add, color: Color(0xFF00897B)),
+            icon: const Icon(Icons.add, color: Color(0xFF94A3B8)),
             tooltip: 'Add setting',
             onPressed: _showAddDialog,
           ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00897B)))
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF94A3B8)))
           : entries.isEmpty
               ? _buildEmptyState()
               : ListView.builder(
@@ -89,7 +89,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   itemBuilder: (_, i) {
                     final e = entries[i];
                     return ListTile(
-                      leading: const Icon(Icons.settings, color: Color(0xFF6089BF)),
+                      leading: const Icon(Icons.settings, color: Color(0xFF94A3B8)),
                       title: Text(e.key, style: const TextStyle(color: Colors.white, fontSize: 14)),
                       subtitle: Text(
                         _truncate(e.value),
@@ -150,11 +150,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(labelText: 'Key', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
               ),
+              const SizedBox(height: 8),
               TextField(
                 controller: valCtl,
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(labelText: 'Value', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
               ),
+              const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 value: type,
                 dropdownColor: const Color(0xFF1E293B),
@@ -179,7 +181,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 if (ctx.mounted) Navigator.of(ctx).pop();
                 await _load();
               },
-              child: const Text('Save', style: TextStyle(color: Color(0xFF00897B))),
+              child: const Text('Save', style: TextStyle(color: Color(0xFF94A3B8))),
             ),
           ],
         ),
@@ -189,29 +191,56 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _showEditDialog(String key, String value) {
     final valCtl = TextEditingController(text: value);
+    var type = _inferType(key, value);
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        title: Text(key, style: const TextStyle(color: Colors.white, fontSize: 18)),
-        content: TextField(
-          controller: valCtl,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(labelText: 'Value', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
-          TextButton(
-            onPressed: () async {
-              await SettingsService.setString(key, valCtl.text.trim());
-              if (ctx.mounted) Navigator.of(ctx).pop();
-              await _load();
-            },
-            child: const Text('Save', style: TextStyle(color: Color(0xFF00897B))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: Text(key, style: const TextStyle(color: Colors.white, fontSize: 18)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: valCtl,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(labelText: 'Value', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: type,
+                dropdownColor: const Color(0xFF1E293B),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(labelText: 'Type', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
+                items: const ['string', 'bool', 'int', 'double', 'list']
+                    .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                    .toList(),
+                onChanged: (v) => setDlg(() => type = v ?? 'string'),
+              ),
+            ],
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
+            TextButton(
+              onPressed: () async {
+                await _writeTyped(type, key, valCtl.text.trim());
+                if (ctx.mounted) Navigator.of(ctx).pop();
+                await _load();
+              },
+              child: const Text('Save', style: TextStyle(color: Color(0xFF94A3B8))),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  String _inferType(String key, String value) {
+    if (value == 'true' || value == 'false') return 'bool';
+    if (int.tryParse(value) != null) return 'int';
+    if (double.tryParse(value) != null) return 'double';
+    if (value.startsWith('[') && value.endsWith(']')) return 'list';
+    return 'string';
   }
 
   Future<void> _writeTyped(String type, String key, String val) async {

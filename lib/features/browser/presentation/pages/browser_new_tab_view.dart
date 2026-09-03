@@ -1,8 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../data/services/browser_search_service.dart';
 import '../../domain/entities/recent_page_item.dart';
@@ -67,7 +65,6 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
   List<SearchSuggestion> _suggestions = const [];
   Timer? _debounce;
   bool _typingLoading = false;
-  String? _clipboardText;
 
   @override
   void initState() {
@@ -96,13 +93,8 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
       if (_state != NewTabState.focused) {
         setState(() => _state = NewTabState.focused);
       }
-      try {
-        final data = await Clipboard.getData(Clipboard.kTextPlain);
-        final text = data?.text;
-        if (mounted) setState(() => _clipboardText = text?.trim().isNotEmpty == true ? text!.trim() : null);
-      } catch (_) {
-        if (mounted) setState(() => _clipboardText = null);
-      }
+    } else if (_state != NewTabState.idle && _controller.text.trim().isEmpty) {
+      setState(() => _state = NewTabState.idle);
     }
   }
 
@@ -143,8 +135,9 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
     final query = (override ?? _controller.text).trim();
     if (query.isEmpty) return;
     BrowserSearchService.saveSearch(query);
+    setState(() => _state = NewTabState.idle);
     _controller.clear();
-    _state = NewTabState.idle;
+    _focusNode.unfocus();
     widget.onNavigate(query);
   }
 
@@ -164,9 +157,8 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
   Widget build(BuildContext context) {
     switch (_state) {
       case NewTabState.typing:
-        return _buildTypingView(context);
       case NewTabState.focused:
-        return _buildFocusedView(context);
+        return _buildInputView(context);
       case NewTabState.idle:
         return _buildIdleView(context);
     }
@@ -266,7 +258,12 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
 
   Widget _buildIdleOmnibox(BuildContext context) {
     return InkWell(
-      onTap: _focusNode.requestFocus,
+      onTap: () {
+        setState(() => _state = NewTabState.focused);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _focusNode.requestFocus();
+        });
+      },
       borderRadius: BorderRadius.circular(26),
       child: Container(
         height: 52,
@@ -382,63 +379,18 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
   }
 
   // ── FOCUSED ───────────────────────────────────────────────────────────────
-  Widget _buildFocusedView(BuildContext context) {
+  Widget _buildInputView(BuildContext context) {
+    final typing = _state == NewTabState.typing;
     return ColoredBox(
       color: _surface,
       child: SafeArea(
         child: Column(
           children: [
-            _buildTopBar(context, bg: const Color(0xFF0B1120)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(
-                children: [
-                  Expanded(child: _buildPinnedOmnibox(context)),
-                  const SizedBox(width: 8),
-                  _buildClipboardTile(context),
-                ],
-              ),
-            ),
+            _buildInputHeader(context),
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 8),
-                    Text(
-                      'Recent Searches',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.6),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (_recentSearches.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Text(
-                          'Your recent searches will show up here.',
-                          style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13),
-                        ),
-                      )
-                    else
-                      ..._recentSearches.map(
-                        (r) => ListTile(
-                          leading: const Icon(Icons.history, color: Colors.white54, size: 20),
-                          title: Text(
-                            r.query,
-                            style: const TextStyle(color: Colors.white, fontSize: 14),
-                          ),
-                          trailing: const Icon(Icons.north_west, color: Colors.white38, size: 18),
-                          onTap: () => _submit(r.query),
-                        ),
-                      ),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-              ),
+              child: typing
+                  ? _buildSuggestionsList(context)
+                  : _buildRecentSearchesList(context),
             ),
           ],
         ),
@@ -446,259 +398,169 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
     );
   }
 
-  Widget _buildPinnedOmnibox(BuildContext context) {
+  // Header with the omnibox centered in it. The same TextField (stable key)
+  // survives the focused <-> typing transition so the soft keyboard never drops.
+  Widget _buildInputHeader(BuildContext context) {
+    final typing = _state == NewTabState.typing;
     return Container(
-      height: 46,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(23),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
-      ),
+      color: const Color(0xFF0B1120),
+      padding: const EdgeInsets.fromLTRB(4, 2, 12, 10),
       child: Row(
         children: [
-          Icon(Icons.search, color: Colors.white.withOpacity(0.4), size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              focusNode: _focusNode,
-              onChanged: _onTextChanged,
-              onSubmitted: (_) => _submit(),
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              textInputAction: TextInputAction.go,
-              decoration: InputDecoration(
-                hintText: 'Search Google or type a URL',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 14),
-                border: InputBorder.none,
-                isDense: true,
-              ),
-            ),
-          ),
           IconButton(
-            tooltip: 'New tab',
-            icon: const Icon(Icons.add, color: Colors.white70, size: 20),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            onPressed: widget.onNewTab,
+            tooltip: 'Back',
+            icon: const Icon(Icons.close, color: Colors.white70),
+            onPressed: typing ? _clearTyping : _exitInput,
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildClipboardTile(BuildContext context) {
-    if (_clipboardText == null) return const SizedBox.shrink();
-    return GestureDetector(
-      onTap: () => _showClipboardSheet(context),
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          color: _card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.12)),
-        ),
-        child: const Icon(Icons.content_paste_rounded, color: Color(0xFF38BDF8), size: 20),
-      ),
-    );
-  }
-
-  void _showClipboardSheet(BuildContext context) {
-    final text = _clipboardText;
-    if (text == null) return;
-    final preview = text.length > 120 ? '${text.substring(0, 117)}...' : text;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1E293B),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(top: 12, bottom: 8),
+          Expanded(
+            child: Container(
+              height: 46,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(2),
+                color: _card,
+                borderRadius: BorderRadius.circular(23),
+                border: Border.all(color: Colors.white.withOpacity(0.12)),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                preview,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _clipboardAction(Icons.copy, 'Copy', () async {
-                  await Clipboard.setData(ClipboardData(text: text));
-                  if (!ctx.mounted) return;
-                  Navigator.pop(ctx);
-                }),
-                _clipboardAction(Icons.share, 'Share', () {
-                  Navigator.pop(ctx);
-                  Share.share(text);
-                }),
-                _clipboardAction(Icons.edit, 'Edit', () {
-                  Navigator.pop(ctx);
-                  _controller.text = text;
-                  _controller.selection = TextSelection.collapsed(offset: text.length);
-                  _state = NewTabState.typing;
-                  _onTextChanged(text);
-                  setState(() {});
-                  _focusNode.requestFocus();
-                }),
-              ],
-            ),
-            const SizedBox(height: 10),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _clipboardAction(IconData icon, String label, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: const Color(0xFF38BDF8), size: 22),
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 11)),
-        ],
-      ),
-    );
-  }
-
-  // ── TYPING ────────────────────────────────────────────────────────────────
-  Widget _buildTypingView(BuildContext context) {
-    final results = _suggestions;
-    return ColoredBox(
-      color: _surface,
-      child: SafeArea(
-        child: Column(
-          children: [
-            _buildTopBar(context, bg: const Color(0xFF0B1120)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
-                  IconButton(
-                    tooltip: 'Clear',
-                    icon: const Icon(Icons.arrow_back, color: Colors.white70),
-                    onPressed: _clearTyping,
-                  ),
-                  Expanded(child: _buildTypingOmnibox(context)),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                children: [
-                  if (_typingLoading)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(
-                        child: SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white38),
-                        ),
-                      ),
-                    )
-                  else if (results.isEmpty && _controller.text.trim().isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Center(
-                        child: Text(
-                          'Search Google for "${_controller.text.trim()}"',
-                          style: const TextStyle(color: Colors.white70, fontSize: 14),
-                        ),
-                      ),
-                    )
-                  else
-                    ...results.map(
-                      (s) => ListTile(
-                        dense: true,
-                        leading: Icon(
-                          s.kind == SearchSuggestionKind.recent
-                              ? Icons.history
-                              : Icons.search,
-                          color: Colors.white54,
-                          size: 20,
-                        ),
-                        title: Text(
-                          s.query,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                        ),
-                        subtitle: s.kind == SearchSuggestionKind.recent
-                            ? null
-                            : Text(
-                                'google.com',
-                                style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11),
-                              ),
-                        onTap: () => _submit(s.query),
+                  Icon(Icons.search, color: Colors.white.withOpacity(0.4), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('nt-omnibox-field'),
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      onChanged: _onTextChanged,
+                      onSubmitted: (_) => _submit(),
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      textInputAction: TextInputAction.go,
+                      decoration: InputDecoration(
+                        hintText: 'Search Google or type a URL',
+                        hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 14),
+                        border: InputBorder.none,
+                        isDense: true,
                       ),
                     ),
+                  ),
+                  IconButton(
+                    tooltip: 'New tab',
+                    icon: const Icon(Icons.add, color: Colors.white70, size: 20),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: widget.onNewTab,
+                  ),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTypingOmnibox(BuildContext context) {
-    return Container(
-      height: 46,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(23),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              focusNode: _focusNode,
-              onChanged: _onTextChanged,
-              onSubmitted: (_) => _submit(),
-              autofocus: true,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              textInputAction: TextInputAction.go,
-              decoration: InputDecoration(
-                hintText: 'Search Google or type a URL',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 14),
-                border: InputBorder.none,
-                isDense: true,
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Clear',
-            icon: const Icon(Icons.close, color: Colors.white70, size: 20),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            onPressed: _clearTyping,
           ),
         ],
       ),
     );
   }
+
+  void _exitInput() {
+    _controller.clear();
+    setState(() {
+      _state = NewTabState.idle;
+      _suggestions = const [];
+      _typingLoading = false;
+    });
+    _focusNode.unfocus();
+  }
+
+  Widget _buildRecentSearchesList(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 12),
+          Text(
+            'Recent Searches',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.6),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (_recentSearches.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(
+                'Your recent searches will show up here.',
+                style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13),
+              ),
+            )
+          else
+            ..._recentSearches.map(
+              (r) => ListTile(
+                leading: const Icon(Icons.history, color: Colors.white54, size: 20),
+                title: Text(
+                  r.query,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                trailing: const Icon(Icons.north_west, color: Colors.white38, size: 18),
+                onTap: () => _submit(r.query),
+              ),
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSuggestionsList(BuildContext context) {
+    final results = _suggestions;
+    return ListView(
+      children: [
+        if (_typingLoading)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white38),
+              ),
+            ),
+          )
+        else if (results.isEmpty && _controller.text.trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: Text(
+                'Search Google for "${_controller.text.trim()}"',
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+            ),
+          )
+        else
+          ...results.map(
+            (s) => ListTile(
+              dense: true,
+              leading: Icon(
+                s.kind == SearchSuggestionKind.recent ? Icons.history : Icons.search,
+                color: Colors.white54,
+                size: 20,
+              ),
+              title: Text(
+                s.query,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              subtitle: s.kind == SearchSuggestionKind.recent
+                  ? null
+                  : Text(
+                      'google.com',
+                      style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11),
+                    ),
+              onTap: () => _submit(s.query),
+            ),
+          ),
+      ],
+    );
+  }
+
 }
 
 class _ShortcutTile extends StatelessWidget {

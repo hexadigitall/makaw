@@ -49,7 +49,7 @@ class Ecosystems {
 
   static const Ecosystem media = Ecosystem(
     'media',
-    'Media Hub',
+    'Media',
     Icons.video_collection_outlined,
     Color(0xFFF87171),
     [
@@ -75,7 +75,7 @@ class Ecosystems {
 
   static const Ecosystem browser = Ecosystem(
     'browser',
-    'Browser Hub',
+    'Browser',
     Icons.language_rounded,
     Color(0xFF00A7C2),
     [
@@ -99,7 +99,7 @@ class Ecosystems {
 
   static const Ecosystem files = Ecosystem(
     'files',
-    'Files Hub',
+    'Files',
     Icons.folder_open_rounded,
     Color(0xFF34D399),
     [

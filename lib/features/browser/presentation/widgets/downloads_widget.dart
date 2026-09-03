@@ -96,18 +96,19 @@ class _DownloadsWidgetState extends ConsumerState<DownloadsWidget> {
         children: [
           Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: const Color(0xFF818CF8).withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
-            child: const Icon(Icons.download, color: Color(0xFF818CF8), size: 22),
+            decoration: BoxDecoration(color: const Color(0xFFFB923C).withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+            child: const Icon(Icons.download, color: Color(0xFFFB923C), size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Downloads', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                 if (active.isNotEmpty)
                   Text('${active.length} active${totalSpeed > 0 ? '  •  ${_fmtSpeed(totalSpeed)}' : ''}',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)))
+                else
+                  const Text('All downloads', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
               ],
             ),
           ),
@@ -170,7 +171,7 @@ class _DownloadsWidgetState extends ConsumerState<DownloadsWidget> {
                   if (item.state == DownloadState.downloading) ...[
                     Row(children: [
                       Text('${(item.progress * 100).toStringAsFixed(0)}%',
-                        style: const TextStyle(color: Color(0xFF818CF8), fontSize: 11, fontWeight: FontWeight.w600)),
+                        style: const TextStyle(color: Color(0xFFFB923C), fontSize: 11, fontWeight: FontWeight.w600)),
                       const SizedBox(width: 8),
                       if (item.totalBytes > 0)
                         Text('${item.receivedStr} / ${item.sizeStr}',
@@ -186,7 +187,7 @@ class _DownloadsWidgetState extends ConsumerState<DownloadsWidget> {
                       child: LinearProgressIndicator(
                         value: item.progress,
                         backgroundColor: const Color(0xFF334155),
-                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
+                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFB923C)),
                         minHeight: 4,
                       ),
                     ),
@@ -229,10 +230,10 @@ class _DownloadsWidgetState extends ConsumerState<DownloadsWidget> {
                   value: item.progress,
                   strokeWidth: 3,
                   backgroundColor: const Color(0xFF334155),
-                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFB923C)),
                 ),
               ),
-              const Icon(Icons.cloud_download, color: Color(0xFF818CF8), size: 18),
+              const Icon(Icons.cloud_download, color: Color(0xFFFB923C), size: 18),
             ],
           ),
         );

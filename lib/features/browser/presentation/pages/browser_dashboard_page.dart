@@ -99,13 +99,7 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
             Text('Browser Hub', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
           ],
         ),
-        actions: [
-          TextButton.icon(
-            onPressed: widget.onBackToMakawHome,
-            icon: const Icon(Icons.home_rounded, color: Color(0xFF60A5FA), size: 20),
-            label: const Text('Makaw Home', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
+        actions: const [],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -214,33 +208,19 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: const [
-                  Text('🚀', style: TextStyle(fontSize: 14)),
-                  SizedBox(width: 8),
-                  Text(
-                    'Browser Dashboard',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              InkWell(
-                onTap: widget.onBackToMakawHome,
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Text(
-                    'Back to Makaw Home',
-                    style: TextStyle(
-                      color: Color(0xFF60A5FA),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: const [
+              Text('🚀', style: TextStyle(fontSize: 14)),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Browser Dashboard',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),

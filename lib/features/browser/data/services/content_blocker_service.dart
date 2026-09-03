@@ -184,7 +184,7 @@ class ContentBlockerService {
     'aside[class*="ad-"]',
     'div[class*="sponsor"]','div[class*="promo"]','div[id*="sponsor"]','div[id*="promo"]',
     'div[class*="banner-ad"]','div[id*="banner-ad"]','div[class*="commercial"]',
-    'amp-ad','amp-embed[type*="ad"]','[data-ad]','[data-ad-*]',
+    'amp-ad','amp-embed[type*="ad"]','[data-ad]','[data-ad-slot]','[data-ad-unit]',
     '.ad-container','.ad-wrapper','.adsbygoogle','.ad-slot','.ad-unit',
     '.sponsored-content','.sponsored-post','.promoted-content',
     '.native-ad','.in-feed-ad','.article-ad','.sidebar-ad',
@@ -200,7 +200,6 @@ class ContentBlockerService {
     document.querySelectorAll(sel).forEach(el => { if(el && el.style) el.style.display = 'none'; });
   }
   ads.forEach(hide);
-  new MutationObserver(() => ads.forEach(hide)).observe(document.body, {childList:true, subtree:true});
 })();
 ''';
   }
@@ -220,7 +219,6 @@ class ContentBlockerService {
     document.querySelectorAll(sel).forEach(el => el.remove());
   }
   trackers.forEach(kill);
-  new MutationObserver(() => trackers.forEach(kill)).observe(document.body, {childList:true, subtree:true});
 })();
 ''';
   }
@@ -253,23 +251,6 @@ class ContentBlockerService {
     document.querySelectorAll(sel).forEach(el => { if(el && el.style) el.style.display = 'none'; });
   }
   annoy.forEach(hide);
-  // Auto-click common "Accept" buttons
-  const acceptSelectors = [
-    '#onetrust-accept-btn-handler',
-    '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-    '.qc-cmp2-summary-buttons button[mode="primary"]',
-    'button[aria-label*="Accept"]','button[aria-label*="accept"]',
-    'button[title*="Accept"]','button[title*="accept"]',
-    '#L2AGLb', '.Fx4iiw',
-  ];
-  acceptSelectors.forEach(sel => {
-    try { const b = document.querySelector(sel); if(b) b.click(); } catch(e) {}
-  });
-  setTimeout(() => {
-    acceptSelectors.forEach(sel => {
-      try { const b = document.querySelector(sel); if(b) b.click(); } catch(e) {}
-    });
-  }, 2000);
 })();
 ''';
   }
@@ -277,19 +258,8 @@ class ContentBlockerService {
   String _commonBlockLogic() {
     return '''
 (function(){
-  // Anti-detection: hide automation flags
-  try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch(e) {}
-  try { window.chrome = window.chrome || { runtime: {}, loadTimes: function(){}, csi: function(){} }; } catch(e) {}
-  try {
-    const origQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (params) => (
-      params.name === 'notifications' ?
-        Promise.resolve({ state: Notification.permission }) :
-        origQuery(params)
-    );
-  } catch(e) {}
-  try { Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] }); } catch(e) {}
-  try { Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] }); } catch(e) {}
+  // NOTE: Do NOT tamper with navigator.plugins/languages/permissions/webdriver here.
+  // Stealth overrides make Google and other bot-detection engines serve a blank page.
   // NOTE: Do NOT kill cookies, service workers, or sendBeacon — they break logins, PWAs, and normal page behavior
 })();
 ''';
@@ -336,7 +306,7 @@ div[class*="ad-container"], div[class*="ad-wrapper"], div[class*="ad-slot"], div
 div[class*="ad-banner"], div[class*="ad-box"], div[class*="ad-section"],
 div[id*="ad-container"], div[id*="ad-wrapper"], div[id*="ad-slot"], div[id*="ad-unit"],
 div[class*="sponsor"], div[class*="promo"], div[class*="banner-ad"],
-amp-ad, amp-embed[type*="ad"], [data-ad], [data-ad-*],
+amp-ad, amp-embed[type*="ad"], [data-ad], [data-ad-slot], [data-ad-unit],
 .ad-container, .ad-wrapper, .adsbygoogle, .ad-slot, .ad-unit,
 .sponsored-content, .sponsored-post, .promoted-content,
 .advertisement, .advertisement-box, .advertising,

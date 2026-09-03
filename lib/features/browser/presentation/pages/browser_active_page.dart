@@ -31,6 +31,8 @@ class BrowserActivePage extends StatefulWidget {
   final VoidCallback onHome; // -> Browser Dashboard
   final VoidCallback onTabs;
   final VoidCallback onMenu;
+  final bool showDock;
+
   final VoidCallback onStop;
   final VoidCallback onReload;
   final VoidCallback onMediaTap;
@@ -45,6 +47,7 @@ class BrowserActivePage extends StatefulWidget {
     this.errorMessage = '',
     this.mediaCount = 0,
     this.tabCount = 0,
+    this.showDock = true,
     this.canGoBack = false,
     this.canGoForward = false,
     required this.onBack,
@@ -95,14 +98,13 @@ class _BrowserActivePageState extends State<BrowserActivePage>
   }
 
   Widget _buildStopOrReload() {
-    final navigating = (widget.isLoading &&
-        widget.progress > 0 &&
-        widget.progress < 1) ||
-        widget.hasError;
+    final loading =
+        widget.isLoading && widget.progress > 0 && widget.progress < 1;
+    final showStop = loading && !widget.hasError;
     return _ActionButton(
-      icon: navigating ? Icons.close_rounded : Icons.refresh_rounded,
+      icon: showStop ? Icons.close_rounded : Icons.refresh_rounded,
       color: const Color(0xFF94A3B8),
-      onPressed: widget.hasError ? widget.onReload : widget.onStop,
+      onPressed: showStop ? widget.onStop : widget.onReload,
     );
   }
 
@@ -225,7 +227,7 @@ class _BrowserActivePageState extends State<BrowserActivePage>
             ],
           ),
         ),
-        _buildBottomDock(),
+        if (widget.showDock) _buildBottomDock(),
       ],
     );
   }

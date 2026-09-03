@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'pdf_organizer_page.dart';
 import 'pdf_merger_page.dart';
+import '../../../../core/services/text_action_service.dart';
 
 class _SearchResult {
   final int page;
@@ -202,6 +203,50 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
     _controller?.goToPage(pageNumber: result.page + 1);
   }
 
+  void _onTextSelectionChange(List<PdfTextRanges> selections) {
+    if (selections.isEmpty) return;
+    final buffer = StringBuffer();
+    String? paraContext;
+    for (final s in selections) {
+      for (final r in s.ranges) {
+        final full = s.pageText.fullText;
+        final start = r.start < full.length ? r.start : full.length;
+        final end = r.end <= full.length ? r.end : full.length;
+        if (end > start) {
+          buffer.write(full.substring(start, end));
+          if (paraContext == null) paraContext = _extractParagraph(full, start, end);
+        }
+      }
+    }
+    final selected = buffer.toString().trim();
+    if (selected.isEmpty || !mounted) return;
+    showTextActionMenu(
+      context,
+      selected,
+      title: selected.length > 60 ? '${selected.substring(0, 60)}…' : selected,
+      readAloudContext: paraContext,
+    );
+  }
+
+  // Expand a [start, end) range within the page text to the surrounding
+  // paragraph/sentence, so Read Aloud starts from the containing paragraph.
+  String _extractParagraph(String full, int start, int end) {
+    if (full.isEmpty) return '';
+    var s = start;
+    var e = end;
+    while (s > 0) {
+      final ch = full.codeUnitAt(s - 1);
+      if (ch == 10 || ch == 46) break; // \n or '.'
+      s--;
+    }
+    while (e < full.length) {
+      final ch = full.codeUnitAt(e);
+      if (ch == 10 || ch == 46) break;
+      e++;
+    }
+    return full.substring(s, e).trim();
+  }
+
   void _toggleSearch() {
     setState(() {
       _isSearchActive = !_isSearchActive;
@@ -253,10 +298,20 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
               ),
             );
           };
+          // Chrome is an overlay. To keep the first page's header (and every
+          // page's top) visible below the top bar instead of hidden behind it,
+          // the canvas is inset below the top chrome rather than overlapped.
+          final chromeInsetTop = _showChrome
+              ? MediaQuery.of(context).padding.top + _kBarHeight + (_isSearchActive ? 48.0 : 0.0)
+              : 0.0;
           return Stack(
             children: [
-              // Canvas — full screen, tap to toggle chrome
-              Positioned.fill(
+              // Canvas — full screen (or inset below top chrome), tap to toggle chrome
+              Positioned(
+                top: chromeInsetTop,
+                left: 0,
+                right: 0,
+                bottom: 0,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: () {
@@ -274,9 +329,16 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                       minScale: 0.5,
                       maxScale: 5.0,
                       backgroundColor: _kDark,
+                      pageAnchor: PdfPageAnchor.top,
+                      // Render slightly above fit-to-screen for readable text,
+                      // but cap it well below the raw devicePixelRatio so a
+                      // high-dpi device doesn't rasterize every page at 3x —
+                      // that stalls pan/scroll. Offscreen pages get re-rendered
+                      // sharper by pdfrx as the user zooms.
                       getPageRenderingScale: (context, page, controller, estimatedScale) {
-                        final dpr = MediaQuery.of(context).devicePixelRatio;
-                        return dpr > estimatedScale ? dpr : estimatedScale;
+                        final base = estimatedScale <= 0 ? 1.0 : estimatedScale;
+                        final target = base * 1.5;
+                        return target > 3.0 ? 3.0 : target;
                       },
                       onDocumentChanged: _onDocumentChanged,
                       onPageChanged: (pageNumber) {
@@ -285,6 +347,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                           _savePosition();
                         }
                       },
+                      onTextSelectionChange: _onTextSelectionChange,
                       onViewerReady: (doc, ctrl) {
                         _controller = ctrl;
                         _totalPages = doc.pages.length;
@@ -572,6 +635,10 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
               Navigator.pop(ctx);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const PdfMergerPage()));
             }),
+            _menuTile(Icons.record_voice_over_rounded, 'Read Aloud', () {
+              Navigator.pop(ctx);
+              _readAloudCurrentPage();
+            }),
             _menuTile(Icons.info_outline_rounded, 'Document Info', () {
               Navigator.pop(ctx);
               _showDocumentInfo();
@@ -832,5 +899,35 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
         ],
       ),
     );
+  }
+
+  // ── Read Aloud ─────────────────────────────────────────────────────────
+
+  void _showToast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, maxLines: 2, overflow: TextOverflow.ellipsis),
+      duration: const Duration(seconds: 2),
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  Future<void> _readAloudCurrentPage() async {
+    if (_document == null) {
+      _showToast('No text to read');
+      return;
+    }
+    try {
+      final pageText = await _document!.pages[_currentPage].loadText();
+      final text = pageText.fullText.trim();
+      if (text.isEmpty) {
+        _showToast('No selectable text on this page');
+        return;
+      }
+      showReadAloudDialog(context, text);
+    } catch (_) {
+      _showToast('Could not read this page');
+    }
   }
 }

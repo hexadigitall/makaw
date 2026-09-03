@@ -66,7 +66,8 @@ class _PasswordsPageState extends State<PasswordsPage> {
             onPressed: () {
               ctl.clear();
               if (ctx.mounted) Navigator.of(ctx).pop();
-              _checkLock();
+              setState(() => _locked = false);
+              _load();
             },
             child: const Text('Skip', style: TextStyle(color: Color(0xFF94A3B8))),
           ),
@@ -83,7 +84,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
               setState(() => _locked = false);
               await _load();
             },
-            child: const Text('Set PIN', style: TextStyle(color: Color(0xFF00897B))),
+            child: const Text('Set PIN', style: TextStyle(color: Color(0xFFF472B6))),
           ),
         ],
       ),
@@ -122,7 +123,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
                 _toast('Incorrect PIN');
               }
             },
-            child: const Text('Unlock', style: TextStyle(color: Color(0xFF00897B))),
+            child: const Text('Unlock', style: TextStyle(color: Color(0xFFF472B6))),
           ),
         ],
       ),
@@ -181,7 +182,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
         actions: [
           if (_locked)
             IconButton(
-              icon: const Icon(Icons.lock_open, color: Color(0xFF00897B)),
+              icon: const Icon(Icons.lock_open, color: Color(0xFFF472B6)),
               tooltip: 'Unlock',
               onPressed: _showUnlockDialog,
             )
@@ -201,7 +202,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
               onPressed: () => setState(() => _showPasswords = !_showPasswords),
             ),
             IconButton(
-              icon: const Icon(Icons.add, color: Color(0xFF00897B)),
+              icon: const Icon(Icons.add, color: Color(0xFFF472B6)),
               tooltip: 'Add password',
               onPressed: _showAddDialog,
             ),
@@ -209,7 +210,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00897B)))
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFF472B6)))
           : _locked
               ? _buildLockedState()
               : _entries.isEmpty
@@ -231,7 +232,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
               style: TextStyle(color: Colors.white38, fontSize: 13)),
           const SizedBox(height: 24),
           ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00897B)),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF472B6)),
             onPressed: _showUnlockDialog,
             icon: const Icon(Icons.lock_open),
             label: const Text('Unlock'),
@@ -271,7 +272,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
             backgroundColor: const Color(0xFF1E293B),
             child: Text(
               e.domain.isNotEmpty ? e.domain[0].toUpperCase() : '?',
-              style: const TextStyle(color: Color(0xFF00897B), fontWeight: FontWeight.bold),
+              style: const TextStyle(color: Color(0xFFF472B6), fontWeight: FontWeight.bold),
             ),
           ),
           title: Text(e.domain, style: const TextStyle(color: Colors.white, fontSize: 14)),
@@ -306,11 +307,13 @@ class _PasswordsPageState extends State<PasswordsPage> {
               style: const TextStyle(color: Colors.white),
               decoration: const InputDecoration(labelText: 'Domain', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
             ),
+            const SizedBox(height: 8),
             TextField(
               controller: userCtl,
               style: const TextStyle(color: Colors.white),
               decoration: const InputDecoration(labelText: 'Username', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
             ),
+            const SizedBox(height: 8),
             TextField(
               controller: passCtl,
               style: const TextStyle(color: Colors.white),
@@ -332,7 +335,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
               if (ctx.mounted) Navigator.of(ctx).pop();
               await _load();
             },
-            child: const Text('Save', style: TextStyle(color: Color(0xFF00897B))),
+            child: const Text('Save', style: TextStyle(color: Color(0xFFF472B6))),
           ),
         ],
       ),
@@ -396,6 +399,7 @@ class _PasswordsPageState extends State<PasswordsPage> {
   }
 
   void _showEditDialog(PasswordEntry e) {
+    final domainCtl = TextEditingController(text: e.domain);
     final userCtl = TextEditingController(text: e.username);
     final passCtl = TextEditingController(text: e.password);
     showDialog(
@@ -407,10 +411,17 @@ class _PasswordsPageState extends State<PasswordsPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
+              controller: domainCtl,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(labelText: 'Domain', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
+            ),
+            const SizedBox(height: 8),
+            TextField(
               controller: userCtl,
               style: const TextStyle(color: Colors.white),
               decoration: const InputDecoration(labelText: 'Username', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
             ),
+            const SizedBox(height: 8),
             TextField(
               controller: passCtl,
               style: const TextStyle(color: Colors.white),
@@ -423,16 +434,17 @@ class _PasswordsPageState extends State<PasswordsPage> {
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
           TextButton(
             onPressed: () async {
+              final domain = domainCtl.text.trim();
               final user = userCtl.text.trim();
               final pass = passCtl.text.trim();
-              if (user.isNotEmpty && pass.isNotEmpty) {
+              if (domain.isNotEmpty && user.isNotEmpty && pass.isNotEmpty) {
                 await passwordService.delete(e.id);
-                await passwordService.save('https://${e.domain}', user, pass);
+                await passwordService.save('https://$domain', user, pass);
               }
               if (ctx.mounted) Navigator.of(ctx).pop();
               await _load();
             },
-            child: const Text('Save', style: TextStyle(color: Color(0xFF00897B))),
+            child: const Text('Save', style: TextStyle(color: Color(0xFFF472B6))),
           ),
         ],
       ),

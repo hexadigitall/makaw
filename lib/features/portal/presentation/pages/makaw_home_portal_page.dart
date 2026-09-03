@@ -309,31 +309,37 @@ class MakawHomePortalPage extends StatelessWidget {
     return InkWell(
       onTap: item.onTap,
       borderRadius: BorderRadius.circular(16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: tileSize,
-            height: tileSize,
-            decoration: BoxDecoration(
-              color: const Color(0xFF334155),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(item.icon, color: item.accentColor, size: iconSize),
+      child: Center(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: tileSize,
+                height: tileSize,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF334155),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(item.icon, color: item.accentColor, size: iconSize),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                item.title,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: Responsive.isDesktop(context) ? 13 : 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            item.title,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: Responsive.isDesktop(context) ? 13 : 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

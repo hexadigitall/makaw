@@ -25,8 +25,6 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:collection';
 import 'dart:typed_data';
-import 'package:xterm/xterm.dart';
-import 'core/platform/conditional_pty.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
@@ -41,7 +39,9 @@ import 'features/media/presentation/pages/video_player_page.dart';
 import 'features/pdf/presentation/pages/pdf_viewer_page.dart';
 import 'features/viewer/presentation/pages/epub_viewer_page.dart';
 import 'features/viewer/presentation/pages/text_viewer_page.dart';
+import 'features/viewer/presentation/pages/spreadsheet_viewer_page.dart';
 import 'features/viewer/presentation/pages/html_viewer_page.dart';
+import 'core/services/text_action_service.dart';
 import 'features/music/presentation/pages/music_player_page.dart';
 import 'features/media/presentation/pages/image_viewer_page.dart';
 import 'features/music/data/services/music_player_service.dart';
@@ -49,6 +49,12 @@ import 'features/media/data/services/image_viewer_service.dart';
 import 'features/media/data/services/video_player_service.dart';
 import 'features/documents/data/services/document_service.dart';
 import 'features/documents/presentation/pages/document_page.dart';
+import 'features/documents/presentation/pages/folders_page.dart';
+import 'features/documents/presentation/widgets/recent_activity_section.dart';
+import 'features/terminal/presentation/terminal_sessions_page.dart';
+import 'features/terminal/presentation/recent_terminal_sections.dart';
+import 'features/studio/presentation/pages/makaw_ide_workspace.dart';
+import 'features/studio/data/studio_project.dart';
 import 'features/browser/domain/entities/entities.dart';
 import 'features/browser/presentation/pages/tab_tray_page.dart';
 import 'features/browser/presentation/pages/qr_scanner_page.dart';
@@ -183,15 +189,6 @@ class ConflictPart {
   String ours = '';
   String theirs = '';
   bool inTheirs = false;
-}
-
-class EditorFile {
-  int id;
-  String name;
-  String content;
-  String language;
-  bool dirty;
-  EditorFile({required this.id, required this.name, required this.content, this.language = 'javascript', this.dirty = false});
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -390,17 +387,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   String _currentView = 'browser';
   Ecosystem? _activeEcosystem;
   ViewMode _viewMode = ViewMode.home;
-  BrowserSubView _browserSubView = BrowserSubView.dashboard;
+  BrowserSubView _browserSubView = BrowserSubView.browsing;
   bool get _isBrowserDashboard => _browserSubView == BrowserSubView.dashboard;
   bool get _isBrowserNewTab => _browserSubView == BrowserSubView.newTab;
   bool get _showHomeScreen => _viewMode == ViewMode.home || _viewMode == ViewMode.newTab;
   bool get _isMakawHome => _viewMode == ViewMode.home;
   bool _ready = false;
   bool _miniPlayerDismissed = false;
-  InAppWebViewController? _monacoController;
   Database? _db;
-  String _currentProject = 'untitled';
-  String _currentLang = 'javascript';
   String _projectPath = '';
   List<Map<String, dynamic>> _projects = [];
   String _gitOutput = '';
@@ -410,12 +404,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   String _snippetSearch = '';
   List<Map<String, String>> _snippets = [];
 
-  late final Terminal _terminal = Terminal(maxLines: 10000);
-  final TerminalController _terminalController = TerminalController();
-  late final TextEditingController _terminalInputController;
-  late final FocusNode _terminalFocusNode;
-  final FocusNode _urlFocusNode = FocusNode();
-  Pty? _pty;
+  late final FocusNode _urlFocusNode = FocusNode();
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: [drive.DriveApi.driveFileScope]);
 
@@ -507,19 +496,23 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   Widget? _buildFeaturePage(String view) {
     switch (view) {
       case 'history': return MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url));
-      case 'studio': return _buildFeatureScaffold('Code Studio', Icons.code, _buildStudioTab());
+      case 'studio': return _buildStudioWorkspace();
       case 'sniffer': return _buildFeatureScaffold('Media Sniffer', Icons.wifi_tethering, _buildSnifferTab());
       case 'snippets': return _buildFeatureScaffold('Snippets', Icons.content_paste, _buildSnippetsTab());
       case 'projects': return _buildFeatureScaffold('Projects', Icons.folder, _buildProjectsTab());
       case 'git': return _buildFeatureScaffold('Git', Icons.account_tree, _buildGitTab());
       case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
-      case 'terminal': return _buildFeatureScaffold('Terminal', Icons.terminal, _buildTerminalTab());
+      case 'terminal': return _buildTerminalPage();
       case 'downloads': return const DownloadsPage();
       case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => Navigator.of(context).pop());
       case 'music': return _buildMusicPlayerPage();
       case 'images': return _buildImagePage();
       case 'documents': return _buildDocumentPage();
-      case 'files': return _buildDocumentPage();
+      case 'files':
+        // Within the Documents ecosystem, the "File Explorer" tool opens the
+        // dedicated Folders screen. Elsewhere it falls back to the document browser.
+        if (_activeEcosystem?.id == 'documents') return _buildFoldersPage();
+        return _buildDocumentPage();
       case 'bookmarks': return const BookmarksPage();
       case 'passwords': return const PasswordsPage();
       case 'lyrics': return const LyricsPage();
@@ -533,11 +526,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   final Map<int, List<MediaItem>> _tabMedia = {};
   List<MediaItem> get _pendingMedia => _tabMedia.putIfAbsent(_activeBrowserTabId, () => []);
 
-  // Editor file tabs
-  List<EditorFile> _openFiles = [];
-  int _activeFileId = 0;
-  int _fileIdCounter = 0;
-
   // Content blocker & download manager
   final ContentBlockerService _contentBlocker = ContentBlockerService();
   final AdBlockerService _adBlocker = AdBlockerService();
@@ -549,6 +537,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   VideoPlayerService _videoService = VideoPlayerService();
   DocumentService _documentService = DocumentService();
   bool _isFullscreen = false;
+  double _lastScrollY = 0;
+  bool _browserDockVisible = true;
   String? _pendingOpenFilePath;
   String? _pendingOpenMimeType = '';
 
@@ -594,18 +584,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   final List<Map<String, String>> _aiMessages = [];
   bool _aiLoading = false;
 
-  static const List<String> LANG_OPTIONS = ['javascript', 'dart', 'python', 'html', 'css', 'typescript', 'json'];
-
-  static const Map<String, String> BOILERPLATES = {
-    'javascript': '// Makaw JS\nconsole.log("Hello from Makaw!");\n',
-    'dart': 'void main() {\n  print("Hello from Makaw!");\n}\n',
-    'python': '# Makaw Python\nprint("Hello from Makaw!")\n',
-    'html': '<!DOCTYPE html>\n<html>\n<head><title>Makaw</title></head>\n<body>\n  <h1>Hello Makaw!</h1>\n</body>\n</html>\n',
-    'css': '/* Makaw CSS */\nbody {\n  background: #0f172a;\n  color: #e2e8f0;\n}\n',
-    'typescript': '// Makaw TypeScript\nconst greeting: string = "Hello from Makaw!";\nconsole.log(greeting);\n',
-    'json': '{\n  "app": "Makaw",\n  "version": "1.0.0"\n}\n',
-  };
-
   void _onMusicChanged() {
     if (mounted) setState(() {});
   }
@@ -630,8 +608,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     WidgetsBinding.instance.addObserver(this);
     _urlController = TextEditingController();
     _searchController = TextEditingController();
-    _terminalInputController = TextEditingController();
-    _terminalFocusNode = FocusNode();
     _urlController.addListener(_onUrlChanged);
     _urlFocusNode.addListener(_onUrlFocusChanged);
     _musicService.addListener(_onMusicChanged);
@@ -688,14 +664,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           onComplete: null,
         );
         ref.read(downloadServiceProvider.notifier).state = _downloadManager;
-        _adBlocker.onBlacklistUpdated = () {
-          final rules = _adBlocker.getContentBlockerRules();
-          for (final entry in _tabControllers.entries) {
-            entry.value.setSettings(settings: InAppWebViewSettings(
-              contentBlockers: rules,
-            ));
-          }
-        };
+        _adBlocker.onBlacklistUpdated = () {};
         _adBlocker.updateBlacklist();
         _initDb();
         _initSnippets();
@@ -950,18 +919,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     ];
   }
 
-  String detectLanguage(String name) {
-    final ext = p.extension(name).replaceAll('.', '').toLowerCase();
-    final map = {
-      'dart': 'dart', 'py': 'python', 'js': 'javascript', 'ts': 'typescript',
-      'html': 'html', 'htm': 'html', 'css': 'css', 'json': 'json',
-      'yaml': 'yaml', 'yml': 'yaml', 'md': 'markdown', 'xml': 'html',
-      'txt': 'plaintext', 'c': 'c', 'cpp': 'cpp', 'h': 'c', 'java': 'java',
-      'rb': 'ruby', 'go': 'go', 'rs': 'rust', 'sh': 'shell', 'sql': 'sql',
-    };
-    return map[ext] ?? 'javascript';
-  }
-
   // ─── DB ─────────────────────────────────────────────────────────────────────
 
   Future<void> _initDb() async {
@@ -1143,24 +1100,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     await prefs.setString('saved_tabs', tabsJson);
     final activeTab = _activeTab;
     await prefs.setInt('active_tab_id', activeTab.incognito ? (savedTabs.isNotEmpty ? savedTabs.first.id : 0) : _activeBrowserTabId);
-  }
-
-  // ─── Terminal ───────────────────────────────────────────────────────────────
-
-  void _startPty() {
-    if (kIsWeb) return;
-    if (_pty != null) return;
-    _pty = Pty.start(
-      Platform.isAndroid ? 'sh' : 'bash',
-      arguments: Platform.isAndroid ? ['-c', 'cd /storage/emulated/0 && sh'] : [],
-      environment: {'TERM': 'xterm-256color'},
-      workingDirectory: _projectPath,
-    );
-    _pty!.output.cast<List<int>>().transform(const Utf8Decoder()).listen(_terminal.write);
-    _pty!.exitCode.then((code) => _terminal.write('Process exited: $code\n'));
-    _terminal.onOutput = (data) {
-      _pty!.write(const Utf8Encoder().convert(data));
-    };
   }
 
   // ─── Browser Tabs ───────────────────────────────────────────────────────────
@@ -1394,6 +1333,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     }
 
     if (_browserTabs.isEmpty) {
+      debugPrint('MAKAW-NAV emptyTabs -> create url=$url c_is_null=${_activeWebview == null}');
       _createBrowserTab(url: url);
       final tab = _activeTab;
       tab.pushHistory(url);
@@ -1410,6 +1350,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       });
       _addHistoryEntry(url, url);
       _saveSession();
+      _pendingNavigationUrl = url;
+      debugPrint('MAKAW-NAV emptyTabs setPending=$_pendingNavigationUrl');
       return;
     }
 
@@ -1417,6 +1359,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     final isNtp = tab.url.isEmpty || tab.url == 'about:blank';
 
     if (isNtp) {
+      debugPrint('MAKAW-NAV isNtp url=$url c_is_null=${_activeWebview == null}');
       tab.url = url;
       tab.title = url;
       tab.pushHistory(url);
@@ -1435,9 +1378,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _saveSession();
       final c = _activeWebview;
       if (c != null) {
+        debugPrint('MAKAW-NAV isNtp directLoad url=$url');
         c.loadUrl(urlRequest: URLRequest(url: WebUri(url))).catchError((_) {});
+      } else {
+        _pendingNavigationUrl = url;
+        debugPrint('MAKAW-NAV isNtp setPending=$_pendingNavigationUrl');
       }
     } else {
+      debugPrint('MAKAW-NAV newTab(from existing) create url=$url');
       _createBrowserTab(url: url);
       final newTab = _activeTab;
       newTab.pushHistory(url);
@@ -1483,11 +1431,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           },
           onCreateTab: () {
             _createBrowserTab();
-            Navigator.of(context).pop();
           },
           onCreateIncognitoTab: () {
             _createBrowserTab(incognito: true);
-            Navigator.of(context).pop();
           },
         ),
         transitionDuration: Duration(milliseconds: 200),
@@ -1723,86 +1669,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         duration: Duration(seconds: 5),
       ));
     }
-  }
-
-  // ─── Editor ──────────────────────────────────────────────────────────────────
-
-  void _openFileInEditor(String name, String content, {String? language}) {
-    final existing = _openFiles.indexWhere((f) => f.name == name);
-    if (existing >= 0) {
-      setState(() => _activeFileId = _openFiles[existing].id);
-      _loadFileInMonaco(_openFiles[existing]);
-      return;
-    }
-    final id = ++_fileIdCounter;
-    final file = EditorFile(id: id, name: name, content: content, language: language ?? detectLanguage(name));
-    setState(() {
-      _openFiles.add(file);
-      _activeFileId = id;
-    });
-    _loadFileInMonaco(file);
-  }
-
-  void _loadFileInMonaco(EditorFile file) {
-    final escaped = file.content.replaceAll('\\', '\\\\').replaceAll('`', '\\`').replaceAll(r'$', r'\$');
-    _monacoController?.evaluateJavascript(source: '''
-      window.editor.getModel().setValue(`$escaped`);
-      monaco.editor.setModelLanguage(window.editor.getModel(), '${file.language}');
-    ''');
-  }
-
-  void _closeEditorFile(int id) {
-    if (_openFiles.length <= 1) return;
-    final idx = _openFiles.indexWhere((f) => f.id == id);
-    setState(() {
-      _openFiles.removeWhere((f) => f.id == id);
-      if (_activeFileId == id) {
-        final next = _openFiles[idx > 0 ? idx - 1 : 0];
-        _activeFileId = next.id;
-        _loadFileInMonaco(next);
-      }
-    });
-  }
-
-  Future<void> _saveProject() async {
-    final code = await _monacoController?.evaluateJavascript(source: "window.editor.getValue()");
-    final ext = _currentLang == 'dart' ? 'dart' : _currentLang == 'python' ? 'py' : _currentLang == 'typescript' ? 'ts' : _currentLang;
-    final path = p.join(_projectPath, '$_currentProject.$ext');
-    await File(path).writeAsString(code ?? '');
-    await _db!.insert('projects', {
-      'name': _currentProject,
-      'content': code,
-      'language': _currentLang,
-      'path': path,
-      'updated_at': DateTime.now().toIso8601String()
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-
-    // Mark file clean
-    final af = _openFiles.where((f) => f.id == _activeFileId);
-    if (af.isNotEmpty) af.first.dirty = false;
-
-    _loadProjects();
-    _showToast('Saved');
-  }
-
-  Future<void> _runPreview() async {
-    final code = await _monacoController?.evaluateJavascript(source: "window.editor.getValue()");
-    String html = code ?? '';
-    if (_currentLang == 'javascript' || _currentLang == 'typescript') {
-      html = '<!DOCTYPE html><html><body><script type="module">$html</script></body></html>';
-    } else if (_currentLang == 'css') {
-      html = '<!DOCTYPE html><html><head><style>$html</style></head><body><h1>CSS Preview</h1></body></html>';
-    } else if (_currentLang == 'dart') {
-      html = '<!DOCTYPE html><html><body><pre>$html</pre></body></html>';
-    }
-    final uri = Uri.dataFromString(html, mimeType: 'text/html', encoding: utf8);
-    await _activeWebview?.loadUrl(urlRequest: URLRequest(url: WebUri(uri.toString())));
-    _switchToView('browser');
-  }
-
-  Future<void> _formatCode() async {
-    await _monacoController?.evaluateJavascript(source: "window.editor.getAction('editor.action.formatDocument').run()");
-    _showToast('Formatted');
   }
 
   // ─── Git Functions ──────────────────────────────────────────────────────────
@@ -2461,11 +2327,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     _musicService.removeListener(_onMusicChanged);
     _downloadManager?.dispose();
     _updateService?.cleanOldApks();
-    _pty?.kill();
     _urlController.dispose();
     _searchController.dispose();
-    _terminalInputController.dispose();
-    _terminalFocusNode.dispose();
     _tabControllers.clear();
     _tabSnapshots.clear();
     super.dispose();
@@ -2487,38 +2350,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             theme: 'vs-dark',
             readOnly: true,
             minimap: {enabled: false}
-          });
-        });
-      </script></body></html>
-    ''';
-  }
-
-  String _monacoHtml() {
-    return '''
-      <!DOCTYPE html><html><head><meta charset="utf-8">
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
-      <style>html,body,#container{width:100%;height:100%;margin:0;padding:0;overflow:hidden;}</style>
-      </head><body><div id="container"></div>
-      <script>
-        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
-        require(['vs/editor/editor.main'], function () {
-          window.editor = monaco.editor.create(document.getElementById('container'), {
-            value: '// Welcome to Makaw Mobile\\nconsole.log("Hello from Makaw!");',
-            language: 'javascript',
-            theme: '${widget.themeMode == "light" ? "vs" : "vs-dark"}',
-            automaticLayout: true,
-            minimap: {enabled: true},
-            fontSize: 14,
-            wordWrap: 'on',
-            formatOnPaste: true,
-            formatOnType: true,
-            quickSuggestions: true,
-            suggestOnTriggerCharacters: true,
-            renderWhitespace: 'selection',
-            fontLigatures: true
-          });
-          window.editor.getModel().onDidChangeContent(function() {
-            window.flutter_inappwebview.callHandler('editorChanged');
           });
         });
       </script></body></html>
@@ -2676,11 +2507,90 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         onOpenTool: (tool) => _openEcosystemTool(hub, tool),
         onGoHome: _goToMakawHome,
         isDesktopShell: Responsive.isDesktop(context) && !kIsWeb,
+        onSearch: _openUniversalSearch,
+        recentActivity: hub.id == 'documents'
+            ? RecentActivitySection(onOpen: (doc) => _openFile(doc.filePath))
+            : hub.id == 'terminal'
+                ? RecentTerminalSessionsSection(
+                    onOpenSession: _openTerminalSession,
+                    onNewSession: () => _openTerminalSession(-1),
+                  )
+                : null,
+        auxSections: hub.id == 'code_studio' ? [_buildRecentProjectsSection()] : const [],
       ),
       transitionDuration: const Duration(milliseconds: 220),
       reverseTransitionDuration: const Duration(milliseconds: 160),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
     ));
+  }
+
+  /// Builds the adaptive Code Studio IDE workspace for the current project.
+  ///
+  /// Opens a new [MakawIdeWorkspace] for the project rooted at [_projectPath].
+  Widget _buildStudioWorkspace() {
+    final root = Directory(_projectPath);
+    return MakawIdeWorkspace(project: StudioProject(root));
+  }
+
+  /// Recent / saved projects shown on the Code Studio hub.
+  Widget _buildRecentProjectsSection() {
+    final projects = List<Map<String, dynamic>>.from(_projects);
+    projects.sort((a, b) => (b['updated_at']?.toString() ?? '').compareTo(a['updated_at']?.toString() ?? ''));
+    final recents = projects.take(5).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.folder_rounded, color: Color(0xFFFBBF24), size: 18),
+            const SizedBox(width: 6),
+            const Text('Recent Projects',
+                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (recents.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(12)),
+            child: const Text('No saved projects yet — write code in Studio and tap Save',
+                style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+          )
+        else
+          for (final p in recents)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(10)),
+              child: ListTile(
+                dense: true,
+                leading: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF818CF8).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.insert_drive_file, color: Color(0xFF818CF8), size: 20),
+                ),
+                title: Text(p['name']?.toString() ?? 'untitled',
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    overflow: TextOverflow.ellipsis),
+                subtitle: Text('${p['language'] ?? 'javascript'}',
+                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                trailing: const Icon(Icons.open_in_new, color: Color(0xFF94A3B8), size: 18),
+                onTap: () {
+                  Navigator.of(context).push(PageRouteBuilder(
+                    pageBuilder: (_, __, ___) => MakawIdeWorkspace(project: StudioProject(Directory(_projectPath))),
+                    transitionDuration: const Duration(milliseconds: 200),
+                    reverseTransitionDuration: const Duration(milliseconds: 150),
+                    transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+                  ));
+                },
+              ),
+            ),
+      ],
+    );
   }
 
   /// Opens the Browser Ecosystem Hub (Browser Dashboard) as a standalone page.
@@ -2922,6 +2832,43 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
+  Widget _buildFoldersPage() {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: FoldersPage(
+        openFile: (path) => _openFile(path),
+      ),
+    );
+  }
+
+  Widget _buildTerminalPage() {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: const TerminalSessionsPage(),
+    );
+  }
+
+  /// Opens the Terminal tool focused on a specific session (from the hub's
+  /// Recent Sessions section).
+  void _openTerminalSession(int sessionId) {
+    Navigator.of(context).push(PageRouteBuilder(
+      pageBuilder: (_, __, ___) => TerminalSessionsPage(initialSessionId: sessionId),
+      transitionDuration: const Duration(milliseconds: 200),
+      reverseTransitionDuration: const Duration(milliseconds: 150),
+      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+    ));
+  }
+
   Widget _buildFeatureScaffold(String title, IconData icon, Widget body) {
     return PopScope(
       canPop: false,
@@ -2972,145 +2919,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           ],
         ),
         body: SafeArea(child: body),
-      ),
-    );
-  }
-
-  // ─── Studio Tab ─────────────────────────────────────────────────────────────
-
-  Widget _buildStudioTab() {
-    return Column(
-      children: [
-        // File tabs bar
-        Container(
-          height: 36,
-          color: Theme.of(context).colorScheme.surface,
-          child: _openFiles.isEmpty
-              ? null
-              : ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _openFiles.length,
-                  itemBuilder: (ctx, i) {
-                    final f = _openFiles[i];
-                    final active = f.id == _activeFileId;
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() => _activeFileId = f.id);
-                        _loadFileInMonaco(f);
-                      },
-                      child: Container(
-                        padding: EdgeInsets.symmetric(horizontal: 10),
-                        decoration: BoxDecoration(
-                          border: Border(bottom: BorderSide(color: active ? kPrimaryBlue : Colors.transparent, width: 2)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (f.dirty) Text('● ', style: TextStyle(color: Colors.yellow, fontSize: 12)),
-                            Text(f.name, style: TextStyle(fontSize: 12, color: active ? Colors.white : Colors.grey)),
-                            SizedBox(width: 4),
-                            GestureDetector(
-                              onTap: () => _closeEditorFile(f.id),
-                              child: Icon(Icons.close, size: 14, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        // Toolbar
-        Container(
-          color: kSurfaceElevated,
-          padding: EdgeInsets.all(6),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  decoration: InputDecoration(hintText: 'Project name', isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
-                  controller: TextEditingController(text: _currentProject),
-                  onChanged: (v) => _currentProject = v,
-                ),
-              ),
-              SizedBox(width: 6),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 6),
-                decoration: BoxDecoration(
-                  color: kSurfaceBorder,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: DropdownButton<String>(
-                  value: _currentLang,
-                  dropdownColor: kSurfaceElevated,
-                  underline: SizedBox(),
-                  style: TextStyle(fontSize: 12, color: Colors.white),
-                  items: LANG_OPTIONS.map((l) => DropdownMenuItem(value: l, child: Text(l, style: TextStyle(fontSize: 12)))).toList(),
-                  onChanged: (v) async {
-                    setState(() => _currentLang = v!);
-                    await _monacoController?.evaluateJavascript(source: "monaco.editor.setModelLanguage(window.editor.getModel(), '$_currentLang')");
-                  },
-                ),
-              ),
-              SizedBox(width: 4),
-              _iconBtn(Icons.save, 'Save', _saveProject),
-              _iconBtn(Icons.play_arrow, 'Run', _runPreview),
-              _iconBtn(Icons.format_align_left, 'Format', _formatCode),
-              _iconBtn(Icons.add, 'New', _newFile),
-            ],
-          ),
-        ),
-        // Monaco editor
-        Expanded(
-          child: InAppWebView(
-            initialData: InAppWebViewInitialData(data: _monacoHtml()),
-            onWebViewCreated: (c) {
-              _monacoController = c;
-              c.addJavaScriptHandler(handlerName: 'editorChanged', callback: (_) {
-                final af = _openFiles.where((f) => f.id == _activeFileId);
-                if (af.isNotEmpty && !af.first.dirty) {
-                  setState(() => af.first.dirty = true);
-                }
-              });
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _iconBtn(IconData icon, String tooltip, VoidCallback onPressed) {
-    return IconButton(
-      icon: Icon(icon, size: 18),
-      onPressed: onPressed,
-      tooltip: tooltip,
-      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-      padding: EdgeInsets.all(4),
-    );
-  }
-
-  void _newFile() {
-    final controller = TextEditingController(text: 'untitled.dart');
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('New File'),
-        content: TextField(controller: controller, autofocus: true, decoration: InputDecoration(hintText: 'filename.dart')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              final name = controller.text.trim();
-              if (name.isEmpty) return;
-              final lang = detectLanguage(name);
-              final boilerplate = BOILERPLATES[lang] ?? '';
-              _openFileInEditor(name, boilerplate, language: lang);
-              _currentLang = lang;
-            },
-            child: Text('Create'),
-          ),
-        ],
       ),
     );
   }
@@ -3189,35 +2997,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       );
     }
 
-    Widget _buildTabCounter() {
-      final tabCount = _currentModeTabCount;
-      return GestureDetector(
-        onTap: _showTabSwitcher,
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: inc ? kIncognitoPurple.withValues(alpha: 0.15) : Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: inc ? kIncognitoPurple.withValues(alpha: 0.5) : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(inc ? Icons.visibility_off : Icons.tab, size: 18, color: inc ? kIncognitoPurple : iconColor),
-              SizedBox(width: 4),
-              Text('$tabCount', style: TextStyle(color: inc ? kIncognitoPurple : iconColor, fontSize: 14, fontWeight: FontWeight.w600)),
-            ],
-          ),
-        ),
-      );
-    }
-
-    Widget _buildOverflowMenu() {
-      return IconButton(icon: Icon(Icons.more_horiz, color: iconColor), onPressed: _showEllipsisMenu);
-    }
-
     // Makaw Home: incognito toggle (left) | spacer | overflow (right). NO tab counter, NO omnibox pill.
     if (_isMakawHome) {
       return Container(
@@ -3235,19 +3014,14 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       );
     }
 
-    // NTP & Browsing: home button (left) | omnibox pill (center) | tab counter | overflow (right)
+    // Browsing: address bar (URL pill) only — controls live in the bottom dock
     return Container(
       color: headerBg,
       padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(children: [
-        IconButton(
-          icon: Icon(inc ? Icons.visibility_off : Icons.home_outlined, color: iconColor),
-          onPressed: _goHome,
-        ),
-        _buildUrlPill(),
-        _buildTabCounter(),
         SizedBox(width: 4),
-        _buildOverflowMenu(),
+        _buildUrlPill(),
+        SizedBox(width: 4),
       ]),
     );
   }
@@ -3647,6 +3421,22 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     final tab = _activeBrowserTab;
     final isLoading = !showHome && !isTypeView && progress > 0 && progress < 100;
 
+    // The Makaw Root Portal is the parent of the whole Makaw ecosystem and
+    // tools. It must render fully standalone — no browser header, dock, or
+    // progress chrome around it. Its own footer menu (mobile bottom nav)
+    // is the portal's dedicated menu.
+    if (_isMakawHome) {
+      if (!kIsWeb && Responsive.isMobile(context)) {
+        return Column(
+          children: [
+            Expanded(child: _buildHomeContent()),
+            _buildBottomNavBar(),
+          ],
+        );
+      }
+      return _buildHomeContent();
+    }
+
     return Column(
       children: [
         if (!_isFullscreen && !_isMakawHome) _buildBrowserHeader(),
@@ -3659,6 +3449,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             errorMessage: _tabErrorMessages[activeId] ?? '',
             mediaCount: _pendingMedia.length,
             tabCount: _currentModeTabCount,
+            showDock: _browserDockVisible,
             canGoBack: tab.canGoBack,
             canGoForward: tab.canGoForward,
             onBack: () => _activeWebview?.goBack(),
@@ -3765,6 +3556,59 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     });
   }
 
+  // ─── Makaw Root Portal Footer Menu (main Makaw menu) ────────────────────────
+
+  Widget _buildBottomNavBar() {
+    const items = [
+      (Icons.code_rounded, Color(0xFF818CF8), 'Studio', 'code_studio'),
+      (Icons.terminal_rounded, Color(0xFF22D3EE), 'Terminal', 'terminal'),
+      (Icons.edit_document, Color(0xFFFBBF24), 'Docs', 'documents'),
+      (Icons.video_collection_outlined, Color(0xFFF87171), 'Media', 'media'),
+      (Icons.language_rounded, Color(0xFF00A7C2), 'Browser', 'browser'),
+      (Icons.folder_outlined, Color(0xFF34D399), 'Files', 'files'),
+    ];
+    return Material(
+      color: const Color(0xFF0B1120),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 66,
+          child: Row(
+            children: [
+              for (final it in items)
+                _footerItem(it.$1, it.$2, it.$3, () => _openEcosystem(it.$4)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _footerItem(IconData icon, Color accent, String label, VoidCallback onTap) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: accent, size: 24),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: Colors.white70,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ─── Home Screen ───────────────────────────────────────────────────────────
 
   Widget _buildHomeContent() {
@@ -3859,7 +3703,13 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             // Omnibox
             GestureDetector(
               onTap: () {
-                setState(() { _typeViewFromHome = true; _viewMode = ViewMode.typeView; });
+                setState(() {
+                  _typeViewFromHome = true;
+                  _searchSuggestions = [];
+                  _suggestions = [];
+                  _browserSubView = BrowserSubView.browsing;
+                  _viewMode = ViewMode.typeView;
+                });
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   _urlFocusNode.requestFocus();
                 });
@@ -4161,6 +4011,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   void _openFile(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
 
+    // Record the open so it surfaces in the Documents ecosystem's recent
+    // activity (best-effort, non-throwing).
+    _documentService.recordRecentOpen(filePath);
+
     final goBack = () {
       if (mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
@@ -4203,6 +4057,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       Navigator.of(context).push(fastRoute(HtmlViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
     } else if (['doc', 'docx', 'odt', 'rtf', 'pages'].contains(ext)) {
       Navigator.of(context).push(fastRoute(DocumentViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
+    } else if (['xls', 'xlsx'].contains(ext)) {
+      Navigator.of(context).push(fastRoute(SpreadsheetViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
     } else {
       OpenFilex.open(filePath);
     }
@@ -4449,61 +4305,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     return false;
   }
 
-  String _googleConsentAutoDismissScript() => '''
-(function(){
-  function killConsentHaze() {
-    try {
-      var selectors = [
-        'iframe[src*="consent.google"]',
-        '#lb',
-        '.SS20bd',
-        'div[role="dialog"][aria-modal="true"]',
-        '.GoogleConsentBanner',
-        '#consent-bump',
-        '[data-consent]',
-        'div[class*="consent"]',
-        'div[id*="consent"]'
-      ];
-      for (var i = 0; i < selectors.length; i++) {
-        var els = document.querySelectorAll(selectors[i]);
-        for (var j = 0; j < els.length; j++) {
-          var el = els[j];
-          var src = (el.src || '').toLowerCase();
-          var cls = (el.className || '').toLowerCase();
-          var id = (el.id || '').toLowerCase();
-          if (src.indexOf('consent.google') >= 0 ||
-              cls.indexOf('consent') >= 0 ||
-              id.indexOf('consent') >= 0 ||
-              id === 'lb') {
-            el.remove();
-          }
-        }
-      }
-      if (document.body) {
-        document.body.style.overflow = 'auto';
-        document.body.style.position = 'static';
-        document.documentElement.style.overflow = 'auto';
-      }
-    } catch(e) {}
-  }
-  killConsentHaze();
-  if (document.body) {
-    var obs = new MutationObserver(function(muts) {
-      for (var i = 0; i < muts.length; i++) {
-        var added = muts[i].addedNodes;
-        for (var j = 0; j < added.length; j++) {
-          var n = added[j];
-          if (n.nodeType === 1) killConsentHaze();
-        }
-      }
-    });
-    obs.observe(document.body, { childList: true, subtree: true });
-  }
-  setTimeout(killConsentHaze, 500);
-  setTimeout(killConsentHaze, 1500);
-})();
-''';
-
   String _antiTapjackScript() => '''
 (function(){
   try {
@@ -4515,21 +4316,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     }
   } catch(e) {}
 
-  // 1. Anti-detection: hide automation flags (keep this - it's harmless)
-  try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch(e) {}
-  try { window.chrome = window.chrome || { runtime: {}, loadTimes: function(){}, csi: function(){} }; } catch(e) {}
-  try {
-    var origQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = function(p) {
-      return p.name === 'notifications' ?
-        Promise.resolve({ state: Notification.permission }) :
-        origQuery(p);
-    };
-  } catch(e) {}
-  try { Object.defineProperty(navigator, 'plugins', { get: function(){ return [1,2,3,4,5]; } }); } catch(e) {}
-  try { Object.defineProperty(navigator, 'languages', { get: function(){ return ['en-US','en']; } }); } catch(e) {}
-
-  // 2. Block location.replace / location.assign redirects to known bad domains only
+  // 1. Block location.replace / location.assign redirects to known bad domains only
   try {
     var _blockedKw = ['casino','betting','gambling','slots','poker','porn','xxx','sex','nude','nsfw','adult','popunder','clickunder','popads','malware','phishing'];
     function _isBadRedirect(url) {
@@ -4577,12 +4364,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       domStorageEnabled: true,
       databaseEnabled: true,
       allowFileAccess: true,
-      useShouldInterceptRequest: true,
       preferredContentMode: UserPreferredContentMode.MOBILE,
-      offscreenPreRaster: true,
+      offscreenPreRaster: false,
       incognito: tab.incognito,
       useOnDownloadStart: true,
-      contentBlockers: _adBlocker.getContentBlockerRules(),
     );
 
     _pullToRefreshController ??= PullToRefreshController(
@@ -4603,7 +4388,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       initialSettings: settings,
       initialUrlRequest: URLRequest(url: WebUri(initialUrl)),
       initialUserScripts: UnmodifiableListView([
-        UserScript(source: _googleConsentAutoDismissScript(), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
         UserScript(source: _antiTapjackScript(), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
       ]),
       pullToRefreshController: _pullToRefreshController,
@@ -4617,11 +4401,13 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       },
       onWebViewCreated: (ctrl) {
         _tabControllers[tab.id] = ctrl;
+        debugPrint('MAKAW-WV CREATED tab=${tab.id} active=$_activeBrowserTabId pending=$_pendingNavigationUrl url=${tab.url}');
 
-        if (_pendingNavigationUrl != null) {
+        if (_pendingNavigationUrl != null && tab.id == _activeBrowserTabId) {
           final pending = _pendingNavigationUrl!;
           _pendingNavigationUrl = null;
           WidgetsBinding.instance.addPostFrameCallback((_) {
+            debugPrint('MAKAW-WV LOAD pending=$pending');
             ctrl.loadUrl(urlRequest: URLRequest(url: WebUri(pending))).catchError((_) {});
           });
         }
@@ -4757,6 +4543,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           } catch (_) {}
         });
       },
+      onLongPressHitTestResult: (ctrl, hitTestResult) {
+        handleWebLongPress(context, hitTestResult);
+      },
       shouldOverrideUrlLoading: (ctrl, navAction) async {
         final url = navAction.request.url.toString();
         // 1. Block non-http protocols (intent://, market://, etc.)
@@ -4803,11 +4592,14 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       onLoadStart: (ctrl, url) {
         final urlStr = url.toString();
         final tabId = tab.id;
+        debugPrint('MAKAW-LOADSTART tab=$tabId active=$_activeBrowserTabId url=$urlStr');
         _tabProgress[tabId] = 0;
         _tabErrorUrls.remove(tabId);
         _tabErrorMessages.remove(tabId);
         if (tabId == _activeBrowserTabId) {
           _pendingMedia.clear();
+          _lastScrollY = 0;
+          _browserDockVisible = true;
           if (urlStr == 'about:blank') return;
           _onBrowserNavigation(urlStr);
         }
@@ -4905,6 +4697,16 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       onExitFullscreen: (ctrl) {
         setState(() => _isFullscreen = false);
       },
+      onScrollChanged: (ctrl, x, y) {
+        if (tab.id != _activeBrowserTabId) return;
+        final dy = y.toDouble();
+        final delta = dy - _lastScrollY;
+        _lastScrollY = dy;
+        final shouldShow = delta <= 0;
+        if (shouldShow != _browserDockVisible) {
+          setState(() => _browserDockVisible = shouldShow);
+        }
+      },
     );
   }
 
@@ -4931,10 +4733,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     final domain = Uri.tryParse(url)?.host.replaceFirst('www.', '') ?? '';
     if (domain.isNotEmpty) {
       c.evaluateJavascript(source: '''
-PasswordAutofillChannel.postMessage(JSON.stringify({
-  url: '$escapedUrl',
-  domain: '$domain'
-}));
+try {
+  PasswordAutofillChannel.postMessage(JSON.stringify({
+    url: '$escapedUrl',
+    domain: '$domain'
+  }));
+} catch(e) {}
 ''').catchError((_) {});
     }
   }
@@ -5241,6 +5045,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     window._makawDownloadIntervalIds.forEach(clearInterval);
   }
   window._makawDownloadIntervalIds = [];
+  if (!window._makawBlobUrls) window._makawBlobUrls = [];
   if (window._makawDownloadInit) return;
   window._makawDownloadInit = true;
 
@@ -5251,26 +5056,8 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     flutter_inappwebview.callHandler('MakawDownloadChannel', JSON.stringify({url: url, filename: filename || ''}));
   }
 
-  // Intercept <a download> and binary file links only
-  document.addEventListener('click', function(e) {
-    var a = e.target.closest('a[download]');
-    if (a && a.href) {
-      e.preventDefault();
-      e.stopPropagation();
-      sendDownload(a.href, a.download);
-      return;
-    }
-    a = e.target.closest('a');
-    if (!a || !a.href) return;
-    var ext = a.href.split('?')[0].split('#')[0].split('.').pop().toLowerCase();
-    if (binaryExts.indexOf(ext) >= 0 && a.href.startsWith('http')) {
-      e.preventDefault();
-      e.stopPropagation();
-      sendDownload(a.href, a.href.split('/').pop().split('?')[0].split('#')[0]);
-    }
-  }, true);
-
-  // Intercept blob URL downloads
+  // Intercept blob URL downloads (the WebView handles <a download>/binary
+  // links natively via onDownloadStartRequest — do NOT preventDefault them).
   var origCreateObjectURL = window.URL.createObjectURL;
   window.URL.createObjectURL = function(obj) {
     var url = origCreateObjectURL.apply(this, arguments);
@@ -5331,7 +5118,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
     return origSend.apply(this, arguments);
   };
 
-  // Monitor for blob downloads
+  // Monitor for blob downloads (lightweight: only on a paced interval)
   window._makawDownloadIntervalIds.push(setInterval(function() {
     if (!_makawBlobUrls || !_makawBlobUrls.length) return;
     var anchors = document.querySelectorAll('a');
@@ -5342,24 +5129,7 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
         a.removeAttribute('download');
       }
     }
-  }, 1000));
-
-  // MutationObserver for dynamically created download links
-  var observer = new MutationObserver(function(mutations) {
-    mutations.forEach(function(mut) {
-      mut.addedNodes.forEach(function(node) {
-        if (node.nodeType === 1) {
-          if (node.tagName === 'A' && node.href && node.hasAttribute('download')) {
-            sendDownload(node.href, node.getAttribute('download') || '');
-          }
-          node.querySelectorAll && node.querySelectorAll('a[download]').forEach(function(a) {
-            if (a.href) sendDownload(a.href, a.download || '');
-          });
-        }
-      });
-    });
-  });
-  if (document.body) observer.observe(document.body, {childList: true, subtree: true});
+  }, 2000));
 })();
 ''').catchError((_) {});
   }
@@ -6036,10 +5806,17 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                       dense: true,
                       title: Text(s['name']!, style: TextStyle(fontSize: 13)),
                       trailing: Icon(Icons.content_paste, size: 16, color: kPrimaryBlue),
-                      onTap: () {
-                        _openFileInEditor('snippet.dart', s['code'] ?? '');
-                        _switchToView('studio');
-                        _showToast('Snippet inserted');
+                      onTap: () async {
+                        final dir = Directory(p.join(_projectPath, 'snippets'))..createSync(recursive: true);
+                        await File(p.join(dir.path, 'snippet.dart')).writeAsString(s['code'] ?? '');
+                        if (!mounted) return;
+                        Navigator.of(context).push(PageRouteBuilder(
+                          pageBuilder: (_, __, ___) => MakawIdeWorkspace(project: StudioProject(Directory(_projectPath))),
+                          transitionDuration: const Duration(milliseconds: 200),
+                          reverseTransitionDuration: const Duration(milliseconds: 150),
+                          transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+                        ));
+                        _showToast('Snippet added to project');
                       },
                     );
                   },
@@ -6080,14 +5857,13 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
                   title: Text(name, style: TextStyle(fontSize: 14)),
                   subtitle: Text('$lang  •  ${updated.toString().substring(0, 10)}', style: TextStyle(fontSize: 11, color: Colors.grey)),
                   trailing: Icon(Icons.open_in_new, size: 16, color: kPrimaryBlue),
-                  onTap: () async {
-                    setState(() {
-                      _currentProject = name;
-                      _currentLang = lang;
-                    });
-                    final content = p['content'] ?? '';
-                    _openFileInEditor('$name.$lang', content, language: lang);
-                    _switchToView('studio');
+                  onTap: () {
+                    Navigator.of(context).push(PageRouteBuilder(
+                      pageBuilder: (_, __, ___) => MakawIdeWorkspace(project: StudioProject(Directory(_projectPath))),
+                      transitionDuration: const Duration(milliseconds: 200),
+                      reverseTransitionDuration: const Duration(milliseconds: 150),
+                      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+                    ));
                   },
                 ),
               );
@@ -6221,59 +5997,6 @@ PasswordAutofillChannel.postMessage(JSON.stringify({
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         padding: EdgeInsets.symmetric(vertical: 12),
-      ),
-    );
-  }
-
-  // ─── Terminal Tab ───────────────────────────────────────────────────────────
-
-  Widget _buildTerminalTab() {
-    if (kIsWeb) {
-      return Container(
-        decoration: BoxDecoration(color: kSurfaceBase),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.terminal, size: 48, color: Colors.grey),
-              SizedBox(height: 16),
-              Text('Terminal is not available on web', style: TextStyle(color: Colors.grey, fontSize: 14)),
-            ],
-          ),
-        ),
-      );
-    }
-    _startPty();
-    return Container(
-      decoration: BoxDecoration(color: kSurfaceBase),
-      child: Column(
-        children: [
-          Expanded(
-            child: TerminalView(
-              _terminal,
-              controller: _terminalController,
-              theme: TerminalThemes.defaultTheme,
-              autofocus: true,
-            ),
-          ),
-          Container(
-            color: kSurfaceElevated,
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              children: [
-                Icon(Icons.terminal, size: 16, color: Colors.grey),
-                SizedBox(width: 8),
-                Text('Terminal', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                Spacer(),
-                _iconBtn(Icons.block, 'Ctrl+C', () => _pty?.write(utf8.encode('\x03'))),
-                SizedBox(width: 4),
-                _iconBtn(Icons.stop, 'Ctrl+D', () => _pty?.write(utf8.encode('\x04'))),
-                SizedBox(width: 4),
-                _iconBtn(Icons.refresh, 'Clear', () { _terminal.eraseDisplay(); _terminal.eraseScrollbackOnly(); }),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

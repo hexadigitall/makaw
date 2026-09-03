@@ -31,7 +31,7 @@ class _SubtitlesPageState extends State<SubtitlesPage> {
   Future<void> _load() async {
     setState(() => _isLoading = true);
     final q = _query.trim();
-    var cues = q.isNotEmpty ? await SubtitleService.search(q) : await _allMedia();
+    var cues = q.isNotEmpty ? await SubtitleService.search(q) : await SubtitleService.listMedia();
     final grouped = <String, List<SubtitleCue>>{};
     for (final c in cues) {
       grouped.putIfAbsent(c.mediaId, () => []);
@@ -45,22 +45,6 @@ class _SubtitlesPageState extends State<SubtitlesPage> {
       _groups = groups;
       _isLoading = false;
     });
-  }
-
-  Future<List<SubtitleCue>> _allMedia() async {
-    // Gather distinct media via search on empty text is not ideal; instead
-    // union cue sets by querying one representative per media_id.
-    try {
-      final rows = await SubtitleService.search('', limit: 10000);
-      final mediaIds = <String>{};
-      final result = <SubtitleCue>[];
-      for (final c in rows) {
-        if (mediaIds.add(c.mediaId)) result.add(c);
-      }
-      return result;
-    } catch (_) {
-      return const [];
-    }
   }
 
   @override
@@ -101,7 +85,7 @@ class _SubtitlesPageState extends State<SubtitlesPage> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00897B)))
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFF87171)))
           : _selectedMedia != null
               ? _buildDetail()
               : _groups.isEmpty

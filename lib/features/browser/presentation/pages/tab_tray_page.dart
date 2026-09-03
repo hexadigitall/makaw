@@ -165,7 +165,10 @@ class _TabTrayPageState extends State<TabTrayPage> {
               children: [
                 IconButton(
                   icon: Icon(Icons.add_circle_outline, color: _showIncognito ? _kIncognitoPurple : kAccentTeal, size: 28),
-                  onPressed: _showIncognito ? widget.onCreateIncognitoTab : widget.onCreateTab,
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    _showIncognito ? widget.onCreateIncognitoTab?.call() : widget.onCreateTab();
+                  },
                   splashRadius: 20,
                 ),
                 Spacer(),

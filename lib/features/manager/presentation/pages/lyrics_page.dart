@@ -85,7 +85,7 @@ class _LyricsPageState extends State<LyricsPage> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00897B)))
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFF472B6)))
           : _selected != null
               ? _buildDetail()
               : _groups.isEmpty

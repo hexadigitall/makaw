@@ -86,19 +86,19 @@ class _BookmarksPageState extends State<BookmarksPage> {
               },
             ),
           IconButton(
-            icon: const Icon(Icons.create_new_folder_outlined, color: Color(0xFF00897B)),
+            icon: const Icon(Icons.create_new_folder_outlined, color: Color(0xFFFBBF24)),
             tooltip: 'New folder',
             onPressed: _showNewFolderDialog,
           ),
           IconButton(
-            icon: const Icon(Icons.add, color: Color(0xFF00897B)),
+            icon: const Icon(Icons.add, color: Color(0xFFFBBF24)),
             tooltip: 'Add bookmark',
             onPressed: _showAddBookmarkDialog,
           ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00897B)))
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFBBF24)))
           : Column(
               children: [
                 if (_folders.isNotEmpty && _query.isEmpty) _buildFolderChips(),
@@ -169,7 +169,7 @@ class _BookmarksPageState extends State<BookmarksPage> {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Material(
-        color: selected ? const Color(0xFF00897B) : const Color(0xFF1E293B),
+        color: selected ? const Color(0xFFFBBF24) : const Color(0xFF1E293B),
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
@@ -291,10 +291,10 @@ class _BookmarksPageState extends State<BookmarksPage> {
         width: 40,
         height: 40,
         fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => const Icon(Icons.bookmark, color: Color(0xFF00897B), size: 22),
+        errorBuilder: (_, __, ___) => const Icon(Icons.bookmark, color: Color(0xFFFBBF24), size: 22),
       );
     }
-    return const Icon(Icons.bookmark, color: Color(0xFF00897B), size: 22);
+    return const Icon(Icons.bookmark, color: Color(0xFFFBBF24), size: 22);
   }
 
   String _host(String url) {
@@ -358,7 +358,7 @@ class _BookmarksPageState extends State<BookmarksPage> {
               if (ctx.mounted) Navigator.of(ctx).pop();
               await _load();
             },
-            child: const Text('Create', style: TextStyle(color: Color(0xFF00897B))),
+            child: const Text('Create', style: TextStyle(color: Color(0xFFFBBF24))),
           ),
         ],
       ),
@@ -368,58 +368,114 @@ class _BookmarksPageState extends State<BookmarksPage> {
   Future<void> _showAddBookmarkDialog() async {
     final titleCtl = TextEditingController();
     final urlCtl = TextEditingController();
+    final tagCtl = TextEditingController();
+    int? folderId = _selectedFolderId;
+    final tags = <String>[];
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        title: const Text('Add bookmark', style: TextStyle(color: Colors.white, fontSize: 18)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleCtl,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Title',
-                labelStyle: TextStyle(color: Color(0xFF94A3B8)),
-              ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: const Text('Add bookmark', style: TextStyle(color: Colors.white, fontSize: 18)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtl,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(labelText: 'Title', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: urlCtl,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(labelText: 'URL', labelStyle: TextStyle(color: Color(0xFF94A3B8))),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int?>(
+                  value: folderId,
+                  dropdownColor: const Color(0xFF1E293B),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'Folder',
+                    labelStyle: TextStyle(color: Color(0xFF94A3B8)),
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(value: null, child: Text('No folder')),
+                    ..._folders.map((f) => DropdownMenuItem<int?>(
+                      value: f.id,
+                      child: Text(f.name),
+                    )),
+                  ],
+                  onChanged: (v) => setDlg(() => folderId = v),
+                ),
+                const SizedBox(height: 12),
+                if (tags.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: tags.map((t) => Chip(
+                        label: Text('#$t', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                        backgroundColor: const Color(0xFF334155),
+                        deleteIconColor: const Color(0xFFF87171),
+                        onDeleted: () => setDlg(() => tags.remove(t)),
+                      )).toList(),
+                    ),
+                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: tagCtl,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(hintText: 'Add tag', hintStyle: TextStyle(color: Colors.white38)),
+                        onSubmitted: (_) {
+                          final t = tagCtl.text.trim().replaceAll('#', '');
+                          if (t.isNotEmpty && !tags.contains(t)) setDlg(() { tags.add(t); tagCtl.clear(); });
+                        },
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add, color: Color(0xFFFBBF24)),
+                      onPressed: () {
+                        final t = tagCtl.text.trim().replaceAll('#', '');
+                        if (t.isNotEmpty && !tags.contains(t)) setDlg(() { tags.add(t); tagCtl.clear(); });
+                      },
+                    ),
+                  ],
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: urlCtl,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'URL',
-                labelStyle: TextStyle(color: Color(0xFF94A3B8)),
-              ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+            ),
+            TextButton(
+              onPressed: () async {
+                final title = titleCtl.text.trim();
+                final url = urlCtl.text.trim();
+                if (url.isNotEmpty) {
+                  await BookmarkService.upsert(Bookmark(
+                    title: title.isEmpty ? _host(url) : title,
+                    url: url,
+                    folderId: folderId,
+                    tags: List.from(tags),
+                    createdAt: DateTime.now(),
+                    updatedAt: DateTime.now(),
+                  ));
+                }
+                if (ctx.mounted) Navigator.of(ctx).pop();
+                await _load();
+              },
+              child: const Text('Save', style: TextStyle(color: Color(0xFFFBBF24))),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
-          ),
-          TextButton(
-            onPressed: () async {
-              final title = titleCtl.text.trim();
-              final url = urlCtl.text.trim();
-              if (url.isNotEmpty) {
-                await BookmarkService.upsert(Bookmark(
-                  title: title.isEmpty ? _host(url) : title,
-                  url: url,
-                  folderId: _selectedFolderId,
-                  tags: const [],
-                  createdAt: DateTime.now(),
-                  updatedAt: DateTime.now(),
-                ));
-              }
-              if (ctx.mounted) Navigator.of(ctx).pop();
-              await _load();
-            },
-            child: const Text('Save', style: TextStyle(color: Color(0xFF00897B))),
-          ),
-        ],
       ),
     );
   }
@@ -466,9 +522,23 @@ class _BookmarksPageState extends State<BookmarksPage> {
                 _showEditBookmarkDialog(b);
               }),
               _actionTile(Icons.delete_outline, 'Delete', () async {
-                await BookmarkService.deleteBookmark(b.id!);
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                await _load();
+                Navigator.of(ctx).pop();
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (dCtx) => AlertDialog(
+                    backgroundColor: const Color(0xFF1E293B),
+                    title: const Text('Delete bookmark?', style: TextStyle(color: Colors.white, fontSize: 18)),
+                    content: Text('Delete "${b.title}"?', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14)),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.of(dCtx).pop(false), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
+                      TextButton(onPressed: () => Navigator.of(dCtx).pop(true), child: const Text('Delete', style: TextStyle(color: Color(0xFFF87171)))),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  await BookmarkService.deleteBookmark(b.id!);
+                  await _load();
+                }
               }, color: const Color(0xFFF87171)),
             ],
           ),
@@ -532,7 +602,7 @@ class _BookmarksPageState extends State<BookmarksPage> {
               if (ctx.mounted) Navigator.of(ctx).pop();
               await _load();
             },
-            child: const Text('Save', style: TextStyle(color: Color(0xFF00897B))),
+            child: const Text('Save', style: TextStyle(color: Color(0xFFFBBF24))),
           ),
         ],
       ),
@@ -624,7 +694,7 @@ class _BookmarksPageState extends State<BookmarksPage> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.add, color: Color(0xFF00897B)),
+                  icon: const Icon(Icons.add, color: Color(0xFFFBBF24)),
                   onPressed: () => _addTagCommit(ctx, b, tagCtl),
                 ),
               ],
@@ -671,10 +741,30 @@ class _BookmarksPageState extends State<BookmarksPage> {
               _showRenameFolderDialog(f);
             }),
             _actionTile(Icons.delete_outline, 'Delete folder', () async {
-              await BookmarkService.deleteFolder(f.id!, cascade: true);
-              if (ctx.mounted) Navigator.of(ctx).pop();
-              if (_selectedFolderId == f.id) _selectedFolderId = null;
-              await _load();
+              Navigator.of(ctx).pop();
+              final count = _allBookmarks?.where((b) => b.folderId == f.id).length ?? 0;
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (dCtx) => AlertDialog(
+                  backgroundColor: const Color(0xFF1E293B),
+                  title: const Text('Delete folder?', style: TextStyle(color: Colors.white, fontSize: 18)),
+                  content: Text(
+                    count > 0
+                        ? 'Delete "${f.name}" and its $count bookmark${count == 1 ? '' : 's'}?'
+                        : 'Delete empty folder "${f.name}"?',
+                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.of(dCtx).pop(false), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
+                    TextButton(onPressed: () => Navigator.of(dCtx).pop(true), child: const Text('Delete', style: TextStyle(color: Color(0xFFF87171)))),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                await BookmarkService.deleteFolder(f.id!, cascade: true);
+                if (_selectedFolderId == f.id) _selectedFolderId = null;
+                await _load();
+              }
             }, color: const Color(0xFFF87171)),
           ],
         ),
@@ -704,7 +794,7 @@ class _BookmarksPageState extends State<BookmarksPage> {
               if (ctx.mounted) Navigator.of(ctx).pop();
               await _load();
             },
-            child: const Text('Save', style: TextStyle(color: Color(0xFF00897B))),
+            child: const Text('Save', style: TextStyle(color: Color(0xFFFBBF24))),
           ),
         ],
       ),

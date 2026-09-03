@@ -104,11 +104,26 @@ class SubtitleService {
     try {
       final rows = await _database.query(
         'subtitles',
-        where: 'media_title LIKE ? OR text LIKE ?',
-        whereArgs: [q, q],
+        where: 'media_id LIKE ? OR media_title LIKE ? OR text LIKE ?',
+        whereArgs: [q, q, q],
         orderBy: 'updated_at DESC',
         limit: limit,
       );
+      return rows.map((m) => SubtitleCue.fromMap(m)).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// List distinct media items (one representative [SubtitleCue] per media_id).
+  static Future<List<SubtitleCue>> listMedia({int limit = 1000}) async {
+    try {
+      final rows = await _database.rawQuery('''
+        SELECT * FROM subtitles
+        WHERE id IN (SELECT MAX(id) FROM subtitles GROUP BY media_id)
+        ORDER BY updated_at DESC
+        LIMIT ?
+      ''', [limit]);
       return rows.map((m) => SubtitleCue.fromMap(m)).toList();
     } catch (_) {
       return const [];

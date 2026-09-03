@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../data/services/document_to_html.dart';
+import '../../../../core/services/text_action_service.dart';
 
 class DocumentViewerPage extends StatefulWidget {
   final String filePath;
@@ -63,6 +64,21 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
         title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
+            icon: const Icon(Icons.record_voice_over, color: Colors.white70),
+            onPressed: _webViewController != null ? () async {
+              final text = await _webViewController!.evaluateJavascript(source: 'document.body.innerText');
+              final clean = text?.toString().trim() ?? '';
+              if (clean.isNotEmpty && mounted) {
+                showReadAloudDialog(context, clean);
+              } else if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('No selectable text'), duration: Duration(seconds: 1), backgroundColor: Color(0xFF334155)),
+                );
+              }
+            } : null,
+            tooltip: 'Read Aloud',
+          ),
+          IconButton(
             icon: const Icon(Icons.copy, color: Colors.white70),
             onPressed: _webViewController != null ? () async {
               final text = await _webViewController!.evaluateJavascript(source: 'document.body.innerText');
@@ -115,7 +131,11 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
                   ),
                   onWebViewCreated: (controller) {
                     _webViewController = controller;
+                    enableWebviewLearningActions(controller: controller, context: context);
                     _loadHtml();
+                  },
+                  onLongPressHitTestResult: (controller, hitTestResult) {
+                    handleWebLongPress(context, hitTestResult);
                   },
                 ),
     );
