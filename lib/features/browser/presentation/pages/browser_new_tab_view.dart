@@ -6,6 +6,7 @@ import '../../data/services/browser_search_service.dart';
 import '../../domain/entities/recent_page_item.dart';
 import '../../../news/data/services/news_feed_service.dart';
 import '../../../news/presentation/widgets/discover_news_feed_widget.dart';
+import '../../../../core/widgets/widgets.dart';
 
 /// The three visual states of the Browser New Tab view.
 ///
@@ -31,6 +32,8 @@ class BrowserNewTabView extends StatefulWidget {
   final VoidCallback onOpenBookmarks;
   final VoidCallback? onEditShortcuts;
   final List<RecentPageItem> recentPages;
+  final void Function(RecentPageItem page)? onRemoveRecentPage;
+  final VoidCallback? onClearRecentPages;
   final List<(String, String)> shortcuts;
   final int tabCount;
   final NewsFeedService? newsFeedService;
@@ -46,6 +49,8 @@ class BrowserNewTabView extends StatefulWidget {
     required this.onOpenBookmarks,
     this.onEditShortcuts,
     required this.recentPages,
+    this.onRemoveRecentPage,
+    this.onClearRecentPages,
     required this.shortcuts,
     required this.tabCount,
     this.newsFeedService,
@@ -213,8 +218,10 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
   Widget _buildIdleView(BuildContext context) {
     return ColoredBox(
       color: _surface,
-      child: SafeArea(
-        child: Column(
+      child: Material(
+        color: Colors.transparent,
+        child: SafeArea(
+          child: Column(
           children: [
             _buildTopBar(context),
             Expanded(
@@ -253,7 +260,8 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildIdleOmnibox(BuildContext context) {
@@ -321,9 +329,33 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Recent Pages',
-            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Recent Pages',
+                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              if (widget.recentPages.isNotEmpty && widget.onClearRecentPages != null)
+                InkWell(
+                  onTap: widget.onClearRecentPages,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.delete_sweep, color: Colors.white38, size: 15),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Clear',
+                          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 14),
           if (widget.recentPages.isEmpty)
@@ -337,7 +369,7 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
                     onTap: () => _submit(p.url),
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                       decoration: BoxDecoration(
                         color: const Color(0xFF243247),
                         borderRadius: BorderRadius.circular(12),
@@ -368,6 +400,15 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
                               ],
                             ),
                           ),
+                          if (widget.onRemoveRecentPage != null)
+                            TappableIcon(
+                              icon: Icons.close,
+                              iconSize: 16,
+                              color: Colors.white38,
+                              onTap: () => widget.onRemoveRecentPage!(p),
+                              tooltip: 'Remove',
+                              target: 34,
+                            ),
                         ],
                       ),
                     ),
@@ -383,16 +424,19 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
     final typing = _state == NewTabState.typing;
     return ColoredBox(
       color: _surface,
-      child: SafeArea(
-        child: Column(
-          children: [
-            _buildInputHeader(context),
-            Expanded(
-              child: typing
-                  ? _buildSuggestionsList(context)
-                  : _buildRecentSearchesList(context),
-            ),
-          ],
+      child: Material(
+        color: Colors.transparent,
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildInputHeader(context),
+              Expanded(
+                child: typing
+                    ? _buildSuggestionsList(context)
+                    : _buildRecentSearchesList(context),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -445,8 +489,6 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
                   IconButton(
                     tooltip: 'New tab',
                     icon: const Icon(Icons.add, color: Colors.white70, size: 20),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
                     onPressed: widget.onNewTab,
                   ),
                 ],

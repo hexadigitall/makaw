@@ -66,9 +66,18 @@ class _ImageViewerWidgetState extends ConsumerState<ImageViewerWidget> {
     return AppBar(
       backgroundColor: _kDark,
       title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-      leading: _selectedFolder != null
-          ? IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => setState(() => _page = 'folders'))
-          : null,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back, color: Colors.white),
+        tooltip: 'Back',
+        onPressed: () {
+          // One-step back: folder contents → folders list, then pop to hub.
+          if (_selectedFolder != null) {
+            setState(() => _page = 'folders');
+          } else {
+            Navigator.of(context).pop();
+          }
+        },
+      ),
       actions: [
         if (isTrash)
           IconButton(

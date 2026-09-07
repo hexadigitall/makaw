@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/platform/platform_paths.dart';
 import '../../../../core/services/media_notification_service.dart';
 import '../../domain/entities/entities.dart';
 export '../../domain/entities/entities.dart';
@@ -157,8 +158,7 @@ class MusicPlayerService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final dirs = ['/storage/emulated/0/Music', '/storage/emulated/0/music',
-        '/storage/emulated/0/Download', '/storage/emulated/0/download'];
+      final dirs = PlatformPaths.musicScanRoots();
       final foundRaw = <MapEntry<int, String>>[];
       final seen = <String>{};
       int idCounter = 1;
@@ -177,13 +177,15 @@ class MusicPlayerService extends ChangeNotifier {
         }
       }
 
-      final root = Directory('/storage/emulated/0/');
-      if (await root.exists()) {
-        await for (final entity in root.list(recursive: false, followLinks: false)) {
-          if (entity is File && seen.add(entity.path)) {
-            final ext = entity.path.toLowerCase();
-            if (_audioExts.any((e) => ext.endsWith(e))) {
-              foundRaw.add(MapEntry(idCounter++, entity.path));
+      if (Platform.isAndroid) {
+        final root = Directory('/storage/emulated/0/');
+        if (await root.exists()) {
+          await for (final entity in root.list(recursive: false, followLinks: false)) {
+            if (entity is File && seen.add(entity.path)) {
+              final ext = entity.path.toLowerCase();
+              if (_audioExts.any((e) => ext.endsWith(e))) {
+                foundRaw.add(MapEntry(idCounter++, entity.path));
+              }
             }
           }
         }

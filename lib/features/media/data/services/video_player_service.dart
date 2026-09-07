@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../domain/entities/video_file_info.dart';
+import '../../../../core/platform/platform_paths.dart';
 export '../../domain/entities/video_file_info.dart';
 
 class VideoPlayerService extends ChangeNotifier {
@@ -81,11 +82,10 @@ class VideoPlayerService extends ChangeNotifier {
 
     // Discover all top-level directories under root (fast — not recursive)
     try {
-      final root = Directory('/storage/emulated/0');
-      if (await root.exists()) {
-        await for (final entity in root.list(recursive: false, followLinks: false)) {
-          if (entity is Directory) dirsToScan.add(entity.path);
-        }
+      final roots = PlatformPaths.videoScanRoots();
+      for (final root in roots) {
+        final r = Directory(root);
+        if (await r.exists()) dirsToScan.add(root);
       }
     } catch (_) {}
 
@@ -97,7 +97,8 @@ class VideoPlayerService extends ChangeNotifier {
                      'VMate', 'Likee', 'Clip', 'TikTok', 'CapCut', 'KineMaster',
                      'Alight Motion', 'PowerDirector', 'FilmoraGo', 'VLLO',
                      'Snapchat', 'Instagram', 'Facebook', 'Telegram']) {
-      dirsToScan.add('/storage/emulated/0/$d');
+      final base = Platform.isAndroid ? '/storage/emulated/0' : (PlatformPaths.home().isEmpty ? '' : PlatformPaths.home());
+      if (base.isNotEmpty) dirsToScan.add('$base/$d');
     }
 
     // Scan each directory async with streaming
@@ -107,8 +108,9 @@ class VideoPlayerService extends ChangeNotifier {
       await _scanDirStream(dir, found, seenPaths);
     }
 
-    // SD card if accessible
+    // SD card if accessible (Android only)
     for (final sd in ['/storage/0000-0000', '/storage/extSdCard', '/sdcard1', '/external_sd']) {
+      if (!Platform.isAndroid) break;
       final dir = Directory(sd);
       if (await dir.exists()) {
         try {

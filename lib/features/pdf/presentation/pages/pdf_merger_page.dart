@@ -3,7 +3,7 @@ import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../../../core/platform/session_paths.dart';
 import 'package:share_plus/share_plus.dart';
 
 class PdfMergerPage extends StatefulWidget {
@@ -68,8 +68,8 @@ class _PdfMergerPageState extends State<PdfMergerPage> {
     setState(() { _isMerging = true; _mergeProgress = 0; });
 
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final outputPath = '${dir.path}/merged_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final dir = await SessionPaths.downloadsDir();
+      final outputPath = '$dir${Platform.pathSeparator}merged_${DateTime.now().millisecondsSinceEpoch}.pdf';
       final paths = _files.map((f) => f.path).toList();
 
       // Run merge in background isolate

@@ -263,12 +263,14 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
       itemBuilder: (_, i) {
         final entry = folderEntries[i];
         final docs = entry.value;
-        return GestureDetector(
-          onTap: () => setState(() => _selectedFolder = entry.key),
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(12)),
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Material(
+            color: _kCard,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
             child: ListTile(
+              onTap: () => setState(() => _selectedFolder = entry.key),
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(color: _kAccent.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
@@ -302,12 +304,14 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
 
   Widget _buildDocItem(DocumentFileInfo doc) {
     final isFav = _service.isFavorite(doc.id);
-    return GestureDetector(
-      onTap: () => widget.openFile(doc.filePath),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(12)),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
         child: ListTile(
+          onTap: () => widget.openFile(doc.filePath),
           leading: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(color: _color(doc.filePath).withOpacity(0.15), borderRadius: BorderRadius.circular(8)),

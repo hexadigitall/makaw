@@ -120,6 +120,32 @@ class Ecosystems {
     ],
   );
 
+  /// Windows OS utilities exposed as an ecosystem, so the Main Menu rails
+  /// stay ecosystem-only. Each tool launches a real Windows app/setting.
+  static const Ecosystem utilities = Ecosystem(
+    'utilities',
+    'Utilities',
+    Icons.apps,
+    Color(0xFF22D3EE),
+    [
+      EcosystemTool('util_this_pc', 'This PC', Icons.desktop_windows_outlined, Color(0xFF60A5FA)),
+      EcosystemTool('util_profile', 'Profile Folder', Icons.person_outline, Color(0xFFA78BFA)),
+      EcosystemTool('util_downloads', 'Downloads', Icons.download_rounded, Color(0xFFFB923C)),
+      EcosystemTool('util_cmd', 'Command Prompt', Icons.terminal_rounded, Color(0xFF34D399)),
+      EcosystemTool('util_powershell', 'PowerShell', Icons.power_rounded, Color(0xFF22D3EE)),
+      EcosystemTool('util_run', 'Run Dialog', Icons.chat_bubble_outline, Color(0xFFF472B6)),
+      EcosystemTool('util_taskmgr', 'Task Manager', Icons.memory_rounded, Color(0xFF38BDF8)),
+      EcosystemTool('util_settings', 'Settings', Icons.settings_outlined, Color(0xFF94A3B8)),
+      EcosystemTool('util_display', 'Display Settings', Icons.monitor_outlined, Color(0xFF34D399)),
+      EcosystemTool('util_device', 'Device Manager', Icons.developer_board_outlined, Color(0xFFFBBF24)),
+      EcosystemTool('util_disk', 'Disk Management', Icons.dns_outlined, Color(0xFF818CF8)),
+      EcosystemTool('util_control', 'Control Panel', Icons.tune, Color(0xFF22D3EE)),
+      EcosystemTool('util_sysinfo', 'System Information', Icons.info_outline, Color(0xFFF87171)),
+      EcosystemTool('util_notepad', 'Notepad', Icons.edit_note_rounded, Color(0xFFF472B6)),
+      EcosystemTool('util_calc', 'Calculator', Icons.calculate_outlined, Color(0xFF60A5FA)),
+    ],
+  );
+
   static const List<Ecosystem> all = [
     codeStudio,
     terminal,
@@ -129,5 +155,6 @@ class Ecosystems {
     cloud,
     files,
     settings,
+    utilities,
   ];
 }

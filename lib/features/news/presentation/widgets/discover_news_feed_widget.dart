@@ -197,8 +197,7 @@ class _DiscoverNewsFeedWidgetState extends State<DiscoverNewsFeedWidget> {
                 IconButton(
                   tooltip: 'Refresh feeds',
                   icon: const Icon(Icons.refresh, color: Colors.white54, size: 18),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                   onPressed: _refresh,
                 ),
             ],

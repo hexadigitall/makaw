@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:makaw_mobile/features/browser/domain/entities/browser_tab.dart';
-import 'package:makaw_mobile/features/browser/domain/repositories/browser_repository.dart';
-import 'package:makaw_mobile/features/documents/domain/repositories/document_repository.dart';
-import 'package:makaw_mobile/features/media/domain/repositories/image_repository.dart';
-import 'package:makaw_mobile/features/media/domain/repositories/video_repository.dart';
-import 'package:makaw_mobile/features/music/domain/repositories/music_repository.dart';
-import 'package:makaw_mobile/features/news/domain/repositories/news_repository.dart';
+import 'package:makaw/features/browser/domain/entities/browser_tab.dart';
+import 'package:makaw/features/browser/domain/repositories/browser_repository.dart';
+import 'package:makaw/features/documents/domain/repositories/document_repository.dart';
+import 'package:makaw/features/media/domain/repositories/image_repository.dart';
+import 'package:makaw/features/media/domain/repositories/video_repository.dart';
+import 'package:makaw/features/music/domain/repositories/music_repository.dart';
+import 'package:makaw/features/news/domain/repositories/news_repository.dart';
 import 'package:mocktail/mocktail.dart';
 
 // Mock implementations for repository interface contract tests

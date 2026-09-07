@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -50,6 +51,18 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
 
   List<int> _bookmarks = [];
 
+  // Non-destructive text selection (Stack overlay, never a modal route).
+  String _selectionText = '';
+  Rect? _menuTargetRect; // screen rect anchor for the floating context menu
+  bool _showSelectionMenu = false;
+  double _canvasTopInset = 0;
+
+  // Persistent TTS HUD.
+  bool _showTtsHud = false;
+  String _hudText = '';
+  String _hudSource = '';
+  Timer? _ttsPoller;
+
   static const _kDark = Color(0xFF0F0F1A);
   static const _kCard = Color(0xFF1A1A2E);
   static const _kAccent = Color(0xFF818CF8);
@@ -72,6 +85,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
 
   @override
   void dispose() {
+    _ttsPoller?.cancel();
     _searchCtrl.dispose();
     _chromeAnim.dispose();
     SystemChrome.restoreSystemUIOverlays();
@@ -204,47 +218,63 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
   }
 
   void _onTextSelectionChange(List<PdfTextRanges> selections) {
-    if (selections.isEmpty) return;
+    if (!mounted) return;
+    final nonEmpty = selections.where((s) => s.ranges.isNotEmpty).toList();
+    if (nonEmpty.isEmpty) {
+      if (_showSelectionMenu) {
+        _clearSelectionAndMenu();
+      }
+      return;
+    }
     final buffer = StringBuffer();
-    String? paraContext;
-    for (final s in selections) {
+    for (final s in nonEmpty) {
       for (final r in s.ranges) {
         final full = s.pageText.fullText;
         final start = r.start < full.length ? r.start : full.length;
         final end = r.end <= full.length ? r.end : full.length;
-        if (end > start) {
-          buffer.write(full.substring(start, end));
-          if (paraContext == null) paraContext = _extractParagraph(full, start, end);
-        }
+        if (end > start) buffer.write(full.substring(start, end));
       }
     }
     final selected = buffer.toString().trim();
-    if (selected.isEmpty || !mounted) return;
-    showTextActionMenu(
-      context,
-      selected,
-      title: selected.length > 60 ? '${selected.substring(0, 60)}…' : selected,
-      readAloudContext: paraContext,
-    );
+    if (selected.isEmpty) return;
+    setState(() {
+      _selectionText = selected;
+      _menuTargetRect = _screenRectForSelection(nonEmpty.first);
+      _showSelectionMenu = true;
+    });
   }
 
-  // Expand a [start, end) range within the page text to the surrounding
-  // paragraph/sentence, so Read Aloud starts from the containing paragraph.
-  String _extractParagraph(String full, int start, int end) {
-    if (full.isEmpty) return '';
-    var s = start;
-    var e = end;
-    while (s > 0) {
-      final ch = full.codeUnitAt(s - 1);
-      if (ch == 10 || ch == 46) break; // \n or '.'
-      s--;
-    }
-    while (e < full.length) {
-      final ch = full.codeUnitAt(e);
-      if (ch == 10 || ch == 46) break;
-      e++;
-    }
-    return full.substring(s, e).trim();
+  /// The selection menu is a Stack overlay (not a modal route) so pdfrx never
+  /// loses focus and the highlight/handles survive until an explicit action or
+  /// a tap-away on the canvas.
+
+  // Map a document-space point to the viewer's local (viewport) coordinates
+  // using the controller's transform matrix (the same math pdfrx uses for its
+  // own text-selection overlay).
+  Offset _docToViewport(Offset doc) {
+    final s = _controller!.value.storage;
+    final w = doc.dx * s[3] + doc.dy * s[7] + s[15];
+    final px = (doc.dx * s[0] + doc.dy * s[4] + s[12]) / w;
+    final py = (doc.dx * s[1] + doc.dy * s[5] + s[13]) / w;
+    return Offset(px, py);
+  }
+
+  // Screen-space rect (in the outer Stack) of a selection's bounding box.
+  Rect? _screenRectForSelection(PdfTextRanges sel) {
+    if (_controller == null) return null;
+    final page = sel.pageNumber;
+    final docRect = _controller!.calcRectForRectInsidePage(pageNumber: page, rect: sel.bounds);
+    final tl = _docToViewport(docRect.topLeft).translate(0, _canvasTopInset);
+    final br = _docToViewport(docRect.bottomRight).translate(0, _canvasTopInset);
+    return Rect.fromPoints(tl, br);
+  }
+
+  void _clearSelectionAndMenu() {
+    setState(() {
+      _showSelectionMenu = false;
+      _selectionText = '';
+      _menuTargetRect = null;
+    });
   }
 
   void _toggleSearch() {
@@ -304,6 +334,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
           final chromeInsetTop = _showChrome
               ? MediaQuery.of(context).padding.top + _kBarHeight + (_isSearchActive ? 48.0 : 0.0)
               : 0.0;
+          _canvasTopInset = chromeInsetTop;
           return Stack(
             children: [
               // Canvas — full screen (or inset below top chrome), tap to toggle chrome
@@ -315,6 +346,10 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: () {
+                    if (_showSelectionMenu) {
+                      _clearSelectionAndMenu();
+                      return;
+                    }
                     if (_showSidebar) {
                       setState(() => _showSidebar = false);
                     } else {
@@ -377,6 +412,13 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                     child: const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: _kAccent)),
                   ),
                 ),
+
+                // Floating text-selection context menu (Stack overlay — non-modal).
+                if (_showSelectionMenu && _menuTargetRect != null)
+                  _buildFloatingSelectionMenu(),
+
+                // Persistent TTS HUD (mounted by header & context Read Aloud).
+                if (_showTtsHud) _buildTtsHud(),
             ],
           );
         },
@@ -504,7 +546,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
             ),
             const SizedBox(width: 2),
             SizedBox(
-              width: 28, height: 28,
+              width: 36, height: 36,
               child: IconButton(
                 padding: EdgeInsets.zero,
                 iconSize: 18,
@@ -513,7 +555,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
               ),
             ),
             SizedBox(
-              width: 28, height: 28,
+              width: 36, height: 36,
               child: IconButton(
                 padding: EdgeInsets.zero,
                 iconSize: 18,
@@ -637,7 +679,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
             }),
             _menuTile(Icons.record_voice_over_rounded, 'Read Aloud', () {
               Navigator.pop(ctx);
-              _readAloudCurrentPage();
+              _mountTtsHud();
             }),
             _menuTile(Icons.info_outline_rounded, 'Document Info', () {
               Navigator.pop(ctx);
@@ -652,7 +694,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
 
   Widget _menuZoomBtn(IconData icon, VoidCallback onPressed) {
     return SizedBox(
-      width: 32, height: 32,
+      width: 36, height: 36,
       child: IconButton(
         padding: EdgeInsets.zero,
         iconSize: 18,
@@ -913,21 +955,234 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
     ));
   }
 
-  Future<void> _readAloudCurrentPage() async {
-    if (_document == null) {
-      _showToast('No text to read');
+  Future<String> _pageText(int pageIndex) async {
+    if (_document == null) return '';
+    try {
+      final pt = await _document!.pages[pageIndex].loadText();
+      return pt.fullText.trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  void _setupTtsPolling() {
+    _ttsPoller?.cancel();
+    _ttsPoller = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      if (!mounted) return;
+      setState(() {});
+    });
+  }
+
+  // -- Persistent TTS HUD ------------------------------------------------
+
+  void _mountTtsHud() {
+    setState(() => _showTtsHud = true);
+    _setupTtsPolling();
+  }
+
+  Future<void> _dismissTtsHud() async {
+    _ttsPoller?.cancel();
+    await TextActionService.stopSpeaking();
+    if (!mounted) return;
+    setState(() {
+      _showTtsHud = false;
+      _hudText = '';
+      _hudSource = '';
+      if (_showSelectionMenu) {
+        _clearSelectionAndMenu();
+      }
+    });
+  }
+
+  Future<void> _playHudTarget(String text, String source) async {
+    if (text.trim().isEmpty) {
+      _showToast('No selectable text on this page');
+      if (mounted) setState(() {});
       return;
     }
-    try {
-      final pageText = await _document!.pages[_currentPage].loadText();
-      final text = pageText.fullText.trim();
-      if (text.isEmpty) {
-        _showToast('No selectable text on this page');
-        return;
-      }
-      showReadAloudDialog(context, text);
-    } catch (_) {
-      _showToast('Could not read this page');
-    }
+    setState(() {
+      _showTtsHud = true;
+      _hudText = text;
+      _hudSource = source;
+    });
+    await TextActionService.playFromBeginning(text);
+    _setupTtsPolling();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _playPageInHud() async {
+    final text = await _pageText(_currentPage);
+    await _playHudTarget(text, 'Page ${_currentPage + 1}');
+  }
+
+  Future<void> _playSelectionInHud() async {
+    if (_selectionText.isEmpty) return;
+    await _playHudTarget(_selectionText, 'Selection');
+  }
+
+  // Context-menu Read Aloud: read the selection if present, else the page in
+  // the viewport. Keeps the HUD mounted and the selection intact so the HUD's
+  // Read Selection stays available.
+  Future<void> _readContextAloud() async {
+    final text = _selectionText.isNotEmpty ? _selectionText : await _pageText(_currentPage);
+    await _playHudTarget(text, _selectionText.isNotEmpty ? 'Selection' : 'Page ${_currentPage + 1}');
+  }
+
+  // -- Floating selection context menu -----------------------------------
+
+  bool get _isSingleWord => _selectionText.split(RegExp(r'\s+')).length == 1;
+
+  Widget _buildFloatingSelectionMenu() {
+    final target = _menuTargetRect!;
+    final screen = MediaQuery.of(context).size;
+    const menuHeight = 48.0;
+    // Place the menu above or below the selection so it never occludes it.
+    final placeAbove = target.top - menuHeight - 12 >= 0;
+    final top = placeAbove ? target.top - menuHeight - 12 : target.bottom + 12;
+    var left = target.left - 8;
+    if (left < 0) left = 0;
+    if (left > screen.width - 300) left = screen.width - 300;
+
+    return Positioned(
+      top: top,
+      left: left,
+      child: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(12),
+        color: const Color(0xFF1E293B),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _selectionMenuItem(Icons.content_copy_rounded, 'Copy', () {
+              TextActionService.copyToClipboard(_selectionText);
+              _clearSelectionAndMenu();
+              _showToast('Copied to clipboard');
+            }),
+            _selectionMenuItem(Icons.record_voice_over_rounded, 'Read Aloud', _readContextAloud),
+            if (_isSingleWord)
+              _selectionMenuItem(Icons.volume_up_rounded, 'Pronounce', () {
+                _clearSelectionAndMenu();
+                TextActionService.pronounce(_selectionText);
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _selectionMenuItem(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: Colors.white),
+            const SizedBox(width: 6),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _hudBtn(IconData icon, String label, VoidCallback? onTap) {
+    final color = onTap == null ? const Color(0xFF475569) : const Color(0xFF22D3EE);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(color: color, fontSize: 10)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTtsHud() {
+    final speaking = TextActionService.isSpeaking;
+    final paused = TextActionService.isPaused;
+    final hasSelection = _selectionText.isNotEmpty;
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: MediaQuery.of(context).padding.bottom + 16,
+      child: Material(
+        elevation: 12,
+        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xFF1E293B),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
+              child: Row(
+                children: [
+                  const Icon(Icons.record_voice_over_rounded, color: Color(0xFFF472B6), size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _hudSource.isEmpty ? 'Reading' : _hudSource,
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+                    onPressed: _dismissTtsHud,
+                    splashRadius: 16,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ),
+            if (_hudText.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Text(
+                  _hudText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, height: 1.3),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _hudBtn(
+                    paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                    paused ? 'Continue' : (speaking ? 'Pause' : 'Play'),
+                    () async {
+                      if (TextActionService.isPaused) {
+                        await TextActionService.resumeSpeaking();
+                      } else if (TextActionService.isSpeaking) {
+                        await TextActionService.pauseSpeaking();
+                      } else {
+                        final text = _hudText.isNotEmpty ? _hudText : await _pageText(_currentPage);
+                        final src = _hudSource.isNotEmpty ? _hudSource : 'Page ${_currentPage + 1}';
+                        await _playHudTarget(text, src);
+                      }
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                  _hudBtn(Icons.menu_book_rounded, 'Read Page', _playPageInHud),
+                  _hudBtn(Icons.highlight_rounded, 'Read Sel', hasSelection ? _playSelectionInHud : null),
+                  _hudBtn(Icons.stop_rounded, 'Stop', TextActionService.stopSpeaking),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

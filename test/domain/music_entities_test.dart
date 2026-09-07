@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:makaw_mobile/features/music/domain/entities/song_info.dart';
-import 'package:makaw_mobile/features/music/domain/entities/playlist.dart';
+import 'package:makaw/features/music/domain/entities/song_info.dart';
+import 'package:makaw/features/music/domain/entities/playlist.dart';
 
 void main() {
   group('SongInfo', () {

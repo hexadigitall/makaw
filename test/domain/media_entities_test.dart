@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:makaw_mobile/features/media/domain/entities/image_file_info.dart';
-import 'package:makaw_mobile/features/media/domain/entities/video_file_info.dart';
+import 'package:makaw/features/media/domain/entities/image_file_info.dart';
+import 'package:makaw/features/media/domain/entities/video_file_info.dart';
 
 void main() {
   group('ImageFileInfo', () {

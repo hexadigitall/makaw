@@ -73,6 +73,7 @@ class _UniversalSearchPaletteState extends State<UniversalSearchPalette> {
     _ToolDef('Cloud Sync', 'Sync across devices', Icons.cloud_rounded, Color(0xFF60A5FA), 'cloud'),
     _ToolDef('History', 'Browse browsing history', Icons.history_rounded, Color(0xFF94A3B8), 'history'),
     _ToolDef('Browser', 'Open the web browser', Icons.language_rounded, Color(0xFF00A7C2), 'browser'),
+    _ToolDef('Settings', 'App-wide preferences', Icons.settings_rounded, Color(0xFF94A3B8), 'settings'),
   ];
 
   @override
@@ -245,8 +246,7 @@ class _UniversalSearchPaletteState extends State<UniversalSearchPalette> {
             if (_controller.text.trim().isNotEmpty)
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white54, size: 20),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                 onPressed: _controller.clear,
               ),
           ],

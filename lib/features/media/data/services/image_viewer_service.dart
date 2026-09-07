@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import '../../domain/entities/image_file_info.dart';
+import '../../../../core/platform/platform_paths.dart';
 export '../../domain/entities/image_file_info.dart';
 
 class ImageViewerService extends ChangeNotifier {
@@ -29,10 +30,7 @@ class ImageViewerService extends ChangeNotifier {
     notifyListeners();
     final found = <ImageFileInfo>{};
     final seenPaths = <String>{};
-    final dirs = [
-      '/storage/emulated/0/DCIM', '/storage/emulated/0/Pictures',
-      '/storage/emulated/0/Screenshots', '/storage/emulated/0/Download',
-    ];
+    final dirs = PlatformPaths.imageScanRoots();
     for (final dirPath in dirs) {
       await _scanDir(dirPath, found, seenPaths, depth: 0);
     }

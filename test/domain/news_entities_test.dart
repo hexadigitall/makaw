@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:makaw_mobile/features/news/domain/entities/news_item.dart';
-import 'package:makaw_mobile/features/news/domain/entities/news_category.dart';
-import 'package:makaw_mobile/features/news/domain/entities/feed_card.dart';
+import 'package:makaw/features/news/domain/entities/news_item.dart';
+import 'package:makaw/features/news/domain/entities/news_category.dart';
+import 'package:makaw/features/news/domain/entities/feed_card.dart';
 
 void main() {
   group('NewsItem', () {

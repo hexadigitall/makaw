@@ -8,8 +8,12 @@ class MediaSnifferPage extends StatefulWidget {
   final void Function(MediaItem) onDownload;
   final void Function(List<MediaItem>) onDownloadAll;
   final VoidCallback onClear;
+  final void Function(MediaItem) onDelete;
   final void Function(MediaItem, String) onRename;
   final void Function(String) showToast;
+
+  /// Splices the item's HLS/DASH segments into a single video file via ffmpeg.
+  final void Function(MediaItem) onStitch;
 
   const MediaSnifferPage({
     super.key,
@@ -17,8 +21,10 @@ class MediaSnifferPage extends StatefulWidget {
     required this.onDownload,
     required this.onDownloadAll,
     required this.onClear,
+    required this.onDelete,
     required this.onRename,
     required this.showToast,
+    required this.onStitch,
   });
 
   @override
@@ -113,7 +119,9 @@ class _MediaSnifferPageState extends State<MediaSnifferPage> {
                       for (int i = _items.length - 1; i >= 0; i--) {
                         if (_selected[i]) toDelete.add(_items[i]);
                       }
-                      widget.onDownloadAll(toDelete);
+                      for (final item in toDelete) {
+                        widget.onDelete(item);
+                      }
                       setState(() {
                         for (final item in toDelete) _items.remove(item);
                         _selected = List.filled(_items.length, false);
@@ -233,7 +241,18 @@ class _MediaSnifferPageState extends State<MediaSnifferPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(displayName, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500)),
-                            Text(item.url, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(item.url, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                ),
+                                if ((item.segments?.isNotEmpty ?? false)) ...[
+                                  Icon(Icons.hls_rounded, size: 13, color: _typeColor(item.type)),
+                                  SizedBox(width: 3),
+                                  Text('${item.segments!.length} segs', style: TextStyle(fontSize: 9, color: _typeColor(item.type))),
+                                ],
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -254,6 +273,27 @@ class _MediaSnifferPageState extends State<MediaSnifferPage> {
                         padding: EdgeInsets.all(4),
                         tooltip: 'Download',
                       ),
+                      IconButton(
+                        icon: Icon(Icons.delete_outline, size: 18, color: Colors.red.shade400),
+                        onPressed: () {
+                          widget.onDelete(item);
+                          setState(() => _items.remove(item));
+                        },
+                        constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                        padding: EdgeInsets.all(4),
+                        tooltip: 'Delete',
+                      ),
+                      if ((item.segments?.isNotEmpty ?? false))
+                        IconButton(
+                          icon: Icon(Icons.smart_toy_outlined, size: 18, color: _typeColor(item.type)),
+                          onPressed: () {
+                            widget.onStitch(item);
+                            widget.showToast('Stitching ${item.segments!.length} segments…');
+                          },
+                          constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                          padding: EdgeInsets.all(4),
+                          tooltip: 'Stitch with ffmpeg',
+                        ),
                     ],
                   ),
                   if (item.formats.isNotEmpty) ...[
@@ -312,7 +352,7 @@ class _MediaSnifferPageState extends State<MediaSnifferPage> {
                 widget.onRename(item, newName);
                 setState(() {
                   final idx = _items.indexOf(item);
-                  if (idx >= 0) _items[idx] = MediaItem(url: item.url, type: item.type, title: newName, formats: item.formats);
+                  if (idx >= 0) _items[idx] = MediaItem(url: item.url, type: item.type, title: newName, formats: item.formats, segments: item.segments);
                 });
               }
               Navigator.of(ctx).pop();

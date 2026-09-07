@@ -9,7 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../../../core/platform/session_paths.dart';
+import '../../../../core/platform/platform_paths.dart';
 import '../../data/services/video_player_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import '../../../../core/storage/subtitle_service.dart';
@@ -124,6 +125,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   String _dragSide = '';
   String _doubleTapSide = '';
   Timer? _doubleTapTimer;
+  Timer? _hideTimer;
 
   @override
   void initState() {
@@ -196,11 +198,25 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   }
 
   void _startAutoHide() {
-    Future.delayed(const Duration(seconds: 4), () {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
       if (mounted && _isPlaying && _showControls) {
         setState(() => _showControls = false);
       }
     });
+  }
+
+  /// "Wake" the controls: show them and restart the idle-hide countdown.
+  ///
+  /// Triggered by external input (mouse movement over the player on desktop,
+  /// tap/click/touch on touch devices) so the header + controls reappear
+  /// without requiring a separate toggle gesture.
+  void _wakeControls() {
+    if (_locked || !mounted) return;
+    if (!_showControls) {
+      setState(() => _showControls = true);
+    }
+    if (_isPlaying) _startAutoHide();
   }
 
   @override
@@ -208,6 +224,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     _subtitleTimer?.cancel();
     _overlayTimer?.cancel();
     _doubleTapTimer?.cancel();
+    _hideTimer?.cancel();
     _controller?.removeListener(_onVideoEvent);
     _controller?.dispose();
     SystemChrome.restoreSystemUIOverlays();
@@ -428,18 +445,21 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          GestureDetector(
-            onTap: _onToggleControls,
-            onDoubleTapDown: _onDoubleTapDown,
-            onVerticalDragStart: _locked ? null : _onVerticalDragStart,
-            onVerticalDragUpdate: _locked ? null : _onVerticalDragUpdate,
-            onVerticalDragEnd: _locked ? null : _onVerticalDragEnd,
-            child: Container(
-              color: Colors.black,
-              width: double.infinity, height: double.infinity,
-              child: RepaintBoundary(
-                key: _videoKey,
-                child: videoWidget,
+          MouseRegion(
+            onHover: (_) => _wakeControls(),
+            child: GestureDetector(
+              onTap: _onToggleControls,
+              onDoubleTapDown: _onDoubleTapDown,
+              onVerticalDragStart: _locked ? null : _onVerticalDragStart,
+              onVerticalDragUpdate: _locked ? null : _onVerticalDragUpdate,
+              onVerticalDragEnd: _locked ? null : _onVerticalDragEnd,
+              child: Container(
+                color: Colors.black,
+                width: double.infinity, height: double.infinity,
+                child: RepaintBoundary(
+                  key: _videoKey,
+                  child: videoWidget,
+                ),
               ),
             ),
           ),
@@ -538,10 +558,10 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
               IconButton(icon: const Icon(Icons.download, color: Colors.white70, size: 22), onPressed: widget.onDownload),
             if (!isLandscape)
               Column(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(icon: const Icon(Icons.cast, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _toastCast),
-                IconButton(icon: const Icon(Icons.screenshot_monitor, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _toastCapture),
-                IconButton(icon: Icon(_isMuted ? Icons.volume_off : Icons.volume_up, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _toastMute),
-                IconButton(icon: const Icon(Icons.screen_rotation, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: () => SystemChrome.setPreferredOrientations(DeviceOrientation.values)),
+                IconButton(icon: const Icon(Icons.cast, color: Colors.white70, size: 18), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: _toastCast),
+                IconButton(icon: const Icon(Icons.screenshot_monitor, color: Colors.white70, size: 18), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: _toastCapture),
+                IconButton(icon: Icon(_isMuted ? Icons.volume_off : Icons.volume_up, color: Colors.white70, size: 18), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: _toastMute),
+                IconButton(icon: const Icon(Icons.screen_rotation, color: Colors.white70, size: 18), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: () => SystemChrome.setPreferredOrientations(DeviceOrientation.values)),
               ])
             else
               Row(mainAxisSize: MainAxisSize.min, children: [
@@ -558,7 +578,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                IconButton(icon: const Icon(Icons.queue_music, color: Colors.white70, size: 18), constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: _showPlaylistSheet),
+                IconButton(icon: const Icon(Icons.queue_music, color: Colors.white70, size: 18), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: _showPlaylistSheet),
               ],
             ),
           ),
@@ -641,31 +661,31 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
               const SizedBox(width: 4),
               IconButton(
                 icon: Icon(_locked ? Icons.lock : Icons.lock_open, color: Colors.white54, size: 20),
-                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                 onPressed: () => setState(() => _locked = true),
               ),
               if (isLandscape) ...[
                 const SizedBox(width: 4),
-                IconButton(icon: const Icon(Icons.replay_10, color: Colors.white70, size: 22), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: () => _controller!.seekTo(Duration(seconds: (pos.inSeconds - 10).clamp(0, 999999)))),
+                IconButton(icon: const Icon(Icons.replay_10, color: Colors.white70, size: 22), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: () => _controller!.seekTo(Duration(seconds: (pos.inSeconds - 10).clamp(0, 999999)))),
               ],
               if (hasMulti) const SizedBox(width: 4),
               if (hasMulti)
-                IconButton(icon: const Icon(Icons.skip_previous, color: Colors.white70, size: 26), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: _currentIndex > 0 ? () => _switchVideo(_currentIndex - 1) : null),
+                IconButton(icon: const Icon(Icons.skip_previous, color: Colors.white70, size: 26), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: _currentIndex > 0 ? () => _switchVideo(_currentIndex - 1) : null),
               const SizedBox(width: 6),
               Container(
                 decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF818CF8)),
                 child: IconButton(
                   icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 32),
-                  padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                   onPressed: _togglePlay,
                 ),
               ),
               const SizedBox(width: 6),
               if (hasMulti)
-                IconButton(icon: const Icon(Icons.skip_next, color: Colors.white70, size: 26), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: _currentIndex < widget.playlist!.length - 1 ? () => _switchVideo(_currentIndex + 1) : null),
+                IconButton(icon: const Icon(Icons.skip_next, color: Colors.white70, size: 26), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: _currentIndex < widget.playlist!.length - 1 ? () => _switchVideo(_currentIndex + 1) : null),
               if (isLandscape) ...[
                 if (hasMulti) const SizedBox(width: 4),
-                IconButton(icon: const Icon(Icons.forward_10, color: Colors.white70, size: 22), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: () => _controller!.seekTo(Duration(seconds: pos.inSeconds + 10))),
+                IconButton(icon: const Icon(Icons.forward_10, color: Colors.white70, size: 22), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: () => _controller!.seekTo(Duration(seconds: pos.inSeconds + 10))),
               ],
               const SizedBox(width: 4),
               GestureDetector(
@@ -711,9 +731,9 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) { _toast('Capture failed'); return; }
       final bytes = byteData.buffer.asUint8List();
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await SessionPaths.downloadsSubDir('Makaw');
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final file = File('${dir.path}/screenshot_$ts.png');
+      final file = File('$dir/screenshot_$ts.png');
       await file.writeAsBytes(bytes);
       image.dispose();
       if (mounted) {
@@ -1128,7 +1148,10 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
       backgroundColor: const Color(0xFF1A1A2E),
       isScrollControlled: true,
       builder: (ctx) {
-        var currentPath = '/storage/emulated/0/Download';
+        final defaultSubPath = PlatformPaths.home().isEmpty
+              ? '/storage/emulated/0/Download'
+              : '${PlatformPaths.home()}${Platform.pathSeparator}Downloads';
+        var currentPath = defaultSubPath;
         return StatefulBuilder(
           builder: (ctx, setDlg) {
             List<FileSystemEntity> entities = [];
@@ -2582,7 +2605,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(children: [
-            IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: () {
+            IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20), constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: () {
               if (_storagePath.isEmpty) setState(() { _storageRoot = ''; _storagePath = ''; });
               else { final p = _storagePath.substring(0, _storagePath.lastIndexOf(RegExp(r'[/\\]'))); setState(() => _storagePath = p.isEmpty ? _storageRoot : p); }
             }),
@@ -2596,6 +2619,16 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   }
 
   Future<List<Map<String, String>>> _getAvailableStorages() async {
+    if (PlatformPaths.isDesktop) {
+      final h = PlatformPaths.home();
+      final result = <Map<String, String>>[];
+      for (final dir in [PlatformPaths.home(), PlatformPaths.defaultDownloadsHint()]) {
+        if (dir.isNotEmpty && await Directory(dir).exists()) {
+          result.add({'path': dir, 'label': dir == h ? 'Home' : 'Downloads'});
+        }
+      }
+      return result;
+    }
     final candidates = [
       {'path': '/storage/emulated/0', 'label': 'Internal Storage'},
       {'path': '/storage/0000-0000', 'label': 'SD Card'},

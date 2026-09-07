@@ -51,7 +51,9 @@ dependencies:
   flutter_code_editor: ^0.3.0
   flutter_highlight: ^0.7.0
   highlight: ^0.7.0
-
+  ffmpeg_kit_flutter_new: ^4.6.2
+  sqflite_common_ffi: ^2.4.2+1
+  video_player_win: ^3.2.2
 msix_config:
   display_name: Makaw
   publisher_display_name: Hexadigitall

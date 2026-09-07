@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:makaw_mobile/features/browser/domain/entities/browser_tab.dart';
-import 'package:makaw_mobile/features/browser/domain/entities/media_item.dart';
-import 'package:makaw_mobile/features/browser/domain/entities/view_mode.dart';
+import 'package:makaw/features/browser/domain/entities/browser_tab.dart';
+import 'package:makaw/features/browser/domain/entities/media_item.dart';
+import 'package:makaw/features/browser/domain/entities/view_mode.dart';
 
 void main() {
   group('BrowserTab', () {

@@ -6,10 +6,12 @@ import '../providers/download_service.dart';
 
 class DownloadsWidget extends ConsumerStatefulWidget {
   final void Function(String url, String filename, String? savePath) onOpenDownload;
+  final void Function(String url, String filename, String? savePath) onOpenLocation;
 
   const DownloadsWidget({
     super.key,
     required this.onOpenDownload,
+    required this.onOpenLocation,
   });
 
   @override
@@ -146,72 +148,80 @@ class _DownloadsWidgetState extends ConsumerState<DownloadsWidget> {
   }
 
   Widget _buildDownloadItem(BuildContext context, DownloadItem item, DownloadService mgr) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
+    final canOpen = item.state == DownloadState.completed && item.savePath != null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: canOpen ? () => widget.onOpenDownload(item.url, item.filename, item.savePath) : null,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF334155), width: 0.5),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            _buildStateIcon(item),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(item.filename,
-                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 3),
-                  if (item.state == DownloadState.downloading) ...[
-                    Row(children: [
-                      Text('${(item.progress * 100).toStringAsFixed(0)}%',
-                        style: const TextStyle(color: Color(0xFFFB923C), fontSize: 11, fontWeight: FontWeight.w600)),
-                      const SizedBox(width: 8),
-                      if (item.totalBytes > 0)
-                        Text('${item.receivedStr} / ${item.sizeStr}',
-                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10)),
-                      if (item.speed > 0) ...[
-                        const SizedBox(width: 8),
-                        Text(item.speedStr, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10)),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFF334155), width: 0.5),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                _buildStateIcon(item),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(item.filename,
+                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 3),
+                      if (item.state == DownloadState.downloading) ...[
+                        Row(children: [
+                          Text('${(item.progress * 100).toStringAsFixed(0)}%',
+                            style: const TextStyle(color: Color(0xFFFB923C), fontSize: 11, fontWeight: FontWeight.w600)),
+                          const SizedBox(width: 8),
+                          if (item.totalBytes > 0)
+                            Text('${item.receivedStr} / ${item.sizeStr}',
+                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10)),
+                          if (item.speed > 0) ...[
+                            const SizedBox(width: 8),
+                            Text(item.speedStr, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10)),
+                          ],
+                        ]),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(3),
+                          child: LinearProgressIndicator(
+                            value: item.progress,
+                            backgroundColor: const Color(0xFF334155),
+                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFB923C)),
+                            minHeight: 4,
+                          ),
+                        ),
+                      ] else if (item.state == DownloadState.queued) ...[
+                        const Text('Waiting...', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                      ] else if (item.state == DownloadState.paused) ...[
+                        const Text('Paused', style: TextStyle(color: Color(0xFFF59E0B), fontSize: 11)),
+                      ] else if (item.state == DownloadState.completed) ...[
+                        Row(children: [
+                          Text(item.sizeStr, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                          if (item.completedAt != null) ...[
+                            const SizedBox(width: 8),
+                            Text(_formatDate(item.completedAt!), style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                          ],
+                        ]),
+                      ] else if (item.state == DownloadState.failed) ...[
+                        Text(item.error ?? 'Failed', style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
                       ],
-                    ]),
-                    const SizedBox(height: 6),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: item.progress,
-                        backgroundColor: const Color(0xFF334155),
-                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFB923C)),
-                        minHeight: 4,
-                      ),
-                    ),
-                  ] else if (item.state == DownloadState.queued) ...[
-                    const Text('Waiting...', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                  ] else if (item.state == DownloadState.paused) ...[
-                    const Text('Paused', style: TextStyle(color: Color(0xFFF59E0B), fontSize: 11)),
-                  ] else if (item.state == DownloadState.completed) ...[
-                    Row(children: [
-                      Text(item.sizeStr, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                      if (item.completedAt != null) ...[
-                        const SizedBox(width: 8),
-                        Text(_formatDate(item.completedAt!), style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                      ],
-                    ]),
-                  ] else if (item.state == DownloadState.failed) ...[
-                    Text(item.error ?? 'Failed', style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ],
-                ],
-              ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _buildActionButton(context, item, mgr),
+              ],
             ),
-            const SizedBox(width: 8),
-            _buildActionButton(context, item, mgr),
-          ],
+          ),
         ),
       ),
     );
@@ -283,8 +293,7 @@ class _DownloadsWidgetState extends ConsumerState<DownloadsWidget> {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (item.savePath != null)
-              _smallBtn(Icons.folder_open, 'Open', () => widget.onOpenDownload(item.url, item.filename, item.savePath)),
+            _smallBtn(Icons.folder_open, 'Open location', () => widget.onOpenLocation(item.url, item.filename, item.savePath)),
             const SizedBox(width: 4),
             _smallBtn(Icons.delete_outline, 'Remove', () => mgr.remove(item)),
           ],
@@ -303,7 +312,7 @@ class _DownloadsWidgetState extends ConsumerState<DownloadsWidget> {
 
   Widget _smallBtn(IconData icon, String tooltip, VoidCallback? onPressed) {
     return SizedBox(
-      width: 32, height: 32,
+      width: 36, height: 36,
       child: IconButton(
         icon: Icon(icon, size: 16, color: const Color(0xFF94A3B8)),
         onPressed: onPressed,

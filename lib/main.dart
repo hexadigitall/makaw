@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -22,6 +23,9 @@ import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sig
 import 'package:google_sign_in/google_sign_in.dart';
 import 'dart:async';
 import 'dart:io';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'core/platform/platform_paths.dart';
+import 'core/platform/system_launcher.dart';
 import 'dart:convert';
 import 'dart:collection';
 import 'dart:typed_data';
@@ -63,9 +67,11 @@ import 'features/browser/presentation/pages/browser_dashboard_page.dart';
 import 'features/browser/presentation/pages/browser_new_tab_view.dart';
 import 'features/news/data/services/news_feed_service.dart';
 import 'features/browser/presentation/providers/download_manager_provider.dart';
+import 'features/browser/data/services/ffmpeg_stitch_service.dart';
 import 'app/providers/service_providers.dart';
 import 'features/browser/presentation/pages/media_sniffer_page.dart';
 import 'core/widgets/responsive.dart';
+import 'core/widgets/widgets.dart';
 import 'features/portal/presentation/pages/makaw_home_portal_page.dart';
 import 'features/portal/presentation/pages/universal_search_palette.dart';
 import 'features/portal/presentation/pages/desktop_portal_shell.dart';
@@ -83,6 +89,63 @@ import 'features/manager/presentation/pages/downloads_page.dart';
 import 'features/manager/presentation/pages/settings_page.dart';
 import 'features/manager/presentation/pages/lyrics_page.dart';
 import 'features/manager/presentation/pages/subtitles_page.dart';
+
+/// Tracks ecosystem hub routes currently in the navigator stack. Used to
+/// decide whether a pushed tool page should offer a "back to hub" affordance
+/// (the hub is the tool's ecosystem home) and to name that hub.
+class _HubRouteObserver extends NavigatorObserver {
+  final List<String> _hubIds = [];
+
+  bool get hasHub => _hubIds.isNotEmpty;
+
+  /// The most recently pushed (topmost) ecosystem hub id still on the stack.
+  String? get topHubId => _hubIds.isEmpty ? null : _hubIds.last;
+
+  static const _hubPrefix = '/ecosystem_hub/';
+
+  String? _hubId(Route<dynamic> route) {
+    final name = route.settings.name ?? '';
+    return name.startsWith(_hubPrefix) ? name.substring(_hubPrefix.length) : null;
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    final id = _hubId(route);
+    if (id != null) _hubIds.add(id);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    final id = _hubId(route);
+    if (id != null && _hubIds.isNotEmpty) _hubIds.removeLast();
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    final id = _hubId(route);
+    if (id != null) _hubIds.remove(id);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    final oldId = _hubId(oldRoute!);
+    final newId = _hubId(newRoute!);
+    if (oldId == null && newId != null) {
+      _hubIds.add(newId);
+    } else if (oldId != null && newId == null) {
+      _hubIds.remove(oldId);
+    } else if (oldId != null && newId != null) {
+      final i = _hubIds.lastIndexOf(oldId);
+      if (i >= 0) {
+        _hubIds[i] = newId;
+      } else {
+        _hubIds.add(newId);
+      }
+    }
+  }
+}
+
+final _hubRouteObserver = _HubRouteObserver();
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 
@@ -210,6 +273,13 @@ void main() async {
     print('STACK: $stack');
     return true; // handled — prevents app process crash
   };
+
+  // Sqflite needs the FFI database factory on desktop platforms before any
+  // `openDatabase` call (missing on Windows/Linux/macOS by default).
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
 
   try { await globalMusicService.init(); } catch (_) {}
   try { await _initMediaNotification(); } catch (_) {}
@@ -369,6 +439,7 @@ class _MakawAppState extends ConsumerState<MakawApp> with WidgetsBindingObserver
         appBarTheme: AppBarTheme(backgroundColor: kSurfaceElevated),
       ),
       home: MakawHome(themeMode: _themeMode, onThemeChanged: setThemeMode),
+      navigatorObservers: [_hubRouteObserver],
     );
   }
 }
@@ -385,7 +456,8 @@ class MakawHome extends ConsumerStatefulWidget {
 
 class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserver {
   String _currentView = 'browser';
-  Ecosystem? _activeEcosystem;
+  VoidCallback? _pendingNav;
+  bool _navScheduled = false;
   ViewMode _viewMode = ViewMode.home;
   BrowserSubView _browserSubView = BrowserSubView.browsing;
   bool get _isBrowserDashboard => _browserSubView == BrowserSubView.dashboard;
@@ -414,6 +486,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   int _browserTabIdCounter = 0;
 
   final Map<int, InAppWebViewController> _tabControllers = {};
+  // Pull-to-refresh is only supported on Android/iOS (desktop throws
+  // `createPlatformPullToRefreshController UnimplementedError`).
+  static bool get _supportsPullToRefresh =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
   PullToRefreshController? _pullToRefreshController;
   final Map<int, int> _tabProgress = {};
   final Map<int, String> _tabErrorUrls = {};
@@ -470,7 +546,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     if (page == null) return;
     final wasBrowsing = !_showHomeScreen;
     Navigator.of(context).push(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => page,
+      pageBuilder: (_, __, ___) => _wrapDesktopShell(page),
       transitionDuration: Duration(milliseconds: 200),
       reverseTransitionDuration: Duration(milliseconds: 150),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
@@ -495,40 +571,76 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   Widget? _buildFeaturePage(String view) {
     switch (view) {
-      case 'history': return MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url));
+      case 'history': return _browserToolPage(MakawHistoryPage(onNavigate: (url) => _navigateInCurrentTab(url)));
       case 'studio': return _buildStudioWorkspace();
-      case 'sniffer': return _buildFeatureScaffold('Media Sniffer', Icons.wifi_tethering, _buildSnifferTab());
-      case 'snippets': return _buildFeatureScaffold('Snippets', Icons.content_paste, _buildSnippetsTab());
+      case 'sniffer': return _browserToolPage(_buildFeatureScaffold('Media Sniffer', Icons.wifi_tethering, _buildSnifferTab()));
+      case 'snippets': return _browserToolPage(_buildFeatureScaffold('Snippets', Icons.content_paste, _buildSnippetsTab()));
       case 'projects': return _buildFeatureScaffold('Projects', Icons.folder, _buildProjectsTab());
       case 'git': return _buildFeatureScaffold('Git', Icons.account_tree, _buildGitTab());
       case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
       case 'terminal': return _buildTerminalPage();
-      case 'downloads': return const DownloadsPage();
+      case 'downloads': return _browserToolPage(const DownloadsPage());
       case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => Navigator.of(context).pop());
       case 'music': return _buildMusicPlayerPage();
       case 'images': return _buildImagePage();
       case 'documents': return _buildDocumentPage();
       case 'files':
-        // Within the Documents ecosystem, the "File Explorer" tool opens the
-        // dedicated Folders screen. Elsewhere it falls back to the document browser.
-        if (_activeEcosystem?.id == 'documents') return _buildFoldersPage();
-        return _buildDocumentPage();
-      case 'bookmarks': return const BookmarksPage();
-      case 'passwords': return const PasswordsPage();
+        // "File Explorer" is the full-device explorer: it lists ALL files and
+        // folders from the storage root (not just documents). It must never
+        // fall through to the documents-only browser regardless of the hub it
+        // is opened from.
+        return _buildFoldersPage();
+      case 'bookmarks': return _browserToolPage(const BookmarksPage());
+      case 'passwords': return _browserToolPage(const PasswordsPage());
       case 'lyrics': return const LyricsPage();
       case 'subtitles': return const SubtitlesPage();
-      case 'settings': return const SettingsPage();
+      case 'settings':
+        return SettingsPage(
+          themeMode: widget.themeMode,
+          onThemeChanged: (m) => widget.onThemeChanged?.call(m),
+          onDownloadLocationChanged: (path) {
+            if (path.isNotEmpty && mounted) setState(() => _downloadLocation = path);
+          },
+        );
       default: return null;
     }
   }
 
+  /// Wraps a browser-ecosystem tool page so its content does not stretch
+  /// edge-to-edge on the wide desktop. List-style tools (history, downloads,
+  /// bookmarks, passwords, …) look cramped and "blown up" running the full
+  /// window width; this centers them in a comfortable column instead.
+  /// Only applied on desktop — mobile keeps full bleed.
+  Widget _browserToolPage(Widget child) {
+    if (kIsWeb || !Responsive.isDesktop(context)) return child;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth > 1160 ? 1160.0 : constraints.maxWidth;
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxW),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
   // Media sniffer — per-tab
   final Map<int, List<MediaItem>> _tabMedia = {};
+
+  // URLs the user chose to clear/remove from the sniffer within the current
+  // page session. These should never be re-sniffed until the user navigates
+  // to a new page (which retires all old sniffs anyway).
+  final Set<String> _tabSuppressedMedia = {};
+
   List<MediaItem> get _pendingMedia => _tabMedia.putIfAbsent(_activeBrowserTabId, () => []);
 
   // Content blocker & download manager
   final ContentBlockerService _contentBlocker = ContentBlockerService();
   final AdBlockerService _adBlocker = AdBlockerService();
+  final FfmpegStitchService _ffmpegStitch = FfmpegStitchService();
   DownloadService? _downloadManager;
   NewsFeedService? _newsService;
   bool _ntpAutofocus = false;
@@ -585,7 +697,15 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool _aiLoading = false;
 
   void _onMusicChanged() {
-    if (mounted) setState(() {});
+    // A setState issued during widget build throws; defer to the next frame.
+    if (!mounted) return;
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
+      setState(() {});
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   @override
@@ -1478,6 +1598,28 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           _pendingMedia.clear();
           setState(() {});
         },
+        onDelete: (item) {
+          _pendingMedia.removeWhere((m) => m.url == item.url);
+          _tabSuppressedMedia.add(item.url);
+          setState(() {});
+        },
+        onStitch: (item) async {
+          final segs = item.segments ?? const [];
+          if (segs.isEmpty) {
+            _showToast('No stream segments to stitch');
+            return;
+          }
+          _showToast('Stitching ${segs.length} segments…');
+          try {
+            final out = await _ffmpegStitch.stitch(
+              segmentUrls: segs,
+              outputFilename: 'stitched_${DateTime.now().millisecondsSinceEpoch}.mp4',
+            );
+            _showToast(out == null ? 'Stitch failed' : 'Video saved');
+          } catch (_) {
+            _showToast('Stitch failed');
+          }
+        },
         onRename: (oldItem, newName) {
           final idx = _pendingMedia.indexWhere((m) => m.url == oldItem.url);
           if (idx >= 0) {
@@ -2057,6 +2199,20 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   /// Returns a path on public external storage that survives uninstall/reinstall.
   /// Falls back to app-specific external storage, then documents dir.
   Future<String> _getPublicStoragePath(String subfolder) async {
+    // Desktop: use the real Downloads folder so Media/Documents stores are
+    // reachable and survive restarts.
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      final base = PlatformPaths.defaultDownloadsHint();
+      if (base.isNotEmpty) {
+        final d = Directory(base);
+        try {
+          await d.create(recursive: true);
+          if (await d.exists()) {
+            return p.join(d.path, 'Makaw', subfolder);
+          }
+        } catch (_) {}
+      }
+    }
     // Try public Downloads folder (survives uninstall with MANAGE_EXTERNAL_STORAGE)
     if (Platform.isAndroid) {
       for (final base in ['/storage/emulated/0/Download', '/sdcard/Download', '/storage/emulated/0/Downloads']) {
@@ -2497,31 +2653,205 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     }
     if (ecosystem == null) return;
     if (ecosystem.id == 'browser') {
-      _openBrowserDashboard();
+      // The browser renders in-place as the app's main surface: pop any pushed
+      // hub/tool routes, then switch to the browser dashboard (NOT the Makaw
+      // Root Portal grid — tapping Browser must open the web browser).
+      if (!mounted) return;
+      _scheduleNavigation(() {
+        if (!mounted) return;
+        Navigator.of(context).popUntil((r) => r.isFirst);
+        _openBrowserDashboard();
+      });
       return;
     }
     final hub = ecosystem;
-    Navigator.of(context).push(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => EcosystemHubPage(
-        ecosystem: hub,
-        onOpenTool: (tool) => _openEcosystemTool(hub, tool),
-        onGoHome: _goToMakawHome,
-        isDesktopShell: Responsive.isDesktop(context) && !kIsWeb,
-        onSearch: _openUniversalSearch,
-        recentActivity: hub.id == 'documents'
-            ? RecentActivitySection(onOpen: (doc) => _openFile(doc.filePath))
-            : hub.id == 'terminal'
-                ? RecentTerminalSessionsSection(
-                    onOpenSession: _openTerminalSession,
-                    onNewSession: () => _openTerminalSession(-1),
-                  )
-                : null,
-        auxSections: hub.id == 'code_studio' ? [_buildRecentProjectsSection()] : const [],
-      ),
+    if (!mounted) return;
+    _scheduleNavigation(() => _pushEcosystemHub(hub));
+  }
+
+  /// Debounces navigator mutations to a single safe execution per frame turn
+  /// and queues them so a tap landing mid-transition (when the Navigator is
+  /// _debugLocked) cannot throw and freeze the app. Only the most recent
+  /// pending action runs.
+  void _scheduleNavigation(VoidCallback action) {
+    if (!mounted) return;
+    _pendingNav = action;
+    if (_navScheduled) return;
+    _navScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _navScheduled = false;
+      final a = _pendingNav;
+      _pendingNav = null;
+      if (a != null && mounted) a();
+    });
+  }
+
+  void _pushEcosystemHub(Ecosystem hub) {
+    if (!mounted) return;
+    final route = PageRouteBuilder(
+      settings: RouteSettings(name: '/ecosystem_hub/${hub.id}'),
+      pageBuilder: (_, __, ___) {
+        final content = EcosystemHubPage(
+          ecosystem: hub,
+          onOpenTool: (tool) => _openEcosystemTool(hub, tool),
+          onGoHome: _goToMakawHome,
+          isDesktopShell: Responsive.isDesktop(context) && !kIsWeb,
+          onSearch: _openUniversalSearch,
+          recentActivity: hub.id == 'documents'
+              ? RecentActivitySection(onOpen: (doc) => _openFile(doc.filePath))
+              : hub.id == 'terminal'
+                  ? RecentTerminalSessionsSection(
+                      onOpenSession: _openTerminalSession,
+                      onNewSession: () => _openTerminalSession(-1),
+                    )
+                  : null,
+          auxSections: hub.id == 'code_studio' ? [_buildRecentProjectsSection()] : const [],
+        );
+        if (!kIsWeb && Responsive.isDesktop(context)) {
+          return DesktopPortalShell(
+            onOpenEcosystem: _openEcosystem,
+            onGoHome: _goToMakawHome,
+            excludeEcosystemId: hub.id,
+            child: content,
+          );
+        }
+        return Material(color: const Color(0xFF0F172A), child: content);
+      },
       transitionDuration: const Duration(milliseconds: 220),
       reverseTransitionDuration: const Duration(milliseconds: 160),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-    ));
+    );
+    // Navigating hub→hub replaces the current hub instead of stacking another
+    // (the Main Menu rail on a hub lists the other ecosystems).
+    if (_hubRouteObserver.hasHub) {
+      Navigator.of(context).pushReplacement(route);
+    } else {
+      Navigator.of(context).push(route);
+    }
+  }
+
+  /// Hosts pushed tool pages within a [Material] so inked taps render
+  /// correctly. The Main Menu rail (DesktopPortalShell) is intentionally NOT
+  /// wrapped here: per the model, tool pages have no rail.
+  ///
+  /// On desktop a floating bottom-right cluster gives one-tap navigation back:
+  /// when an ecosystem hub route is alive underneath, a "hub" home button
+  /// (back to the tool's own ecosystem hub) is shown alongside the Makaw logo
+  /// (directly to the Makaw Home / Root Portal).
+  Widget _wrapDesktopShell(Widget child) {
+    final shelled = Material(
+      color: const Color(0xFF0F172A),
+      child: child,
+    );
+    if (!kIsWeb && Responsive.isDesktop(context)) {
+      final isTool = _hasEcosystemHubRoute();
+      return Stack(
+        children: [
+          Positioned.fill(child: shelled),
+          Positioned(
+            right: 18,
+            bottom: 18,
+            // InkWell (for the float buttons' ripples) requires a Material
+            // ancestor; the page's Material is a Stack sibling, so provide one.
+            child: Material(
+              color: Colors.transparent,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isTool) ...[
+                    _buildEcosystemHubFloatButton(),
+                    const SizedBox(width: 10),
+                  ],
+                  _buildMakawHomeFloatButton(),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return shelled;
+  }
+
+  /// True when an ecosystem hub route is still alive in the navigator stack
+  /// (so a pushed tool page can offer a "back to its ecosystem hub" button).
+  bool _hasEcosystemHubRoute() => _hubRouteObserver.hasHub;
+
+  String? _ecosystemNameForHub() {
+    final id = _hubRouteObserver.topHubId;
+    if (id == null) return null;
+    for (final e in Ecosystems.all) {
+      if (e.id == id) return e.name;
+    }
+    return null;
+  }
+
+  /// Floating "hub" home button shown on ecosystem tool pages: returns to the
+  /// tool's own ecosystem hub (not to the Makaw Home / Root Portal).
+  Widget _buildEcosystemHubFloatButton() {
+    final ecosystemName = _ecosystemNameForHub() ?? 'Ecosystem';
+    return Tooltip(
+      message: '$ecosystemName hub',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(28),
+        onTap: _goToActiveEcosystemHub,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF0B1120),
+            border: Border.all(color: Colors.white.withOpacity(0.12)),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 12, offset: const Offset(0, 4)),
+            ],
+          ),
+          child: const Icon(Icons.grid_view_rounded, color: Colors.white, size: 20),
+        ),
+      ),
+    );
+  }
+
+  /// Pops back through any tool screens until the current ecosystem's hub.
+  void _goToActiveEcosystemHub() {
+    if (!mounted) return;
+    _scheduleNavigation(() {
+      if (!mounted) return;
+      Navigator.of(context)
+          .popUntil((route) => (route.settings.name ?? '').startsWith(_HubRouteObserver._hubPrefix));
+    });
+  }
+
+  /// Floating Makaw logo that always returns to the Makaw Home / Root Portal.
+  Widget _buildMakawHomeFloatButton() {
+    return Tooltip(
+      message: 'Makaw Home',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(28),
+        onTap: _goToMakawHome,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF0B1120),
+            border: Border.all(color: Colors.white.withOpacity(0.12)),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 12, offset: const Offset(0, 4)),
+            ],
+          ),
+          padding: const EdgeInsets.all(7),
+          child: ClipOval(
+            child: Image.asset(
+              'assets/makaw_logo_28.png',
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) =>
+                  const Icon(Icons.home_rounded, color: Colors.white, size: 20),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// Builds the adaptive Code Studio IDE workspace for the current project.
@@ -2581,7 +2911,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 trailing: const Icon(Icons.open_in_new, color: Color(0xFF94A3B8), size: 18),
                 onTap: () {
                   Navigator.of(context).push(PageRouteBuilder(
-                    pageBuilder: (_, __, ___) => MakawIdeWorkspace(project: StudioProject(Directory(_projectPath))),
+                    pageBuilder: (_, __, ___) => _wrapDesktopShell(MakawIdeWorkspace(project: StudioProject(Directory(_projectPath)))),
                     transitionDuration: const Duration(milliseconds: 200),
                     reverseTransitionDuration: const Duration(milliseconds: 150),
                     transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
@@ -2603,26 +2933,75 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     _showBrowserDashboard();
   }
 
+  /// Deferred one-step pop: taps that land while a route transition is in
+  /// flight otherwise throw '!_debugLocked' in the Navigator, freezing the app.
+  void _popStep() {
+    if (!mounted) return;
+    _scheduleNavigation(() {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    });
+  }
+
   /// Opens a tool page within an ecosystem, loading the tool behind the hub.
   void _openEcosystemTool(Ecosystem ecosystem, EcosystemTool tool) {
-    _activeEcosystem = ecosystem;
+    if (ecosystem.id == 'utilities') {
+      _launchUtility(tool.view);
+      return;
+    }
     if (tool.view == 'browser') {
-      _activeEcosystem = null;
       _openBrowserDashboard();
       return;
     }
     final page = _buildFeaturePage(tool.view);
     if (page != null) {
-      Navigator.of(context).push(PageRouteBuilder(
-        pageBuilder: (_, __, ___) => page,
-        transitionDuration: const Duration(milliseconds: 200),
-        reverseTransitionDuration: const Duration(milliseconds: 150),
-        transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-      )).then((_) {
-        if (mounted) _activeEcosystem = null;
+      if (!mounted) return;
+      _scheduleNavigation(() {
+        if (!mounted) return;
+        Navigator.of(context).push(PageRouteBuilder(
+          pageBuilder: (_, __, ___) => _wrapDesktopShell(page),
+          transitionDuration: const Duration(milliseconds: 200),
+          reverseTransitionDuration: const Duration(milliseconds: 150),
+          transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+        ));
       });
-    } else {
-      _activeEcosystem = null;
+    }
+  }
+
+  /// Launches a real Windows OS utility from the Utilities ecosystem.
+  void _launchUtility(String view) {
+    final home = PlatformPaths.home();
+    switch (view) {
+      case 'util_this_pc':
+        SystemLauncher.openThisPc();
+      case 'util_profile':
+        if (home.isNotEmpty) SystemLauncher.openExplorer(home);
+      case 'util_downloads':
+        SystemLauncher.openDownloads();
+      case 'util_cmd':
+        if (home.isNotEmpty) SystemLauncher.openTerminalAt(home);
+      case 'util_powershell':
+        if (home.isNotEmpty) SystemLauncher.openPowerShellAt(home);
+      case 'util_run':
+        SystemLauncher.openRunDialog();
+      case 'util_taskmgr':
+        SystemLauncher.openTaskManager();
+      case 'util_settings':
+        SystemLauncher.openSettings();
+      case 'util_display':
+        SystemLauncher.openDisplaySettings();
+      case 'util_device':
+        SystemLauncher.openDeviceManager();
+      case 'util_disk':
+        SystemLauncher.openDiskManagement();
+      case 'util_control':
+        SystemLauncher.openControlPanel();
+      case 'util_sysinfo':
+        SystemLauncher.openSystemInfo();
+      case 'util_notepad':
+        SystemLauncher.openNotepad();
+      case 'util_calc':
+        SystemLauncher.openCalculator();
     }
   }
 
@@ -2861,15 +3240,20 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   /// Opens the Terminal tool focused on a specific session (from the hub's
   /// Recent Sessions section).
   void _openTerminalSession(int sessionId) {
-    Navigator.of(context).push(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => TerminalSessionsPage(initialSessionId: sessionId),
-      transitionDuration: const Duration(milliseconds: 200),
-      reverseTransitionDuration: const Duration(milliseconds: 150),
-      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-    ));
+    if (!mounted) return;
+    _scheduleNavigation(() {
+      if (!mounted) return;
+      Navigator.of(context).push(PageRouteBuilder(
+        pageBuilder: (_, __, ___) => _wrapDesktopShell(TerminalSessionsPage(initialSessionId: sessionId)),
+        transitionDuration: const Duration(milliseconds: 200),
+        reverseTransitionDuration: const Duration(milliseconds: 150),
+        transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+      ));
+    });
   }
 
   Widget _buildFeatureScaffold(String title, IconData icon, Widget body) {
+    final hubName = _ecosystemNameForHub();
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -2882,11 +3266,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         appBar: AppBar(
           leading: IconButton(
             icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
-            onPressed: () => Navigator.of(context).pop(),
-            tooltip: _activeEcosystem != null ? 'Back to ${_activeEcosystem!.name} Hub' : 'Back',
+            onPressed: _popStep,
+            tooltip: hubName != null ? 'Back to $hubName Hub' : 'Back',
           ),
-          leadingWidth: _activeEcosystem != null ? 300 : kToolbarHeight,
-          titleSpacing: _activeEcosystem != null ? 0 : null,
+          leadingWidth: hubName != null ? 300 : kToolbarHeight,
+          titleSpacing: hubName != null ? 0 : null,
           title: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, size: 20, color: kAccentTeal),
             SizedBox(width: 8),
@@ -2896,9 +3280,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(title, overflow: TextOverflow.ellipsis),
-                  if (_activeEcosystem != null)
+                  if (hubName != null)
                     Text(
-                      'From ${_activeEcosystem!.name} Hub',
+                      'From $hubName Hub',
                       style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
                     ),
                 ],
@@ -2937,6 +3321,45 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   // ─── Browser Header ──────────────────────────────────────────────────────────
 
+  /// Chrome-style omnibox activation (Ctrl+L / Alt+D / tap): enter type view,
+  /// select-all the address.
+  void _focusUrlBar() {
+    setState(() {
+      final clean = _cleanDisplayUrl(_urlController.text);
+      _typeViewFromHome = _showHomeScreen;
+      _ignoreUrlChanges = true;
+      if (clean.isNotEmpty) _urlController.text = clean;
+      _ignoreUrlChanges = false;
+      _viewMode = ViewMode.typeView;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _urlFocusNode.requestFocus();
+      _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
+    });
+  }
+
+  void _closeActiveTab() {
+    final id = _activeBrowserTabId;
+    if (_browserTabs.isNotEmpty && _browserTabs.any((t) => t.id == id)) {
+      _closeBrowserTab(id);
+    }
+  }
+
+  void _stepTab(int dir) {
+    if (_browserTabs.isEmpty) return;
+    final idx = _browserTabs.indexWhere((t) => t.id == _activeBrowserTabId);
+    if (idx < 0) return;
+    final n = (idx + dir) % _browserTabs.length;
+    _switchBrowserTab(_browserTabs[n].id);
+  }
+
+  void _reloadActiveTab() {
+    _activeWebview?.reload().catchError((_) {});
+  }
+
+  void _goBackActiveTab() => _activeWebview?.goBack();
+  void _goForwardActiveTab() => _activeWebview?.goForward();
+
   Widget _buildBrowserHeader() {
     final inc = _isIncognitoActive;
 
@@ -2953,18 +3376,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     Widget _buildUrlPill() {
       return Expanded(
         child: GestureDetector(
-          onTap: () {
-            final clean = _cleanDisplayUrl(_urlController.text);
-            _typeViewFromHome = false;
-            _ignoreUrlChanges = true;
-            if (clean.isNotEmpty) _urlController.text = clean;
-            _ignoreUrlChanges = false;
-            setState(() { _viewMode = ViewMode.typeView; });
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _urlFocusNode.requestFocus();
-              _urlController.selection = TextSelection(baseOffset: 0, extentOffset: _urlController.text.length);
-            });
-          },
+          onTap: _focusUrlBar,
           child: Container(
             margin: EdgeInsets.symmetric(horizontal: 8),
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -3015,14 +3427,83 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     }
 
     // Browsing: address bar (URL pill) only — controls live in the bottom dock
+    // on mobile. On desktop the bottom dock is hidden, so render the
+    // back/forward/reload/home buttons here next to the address bar, plus the
+    // Chrome-style star (bookmark), apps and overflow menu on the right.
     return Container(
       color: headerBg,
       padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(children: [
-        SizedBox(width: 4),
+        if (Responsive.isDesktop(context) && !kIsWeb) ...[
+          const SizedBox(width: 2),
+          _buildDesktopNavButtons(inc: inc, iconColor: iconColor),
+        ],
+        const SizedBox(width: 2),
         _buildUrlPill(),
+        if (Responsive.isDesktop(context) && !kIsWeb) ...[
+          const SizedBox(width: 2),
+          IconButton(
+            icon: Icon(_isCurrentPageBookmarked() ? Icons.star : Icons.star_border, size: 20,
+              color: _isCurrentPageBookmarked() ? const Color(0xFFFBBF24) : iconColor),
+            tooltip: _isCurrentPageBookmarked() ? 'Remove bookmark' : 'Bookmark this page',
+            onPressed: _toggleBookmarkForCurrentPage,
+          ),
+          IconButton(
+            icon: Icon(Icons.apps_rounded, size: 20, color: iconColor),
+            tooltip: 'All apps',
+            onPressed: _showBrowserDashboard,
+          ),
+          IconButton(
+            icon: Icon(Icons.more_horiz, size: 20, color: iconColor),
+            tooltip: 'Menu',
+            onPressed: _showEllipsisMenu,
+          ),
+        ],
         SizedBox(width: 4),
       ]),
+    );
+  }
+
+  /// Desktop-only navigation cluster (back / forward / stop-reload / home).
+  Widget _buildDesktopNavButtons({required bool inc, required Color iconColor}) {
+    final tab = _activeBrowserTab;
+    final progress = (_tabProgress[_activeBrowserTabId] ?? 0) / 100.0;
+    final isLoading = progress > 0 && progress < 1;
+    final dim = iconColor.withValues(alpha: 0.35);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: Icon(Icons.arrow_back_rounded, size: 20),
+          color: tab.canGoBack ? iconColor : dim,
+          tooltip: 'Back',
+          onPressed: tab.canGoBack ? () => _activeWebview?.goBack() : null,
+        ),
+        IconButton(
+          icon: Icon(Icons.arrow_forward_rounded, size: 20),
+          color: tab.canGoForward ? iconColor : dim,
+          tooltip: 'Forward',
+          onPressed: tab.canGoForward ? () => _activeWebview?.goForward() : null,
+        ),
+        IconButton(
+          icon: Icon(isLoading ? Icons.close_rounded : Icons.refresh_rounded, size: 20),
+          color: iconColor,
+          tooltip: isLoading ? 'Stop' : 'Reload',
+          onPressed: () {
+            if (isLoading) {
+              _activeWebview?.stopLoading();
+            } else {
+              _retryActiveTab();
+            }
+          },
+        ),
+        IconButton(
+          icon: Icon(Icons.home_outlined, size: 20),
+          color: iconColor,
+          tooltip: 'Makaw Home',
+          onPressed: _showBrowserDashboard,
+        ),
+      ],
     );
   }
 
@@ -3335,9 +3816,164 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   // ─── Browser Content ──────────────────────────────────────────────────────
 
   Widget _buildBrowserContent() {
-    if (_isBrowserDashboard) return _buildBrowserDashboardSurface();
-    if (_isBrowserNewTab) return _buildBrowserNewTabSurface();
-    return _buildBrowsingSurface();
+    final isDesktopBrowser = Responsive.isDesktop(context) && !kIsWeb;
+    final surface = _isBrowserDashboard
+        ? ColoredBox(color: kSurfaceBase, child: _buildBrowserDashboardSurface())
+        : _isBrowserNewTab
+            ? ColoredBox(color: kSurfaceBase, child: _buildBrowserNewTabSurface())
+            : _buildBrowsingSurface();
+    // Tab webviews are mounted ONCE and stay alive under every sub-surface:
+    // switching dashboard/newTab/browsing never destroys/recreates platform
+    // views. Previously each sub-view swap unmounted the InAppWebView stack,
+    // churning the inappwebview_windows text-input client and crashing at boot
+    // with the "view ID is null" attach storm. Overlays must be opaque.
+    final host = Stack(
+      children: [
+        if (_browserTabs.isNotEmpty) _buildWebviewArea(),
+        surface,
+      ],
+    );
+    if (isDesktopBrowser && !_isFullscreen && !_isMakawHome) {
+      return CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyL, control: true): _focusUrlBar,
+          const SingleActivator(LogicalKeyboardKey.keyD, alt: true): _focusUrlBar,
+          const SingleActivator(LogicalKeyboardKey.keyT, control: true): () => _createBrowserTab(incognito: _isIncognitoActive),
+          const SingleActivator(LogicalKeyboardKey.keyW, control: true): _closeActiveTab,
+          const SingleActivator(LogicalKeyboardKey.tab, control: true): () => _stepTab(1),
+          const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true): () => _stepTab(-1),
+          const SingleActivator(LogicalKeyboardKey.keyR, control: true): _reloadActiveTab,
+          const SingleActivator(LogicalKeyboardKey.f5): _reloadActiveTab,
+          const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): _goBackActiveTab,
+          const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): _goForwardActiveTab,
+        },
+        child: Focus(
+          child: Column(
+            children: [
+              _buildDesktopTabStrip(),
+              _chromeProgressBar(),
+              Expanded(child: host),
+            ],
+          ),
+        ),
+      );
+    }
+    return host;
+  }
+
+  /// Desktop-only horizontal tab strip (Chrome/Edge style). Hidden on mobile.
+  Widget _buildDesktopTabStrip() {
+    final inc = _isIncognitoActive;
+    final bg = inc ? kIncognitoBg : const Color(0xFF0B1120);
+    final hairline = inc ? kIncognitoInput : const Color(0xFF1C2940);
+    return SizedBox(
+      height: 40,
+      child: Stack(
+        children: [
+          Positioned.fill(child: Container(color: bg)),
+          // Chrome hairline below the tab strip; the ACTIVE tab breaks it and
+          // flows into the page beneath.
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 1,
+            child: Container(height: 1, color: hairline),
+          ),
+          Positioned.fill(
+            child: Row(
+              children: [
+                Expanded(
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(left: 6, right: 2),
+                    children: [
+                      for (final tab in _browserTabs) _buildDesktopTabChip(tab),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.add_rounded, color: inc ? kIncognitoAccent : Colors.white70, size: 20),
+                  tooltip: 'New tab',
+                  onPressed: () => _createBrowserTab(incognito: _isIncognitoActive),
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Thin Chrome-style loading bar under the tab strip.
+  Widget _chromeProgressBar() {
+    final p = (_tabProgress[_activeBrowserTabId] ?? 0) / 100.0;
+    final loading = p > 0 && p < 1;
+    return SizedBox(
+      height: 2,
+      width: double.infinity,
+      child: loading
+          ? LinearProgressIndicator(
+              value: p,
+              minHeight: 2,
+              backgroundColor: Colors.transparent,
+              valueColor: const AlwaysStoppedAnimation<Color>(kAccentTeal),
+            )
+          : null,
+    );
+  }
+
+Widget _buildDesktopTabChip(BrowserTab tab) {
+    final active = tab.id == _activeBrowserTabId;
+    final inc = _isIncognitoActive;
+    // Active tab flows into the page below (Chrome behavior): full strip height,
+    // content-colored, no bottom rounding, breaks the hairline underneath it.
+    final topPad = active ? 0.0 : 4.0;
+    final fg = inc ? Colors.white : Colors.white.withValues(alpha: 0.85);
+    final tabBg = active
+        ? (inc ? kIncognitoBg : kSurfaceBase)
+        : (inc ? kIncognitoInput : const Color(0xFF16263F));
+    return Padding(
+      padding: EdgeInsets.only(top: topPad, right: 4),
+      child: InkWell(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+        onTap: () => _switchBrowserTab(tab.id),
+        child: Container(
+          width: 200,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: tabBg,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                inc ? Icons.visibility_off : (tab.url.isEmpty ? Icons.add_rounded : Icons.public_rounded),
+                size: 13,
+                color: inc ? kIncognitoAccent : Colors.white54,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  tab.title.isEmpty ? (tab.url.isEmpty ? 'New Tab' : _cleanDisplayUrl(tab.url)) : tab.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: fg, fontSize: 12),
+                ),
+              ),
+TappableIcon(
+                icon: Icons.close_rounded,
+                iconSize: 14,
+                color: Colors.white38,
+                onTap: () => _closeBrowserTab(tab.id),
+                tooltip: 'Close tab',
+                target: 30,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// In-place Browser Hub (dashboard) — the Home target for the browser.
@@ -3425,16 +4061,21 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     // tools. It must render fully standalone — no browser header, dock, or
     // progress chrome around it. Its own footer menu (mobile bottom nav)
     // is the portal's dedicated menu.
+    // The tab webviews stay mounted beneath it: home is an OPAQUE overlay, so
+    // navigations never destroy/recreate platform views. Unmounting+remounting
+    // them on every surface transition churns the inappwebview text-input
+    // client and crashes on Windows ("view ID is null" attach storm).
     if (_isMakawHome) {
+      final content = _buildHomeContent();
       if (!kIsWeb && Responsive.isMobile(context)) {
         return Column(
           children: [
-            Expanded(child: _buildHomeContent()),
+            Expanded(child: content),
             _buildBottomNavBar(),
           ],
         );
       }
-      return _buildHomeContent();
+      return content;
     }
 
     return Column(
@@ -3449,7 +4090,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             errorMessage: _tabErrorMessages[activeId] ?? '',
             mediaCount: _pendingMedia.length,
             tabCount: _currentModeTabCount,
-            showDock: _browserDockVisible,
+            showDock: (Responsive.isDesktop(context) && !kIsWeb) ? false : _browserDockVisible,
             canGoBack: tab.canGoBack,
             canGoForward: tab.canGoForward,
             onBack: () => _activeWebview?.goBack(),
@@ -3462,7 +4103,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             onMediaTap: _showMediaSnifferPage,
             child: Stack(
               children: [
-                if (!showHome && !isTypeView) _buildWebviewArea(),
                 if (showHome && !isTypeView) _buildHomeContent(),
                 if (isTypeView) _buildTypeView(),
               ],
@@ -3533,7 +4173,10 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   void _goToNtp() {
-    _ntpAutofocus = true;
+    // Desktop never autofocuses the NTP search: an autofocused TextField racing
+    // webview platform-view mount/destroy on Windows triggers the plugin's
+    // text-input attach storm ("view ID is null") that kills the app.
+    _ntpAutofocus = kIsWeb || Responsive.isMobile(context);
     _enterBrowserSubView(BrowserSubView.newTab);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ntpAutofocus = false;
@@ -3545,14 +4188,20 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   void _goToMakawHome() {
-    Navigator.of(context).popUntil((r) => r.isFirst);
-    _switchToView('browser');
-    setState(() {
-      // The Makaw Root Portal (launcher hub) renders via the Makaw-home branch
-      // of the browsing surface; the sub-view must not intercept it.
-      _viewMode = ViewMode.home;
-      _browserSubView = BrowserSubView.browsing;
-      _urlController.clear();
+    if (!mounted) return;
+    // Defer to the next frame: popUntil during an active route transition
+    // throws '!_debugLocked' in the Navigator and freezes the app.
+    _scheduleNavigation(() {
+      if (!mounted) return;
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      _switchToView('browser');
+      setState(() {
+        // The Makaw Root Portal (launcher hub) renders via the Makaw-home branch
+        // of the browsing surface; the sub-view must not intercept it.
+        _viewMode = ViewMode.home;
+        _browserSubView = BrowserSubView.browsing;
+        _urlController.clear();
+      });
     });
   }
 
@@ -3928,7 +4577,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     dense: true,
                     leading: Icon(Icons.folder, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
                     title: Text('Download Location', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
-                    subtitle: Text(_downloadLocation.isNotEmpty ? _downloadLocation.split('/').last : 'MakawDownloads', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11)),
+                    subtitle: Text(_downloadLocation.isNotEmpty ? _downloadLocation.split('\\').last.split('/').last : (kIsWeb ? 'MakawDownloads' : PlatformPaths.defaultDownloadsHint()), style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11)),
                     trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
                     onTap: () async {
                       Navigator.of(ctx2).pop();
@@ -4022,7 +4671,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     };
 
     Route fastRoute(Widget child) => PageRouteBuilder(
-      pageBuilder: (_, __, ___) => child,
+      pageBuilder: (_, __, ___) => _wrapDesktopShell(child),
       transitionDuration: Duration(milliseconds: 200),
       reverseTransitionDuration: Duration(milliseconds: 150),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
@@ -4364,22 +5013,26 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       domStorageEnabled: true,
       databaseEnabled: true,
       allowFileAccess: true,
-      preferredContentMode: UserPreferredContentMode.MOBILE,
+      preferredContentMode: Responsive.isDesktop(context) && !kIsWeb
+          ? UserPreferredContentMode.DESKTOP
+          : UserPreferredContentMode.MOBILE,
       offscreenPreRaster: false,
       incognito: tab.incognito,
       useOnDownloadStart: true,
     );
 
-    _pullToRefreshController ??= PullToRefreshController(
-      settings: PullToRefreshSettings(
-        color: kAccentTeal,
-        enabled: true,
-        backgroundColor: Theme.of(context).colorScheme.surface,
-      ),
-      onRefresh: () {
-        _activeWebview?.reload();
-      },
-    );
+    if (_supportsPullToRefresh) {
+      _pullToRefreshController ??= PullToRefreshController(
+        settings: PullToRefreshSettings(
+          color: kAccentTeal,
+          enabled: true,
+          backgroundColor: Theme.of(context).colorScheme.surface,
+        ),
+        onRefresh: () {
+          _activeWebview?.reload();
+        },
+      );
+    }
 
     final initialUrl = tab.url.isNotEmpty ? tab.url : 'about:blank';
 
@@ -4390,7 +5043,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       initialUserScripts: UnmodifiableListView([
         UserScript(source: _antiTapjackScript(), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
       ]),
-      pullToRefreshController: _pullToRefreshController,
+      pullToRefreshController: _supportsPullToRefresh ? _pullToRefreshController : null,
       onCreateWindow: (ctrl, request) async {
         final targetUrl = request.request.url?.toString() ?? '';
         if (targetUrl.isEmpty || targetUrl == 'about:blank' || _isBlockedRedirect(targetUrl)) {
@@ -5712,23 +6365,19 @@ try {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     IconButton(
-                                      icon: Icon(Icons.play_arrow, size: 16, color: Colors.green),
+                                      icon: Icon(Icons.play_arrow, size: 18, color: Colors.green),
                                       onPressed: () {
                                         _switchToView('player');
                                       },
                                       tooltip: 'Play',
-                                      constraints: BoxConstraints(minWidth: 24, minHeight: 24),
-                                      padding: EdgeInsets.all(2),
                                     ),
                                     IconButton(
-                                      icon: Icon(Icons.download, size: 16, color: Colors.cyan),
+                                      icon: Icon(Icons.download, size: 18, color: Colors.cyan),
                                       onPressed: () {
                                         _downloadManager?.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
                                         _showToast('Added to downloads');
                                       },
                                       tooltip: 'Download original',
-                                      constraints: BoxConstraints(minWidth: 24, minHeight: 24),
-                                      padding: EdgeInsets.all(2),
                                     ),
                                   ],
                                 ),
@@ -5811,7 +6460,7 @@ try {
                         await File(p.join(dir.path, 'snippet.dart')).writeAsString(s['code'] ?? '');
                         if (!mounted) return;
                         Navigator.of(context).push(PageRouteBuilder(
-                          pageBuilder: (_, __, ___) => MakawIdeWorkspace(project: StudioProject(Directory(_projectPath))),
+                          pageBuilder: (_, __, ___) => _wrapDesktopShell(MakawIdeWorkspace(project: StudioProject(Directory(_projectPath)))),
                           transitionDuration: const Duration(milliseconds: 200),
                           reverseTransitionDuration: const Duration(milliseconds: 150),
                           transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
@@ -5859,7 +6508,7 @@ try {
                   trailing: Icon(Icons.open_in_new, size: 16, color: kPrimaryBlue),
                   onTap: () {
                     Navigator.of(context).push(PageRouteBuilder(
-                      pageBuilder: (_, __, ___) => MakawIdeWorkspace(project: StudioProject(Directory(_projectPath))),
+                      pageBuilder: (_, __, ___) => _wrapDesktopShell(MakawIdeWorkspace(project: StudioProject(Directory(_projectPath)))),
                       transitionDuration: const Duration(milliseconds: 200),
                       reverseTransitionDuration: const Duration(milliseconds: 150),
                       transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),

@@ -46,6 +46,16 @@ class _RecentTerminalSessionsSectionState extends ConsumerState<RecentTerminalSe
     if (mounted) setState(() => _sessions = s);
   }
 
+  Future<void> _remove(int id) async {
+    await _store.remove(id);
+    if (mounted) _load();
+  }
+
+  Future<void> _clear() async {
+    await _store.clearAll();
+    if (mounted) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessions = _sessions;
@@ -56,8 +66,27 @@ class _RecentTerminalSessionsSectionState extends ConsumerState<RecentTerminalSe
           children: [
             const Icon(Icons.post_add, color: Color(0xFF22D3EE), size: 18),
             const SizedBox(width: 6),
-            const Text('Recent Sessions',
-                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+            const Expanded(
+              child: Text('Recent Sessions',
+                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+            ),
+            if (sessions != null && sessions.isNotEmpty)
+              InkWell(
+                onTap: _clear,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.delete_sweep, color: Color(0xFF94A3B8), size: 15),
+                      const SizedBox(width: 4),
+                      const Text('Clear',
+                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
         const SizedBox(height: 10),
@@ -94,7 +123,19 @@ class _RecentTerminalSessionsSectionState extends ConsumerState<RecentTerminalSe
                     overflow: TextOverflow.ellipsis),
                 subtitle: Text('Opened ${_ago(s.createdAt)}',
                     style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                trailing: const Icon(Icons.play_arrow_rounded, color: Color(0xFF94A3B8), size: 20),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: () => _remove(s.id),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.close, color: Color(0xFF94A3B8), size: 16),
+                      ),
+                    ),
+                    const Icon(Icons.play_arrow_rounded, color: Color(0xFF94A3B8), size: 20),
+                  ],
+                ),
                 onTap: () => widget.onOpenSession(s.id),
               ),
             ),

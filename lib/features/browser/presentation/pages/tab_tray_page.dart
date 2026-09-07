@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+
+import '../../../../core/widgets/widgets.dart';
 import '../../domain/entities/browser_tab.dart';
 
 const _kAccentTealLight = Color(0xFF0D9488);
@@ -242,7 +244,7 @@ class _TabTrayPageState extends State<TabTrayPage> {
                     PopupMenuDivider(),
                     PopupMenuItem(value: 'close_all', child: Row(children: [Icon(Icons.close, size: 18, color: Colors.redAccent), SizedBox(width: 12), Text('Close all tabs', style: TextStyle(color: Colors.redAccent))])),
                     PopupMenuItem(value: 'select_tabs', child: Row(children: [Icon(Icons.checklist, size: 18, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)), SizedBox(width: 12), Text('Select tabs', style: TextStyle(color: Theme.of(context).colorScheme.onSurface))])),
-                    PopupMenuItem(value: 'delete_data', child: Row(children: [Icon(Icons.delete_sweep_outlined, size: 18, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)), SizedBox(width: 12), Text('Delete browsing data', style: TextStyle(color: Theme.of(context).colorScheme.onSurface))])),
+                    PopupMenuItem(value: 'delete_data', child: Row(children: [Icon(Icons.delete_sweep, size: 18, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)), SizedBox(width: 12), Text('Delete browsing data', style: TextStyle(color: Theme.of(context).colorScheme.onSurface))])),
                     PopupMenuItem(value: 'settings', child: Row(children: [Icon(Icons.settings, size: 18, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)), SizedBox(width: 12), Text('Settings', style: TextStyle(color: Theme.of(context).colorScheme.onSurface))])),
                   ],
                 ),
@@ -355,12 +357,13 @@ class _TabTrayPageState extends State<TabTrayPage> {
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
-                                    GestureDetector(
+                                    TappableIcon(
+                                      icon: Icons.close,
+                                      iconSize: 14,
+                                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                                       onTap: () => _closeTab(tab.id),
-                                      child: Container(
-                                        padding: EdgeInsets.all(4),
-                                        child: Icon(Icons.close, size: 14, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
-                                      ),
+                                      tooltip: 'Close tab',
+                                      target: 30,
                                     ),
                                   ],
                                 ),

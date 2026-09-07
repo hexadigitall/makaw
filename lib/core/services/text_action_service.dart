@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../../core/platform/session_paths.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -110,6 +110,50 @@ class TextActionService {
       await stopSpeaking();
       return;
     }
+    _currentText = clean;
+    _isSpeaking = true;
+    _isPaused = false;
+    _tts.setStartHandler(() {
+      _isSpeaking = true;
+      _isPaused = false;
+    });
+    _tts.setCompletionHandler(() {
+      _isSpeaking = false;
+      _isPaused = false;
+    });
+    _tts.setCancelHandler(() {
+      _isSpeaking = false;
+      _isPaused = false;
+    });
+    _tts.setPauseHandler(() {
+      _isSpeaking = true;
+      _isPaused = true;
+    });
+    _tts.setContinueHandler(() {
+      _isSpeaking = true;
+      _isPaused = false;
+    });
+    _tts.setErrorHandler((_) {
+      _isSpeaking = false;
+      _isPaused = false;
+    });
+    try {
+      await _tts.speak(clean);
+    } catch (_) {
+      _isSpeaking = false;
+      _isPaused = false;
+    }
+  }
+
+  /// Restart reading [text] from the very beginning (used by the persistent
+  /// HUD "Play from beginning" action). Unlike [readAloud], it always starts a
+  /// fresh playback even if audio is already playing or paused, wiring the same
+  /// handlers so the UI can track state live.
+  static Future<void> playFromBeginning(String text) async {
+    await ensureInit();
+    final clean = text.trim();
+    if (clean.isEmpty) return;
+    await stopSpeaking();
     _currentText = clean;
     _isSpeaking = true;
     _isPaused = false;
@@ -819,8 +863,8 @@ Future<String> _webImageSaveDir() async {
       } catch (_) {}
     }
   }
-  final docDir = await getApplicationDocumentsDirectory();
-  final dir = Directory(p.join(docDir.path, 'Makaw'));
+  final base = await SessionPaths.downloadsDir();
+  final dir = Directory(p.join(base, 'Makaw'));
   await dir.create(recursive: true);
   return dir.path;
 }

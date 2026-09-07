@@ -237,6 +237,7 @@ class DownloadService extends ChangeNotifier {
       } else {
         item.state = DownloadState.failed;
         item.error = 'HTTP ${response.statusCode}';
+        onComplete?.call(item);
       }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
@@ -254,10 +255,12 @@ class DownloadService extends ChangeNotifier {
         if (e.response?.statusCode != null) {
           item.error = 'HTTP ${e.response!.statusCode}';
         }
+        onComplete?.call(item);
       }
     } catch (e) {
       item.state = DownloadState.failed;
       item.error = e.toString();
+      onComplete?.call(item);
     }
     notifyListeners();
     _saveHistory();

@@ -6,19 +6,21 @@ import '../../domain/ecosystem.dart';
 /// A collapsible far-left main menu that starts collapsed to a slim icon rail
 /// (with the Makaw logo at the top). The collapse toggle expands it into a
 /// labelled drawer; in both states the menu *pushes* the content area to the
-/// right rather than overlaying it. This menu exists only on the Root Portal —
-/// ecosystem screens use a plain "Home" affordance instead, and tool pages use
-/// "Back to {Ecosystem} Hub".
+/// right rather than overlaying it. This menu exists on the Root Portal (all
+/// ecosystems) and on each ecosystem hub (where [excludeEcosystemId] hides
+/// the current ecosystem's own entry) — tool pages do not use it.
 class DesktopPortalShell extends StatefulWidget {
   final Widget child;
   final void Function(String ecosystemId) onOpenEcosystem;
   final void Function() onGoHome;
+  final String? excludeEcosystemId;
 
   const DesktopPortalShell({
     super.key,
     required this.child,
     required this.onOpenEcosystem,
     required this.onGoHome,
+    this.excludeEcosystemId,
   });
 
   @override
@@ -31,27 +33,35 @@ class _DesktopPortalShellState extends State<DesktopPortalShell> {
   static const double _collapsedWidth = 72;
   static const double _expandedWidth = 240;
 
-  List<Ecosystem> get _ecosystems => Ecosystems.all;
+  List<Ecosystem> get _ecosystems => [
+        for (final e in Ecosystems.all)
+          if (e.id != widget.excludeEcosystemId) e,
+      ];
 
   void _toggle() => setState(() => _expanded = !_expanded);
 
   @override
   Widget build(BuildContext context) {
     final width = _expanded ? _expandedWidth : _collapsedWidth;
-    return Row(
-      children: [
-        // Collapsible main menu (pushes content, never overlays).
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOut,
-          width: width,
-          height: double.infinity,
-          color: const Color(0xFF0B1120),
-          child: _expanded ? _buildExpandedMenu() : _buildCollapsedMenu(),
-        ),
-        VerticalDivider(width: 1, thickness: 1, color: Colors.white.withOpacity(0.06)),
-        Expanded(child: widget.child),
-      ],
+    // Hosted pages can be pushed onto the Navigator without any Material
+    // ancestor, so provide one here for the rail's inked interactions.
+    return Material(
+      color: Colors.transparent,
+      child: Row(
+        children: [
+          // Collapsible main menu (pushes content, never overlays).
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+            width: width,
+            height: double.infinity,
+            color: const Color(0xFF0B1120),
+            child: _expanded ? _buildExpandedMenu() : _buildCollapsedMenu(),
+          ),
+          VerticalDivider(width: 1, thickness: 1, color: Colors.white.withOpacity(0.06)),
+          Expanded(child: widget.child),
+        ],
+      ),
     );
   }
 

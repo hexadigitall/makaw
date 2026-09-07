@@ -53,9 +53,15 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
   void initState() {
     super.initState();
     _service.addListener(_onChange);
-    if (_service.allSongs.isEmpty && !_service.isScanning) {
-      _service.scanAllSongs();
-    }
+    // Defer the scan past the first build pass — scanAllSongs() fires
+    // notifyListeners synchronously, which would setState on the parent
+    // (MakawHome) while MusicPlayerWidget's route is still mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_service.allSongs.isEmpty && !_service.isScanning) {
+        _service.scanAllSongs();
+      }
+    });
   }
 
   @override

@@ -10,6 +10,7 @@ class MakawHomePortalPage extends StatelessWidget {
   final VoidCallback onToggleIncognito;
   final VoidCallback onOpenAiAssistant;
   final VoidCallback onOpenSearch;
+  final Widget? recentActivity;
 
   const MakawHomePortalPage({
     Key? key,
@@ -19,6 +20,7 @@ class MakawHomePortalPage extends StatelessWidget {
     required this.onToggleIncognito,
     required this.onOpenAiAssistant,
     required this.onOpenSearch,
+    this.recentActivity,
   }) : super(key: key);
 
   @override
@@ -118,7 +120,7 @@ class MakawHomePortalPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildRecentActivitySection(),
+                  recentActivity ?? _buildRecentActivitySection(),
                   const SizedBox(height: 20),
                   _buildFeatureHighlights(context),
                 ],
@@ -177,7 +179,7 @@ class MakawHomePortalPage extends StatelessWidget {
         const SizedBox(height: 16),
 
         // 5. Recent Activity Card
-        _buildRecentActivitySection(),
+        recentActivity ?? _buildRecentActivitySection(),
         const SizedBox(height: 20),
       ],
     );
@@ -301,6 +303,12 @@ class MakawHomePortalPage extends StatelessWidget {
         icon: Icons.folder_outlined,
         accentColor: const Color(0xFF34D399),
         onTap: () => onOpenEcosystem('files'),
+      ),
+      LauncherItem(
+        title: 'Settings',
+        icon: Icons.settings_outlined,
+        accentColor: const Color(0xFF94A3B8),
+        onTap: () => onNavigate('settings'),
       ),
     ];
   }

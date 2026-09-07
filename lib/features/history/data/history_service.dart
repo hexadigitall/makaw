@@ -63,6 +63,13 @@ class HistoryService {
     } catch (_) {}
   }
 
+  static Future<void> deleteByUrl(String url) async {
+    if (_db == null) return;
+    try {
+      await _database.delete('history', where: 'url = ?', whereArgs: [url]);
+    } catch (_) {}
+  }
+
   static Future<void> clearAll() async {
     if (_db == null) return;
     try {

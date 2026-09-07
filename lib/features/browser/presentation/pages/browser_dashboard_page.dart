@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/widgets.dart';
 import '../../domain/entities/recent_page_item.dart';
 
 /// Browser Dashboard (Browser Ecosystem Home).
@@ -23,6 +24,8 @@ class BrowserDashboardPage extends StatefulWidget {
   final VoidCallback onToggleShield;
   final VoidCallback onSearchFocused;
   final List<RecentPageItem> recentPages;
+  final void Function(RecentPageItem page)? onRemoveRecentPage;
+  final VoidCallback? onClearRecentPages;
 
   const BrowserDashboardPage({
     super.key,
@@ -39,6 +42,8 @@ class BrowserDashboardPage extends StatefulWidget {
     required this.onToggleShield,
     this.onSearchFocused = _noop,
     this.recentPages = const [],
+    this.onRemoveRecentPage,
+    this.onClearRecentPages,
   }) : super();
 
   static void _noop() {}
@@ -180,15 +185,13 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
           ),
           IconButton(
             icon: Icon(Icons.qr_code_scanner_rounded, color: Colors.white.withOpacity(0.6), size: 20),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
             onPressed: widget.onOpenQrScanner,
           ),
           const SizedBox(width: 12),
           IconButton(
             icon: Icon(Icons.shield_outlined, color: Colors.white.withOpacity(0.6), size: 20),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
             onPressed: widget.onToggleShield,
           ),
         ],
@@ -377,13 +380,37 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Recent Pages',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Recent Pages',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (pages.isNotEmpty && widget.onClearRecentPages != null)
+                InkWell(
+                  onTap: widget.onClearRecentPages,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.delete_sweep, color: Colors.white38, size: 15),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Clear',
+                          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 14),
           if (pages.isEmpty)
@@ -402,7 +429,7 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
                   onTap: () => widget.onSearchOrNavigate(page.url),
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                     decoration: BoxDecoration(
                       color: const Color(0xFF243247),
                       borderRadius: BorderRadius.circular(12),
@@ -435,6 +462,15 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
                             ),
                           ),
                         ),
+                        if (widget.onRemoveRecentPage != null)
+                          TappableIcon(
+                            icon: Icons.close,
+                            iconSize: 16,
+                            color: Colors.white38,
+                            onTap: () => widget.onRemoveRecentPage!(page),
+                            tooltip: 'Remove',
+                            target: 34,
+                          ),
                       ],
                     ),
                   ),

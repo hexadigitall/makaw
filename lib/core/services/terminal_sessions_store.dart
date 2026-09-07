@@ -86,6 +86,13 @@ class TerminalSessionsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> clearAll() async {
+    await _ensureLoaded();
+    _sessions = [];
+    _persist();
+    notifyListeners();
+  }
+
   Future<void> recentOpen(int id) async {
     await _ensureLoaded();
     final idx = _sessions.indexWhere((s) => s.id == id);

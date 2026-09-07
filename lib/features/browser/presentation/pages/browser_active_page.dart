@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../widgets/browser_error_view.dart';
 import '../widgets/media_sniffer_pill.dart';
@@ -67,9 +66,6 @@ class BrowserActivePage extends StatefulWidget {
 class _BrowserActivePageState extends State<BrowserActivePage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pillController;
-
-  bool get _showProgressBar =>
-      widget.isLoading && widget.progress > 0 && widget.progress < 1;
 
   @override
   void initState() {
@@ -181,25 +177,6 @@ class _BrowserActivePageState extends State<BrowserActivePage>
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Container(
-          color: const Color(0xFF0F172A),
-          height: 2.5,
-          width: double.infinity,
-          child: Stack(
-            children: [
-              if (_showProgressBar)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: FractionallySizedBox(
-                    widthFactor: math.min(1.0, widget.progress),
-                    child: const ColoredBox(
-                      color: Color(0xFF38BDF8),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
         Expanded(
           child: Stack(
             children: [

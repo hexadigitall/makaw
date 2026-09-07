@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../domain/entities/document_file_info.dart';
+import '../../../../core/platform/platform_paths.dart';
 import '../../../../core/storage/file_recents_service.dart';
 export '../../domain/entities/document_file_info.dart';
 
@@ -33,7 +34,7 @@ class DocumentService extends ChangeNotifier {
     'json': 'code', 'xml': 'code', 'yaml': 'code', 'yml': 'code',
   };
 
-  static const List<String> _scanDirs = [
+  static const List<String> _androidScanDirs = [
     '/storage/emulated/0/Documents',
     '/storage/emulated/0/Download',
     '/storage/emulated/0/Books',
@@ -59,6 +60,13 @@ class DocumentService extends ChangeNotifier {
     }
   }
 
+  /// Platform-aware document scan roots (Android legacy paths on mobile,
+  /// OS-native user folders on desktop).
+  static List<String> _scanDirsForPlatform() {
+    if (PlatformPaths.isDesktop) return PlatformPaths.documentScanDirs();
+    return _androidScanDirs;
+  }
+
   /// Scans all document directories in a background isolate to avoid blocking UI.
   Future<void> scanAllDocuments() async {
     _isScanning = true;
@@ -70,7 +78,7 @@ class DocumentService extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      final result = await compute(_scanInBackground, _scanDirs);
+      final result = await compute(_scanInBackground, _scanDirsForPlatform());
       _allDocuments = result.map((m) => DocumentFileInfo(
         id: m['filePath'].hashCode,
         filePath: m['filePath'] as String,

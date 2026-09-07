@@ -5,10 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
+
 import '../../../core/platform/conditional_pty.dart';
 import '../../../core/services/terminal_sessions_store.dart';
 import '../../../app/providers/service_providers.dart';
-
+import '../../../core/widgets/widgets.dart';
 /// A live terminal session: its own transcript buffer and PTY (started only
 /// while active so we don't hold many processes open).
 class _LiveSession {
@@ -104,24 +105,80 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
   void _startSession(_LiveSession session) {
     if (session.started) return;
     if (kIsWeb) return;
+    final List<(String, String, String, List<String>)> candidates;
+    if (Platform.isWindows) {
+      // Prefer PowerShell, but a broken PowerShell quits within a second of
+      // launch (e.g. "Loading managed Windows PowerShell failed with
+      // 0x8009001d"), so fall back to cmd.exe when that happens.
+      candidates = [
+        ('powershell', 'powershell.exe', r'C:\', ['-NoLogo', '-NoProfile']),
+        ('cmd', 'cmd.exe', Platform.environment['USERPROFILE'] ?? r'C:\', const []),
+      ];
+    } else if (Platform.isAndroid) {
+      candidates = [
+        ('sh', 'sh', '/storage/emulated/0', ['-c', 'cd /storage/emulated/0 && sh']),
+      ];
+    } else {
+      candidates = [
+        ('bash', 'bash', Platform.environment['HOME'] ?? '/', const []),
+      ];
+    }
+    _spawnSession(session, candidates);
+  }
+
+  void _spawnSession(_LiveSession session, List<(String, String, String, List<String>)> candidates) {
+    if (candidates.isEmpty) {
+      session.term.write('\r\n[error starting PTY] no usable shell found');
+      session.started = true;
+      return;
+    }
+    final (display, executable, cwd, args) = candidates.first;
+    final remaining = candidates.sublist(1);
     try {
       final pty = Pty.start(
-        Platform.isAndroid ? 'sh' : 'bash',
-        arguments: Platform.isAndroid ? ['-c', 'cd /storage/emulated/0 && sh'] : [],
+        executable,
+        arguments: args,
         environment: {'TERM': 'xterm-256color'},
-        workingDirectory: Platform.isAndroid ? '/storage/emulated/0' : null,
+        workingDirectory: cwd,
       );
       session._pty = pty;
       session.started = true;
+      final startedAt = DateTime.now();
+      final output = StringBuffer();
       pty.output
           .cast<List<int>>()
           .transform(const Utf8Decoder())
-          .listen(session.term.write);
-      pty.exitCode.then((_) => session.term.write('\r\n[process exited]'));
+          .listen((chunk) {
+        output.write(chunk);
+        session.term.write(chunk);
+      });
+      if (Platform.isWindows && display == 'cmd') {
+        pty.write(utf8.encode('chcp 65001>nul\r\n'));
+      }
+      pty.exitCode.then((_) {
+        session._pty = null;
+        final crashedAtStartup = remaining.isNotEmpty &&
+            (DateTime.now().difference(startedAt).inMilliseconds < 2000 ||
+                output.toString().contains('8009001d') ||
+                output.toString().contains('managed Windows PowerShell failed') ||
+                output.toString().contains('Internal Windows PowerShell Error'));
+        if (crashedAtStartup) {
+          session.started = false;
+          session.term.write('\r\n[$display exited unexpectedly at startup — '
+              'retrying with ${remaining.first.$1}]\r\n');
+          _spawnSession(session, remaining);
+          return;
+        }
+        session.term.write('\r\n[process exited]');
+      });
       session.term.onOutput = (data) {
         pty.write(const Utf8Encoder().convert(data));
       };
-    } catch (_) {}
+    } catch (e) {
+      session.term.write('\r\n[error starting $executable]\r\n$e');
+      session.started = false;
+      if (remaining.isNotEmpty) _spawnSession(session, remaining);
+    }
   }
 
   Future<void> _newSession() async {
@@ -235,7 +292,6 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
             const SizedBox(width: 4),
             IconButton(
               icon: const Icon(Icons.add, color: Color(0xFF818CF8), size: 20),
-              visualDensity: VisualDensity.compact,
               onPressed: _newSession,
               tooltip: 'New session',
             ),
@@ -263,10 +319,14 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
           children: [
             Text(s.name,
                 style: TextStyle(color: active ? Colors.black : Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-            const SizedBox(width: 6),
-            InkWell(
+            const SizedBox(width: 2),
+            TappableIcon(
+              icon: Icons.close,
+              iconSize: 15,
+              color: active ? Colors.black87 : Colors.white38,
               onTap: () => _closeSession(id),
-              child: Icon(Icons.close, size: 15, color: active ? Colors.black87 : Colors.white38),
+              tooltip: 'Close session',
+              target: 28,
             ),
           ],
         ),

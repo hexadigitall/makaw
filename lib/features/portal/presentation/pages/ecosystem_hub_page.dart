@@ -58,9 +58,9 @@ class EcosystemHubPage extends StatelessWidget {
         backgroundColor: const Color(0xFF0B1120),
         foregroundColor: Colors.white,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-          tooltip: 'Back',
+          icon: const Icon(Icons.home_rounded, color: Colors.white),
+          onPressed: onGoHome,
+          tooltip: 'Makaw Home',
         ),
         title: Row(
           children: [
