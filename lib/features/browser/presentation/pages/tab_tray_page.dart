@@ -43,6 +43,15 @@ class _TabTrayPageState extends State<TabTrayPage> {
   String _searchQuery = '';
   bool _showIncognito = false;
 
+  /// Responsive column count for the tab grid — wide/landscape surfaces get
+  /// more columns so tab cards stay a reasonable size.
+  int _tabColumns(double width) {
+    if (width >= 1400) return 5;
+    if (width >= 1000) return 4;
+    if (width >= 680) return 3;
+    return 2;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -285,11 +294,14 @@ class _TabTrayPageState extends State<TabTrayPage> {
                     ],
                   ),
                 )
-              : GridView.builder(
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final cols = _tabColumns(constraints.maxWidth);
+                    return GridView.builder(
                   padding: EdgeInsets.fromLTRB(16, 4, 16, 24),
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.65,
+                    crossAxisCount: cols,
+                    childAspectRatio: 0.72,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 12,
                   ),
@@ -380,7 +392,9 @@ class _TabTrayPageState extends State<TabTrayPage> {
                       ),
                     ));
                   },
-                ),
+                );
+                    },
+                  ),
           ),
         ],
         ),
