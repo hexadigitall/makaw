@@ -3817,11 +3817,28 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   Widget _buildBrowserContent() {
     final isDesktopBrowser = Responsive.isDesktop(context) && !kIsWeb;
-    final surface = _isBrowserDashboard
+    Widget surface = _isBrowserDashboard
         ? ColoredBox(color: kSurfaceBase, child: _buildBrowserDashboardSurface())
         : _isBrowserNewTab
             ? ColoredBox(color: kSurfaceBase, child: _buildBrowserNewTabSurface())
             : _buildBrowsingSurface();
+    // Idle dashboard / new-tab surfaces are not a full-bleed webview, so on the
+    // wide desktop the column must not stretch edge-to-edge or it looks blown
+    // up. The active browsing surface stays full width like a real browser.
+    if (isDesktopBrowser && (_isBrowserDashboard || _isBrowserNewTab)) {
+      surface = LayoutBuilder(
+        builder: (context, constraints) {
+          final maxW = constraints.maxWidth > 1160 ? 1160.0 : constraints.maxWidth;
+          return Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxW),
+              child: surface,
+            ),
+          );
+        },
+      );
+    }
     // Tab webviews are mounted ONCE and stay alive under every sub-surface:
     // switching dashboard/newTab/browsing never destroys/recreates platform
     // views. Previously each sub-view swap unmounted the InAppWebView stack,

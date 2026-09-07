@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 
@@ -31,6 +32,7 @@ class ProjectTreeViewState extends State<ProjectTreeView> {
   final Set<String> _collapsed = {};
   List<_Node> _roots = [];
   String _missingNote = '';
+  bool _loading = false;
 
   @override
   void initState() {
@@ -50,27 +52,49 @@ class ProjectTreeViewState extends State<ProjectTreeView> {
   /// Re-reads the folder tree from disk.
   void refresh() => _scan();
 
+  /// Walks the folder tree on a background isolate so huge folders do not
+  /// freeze the UI, then swaps the nodes into the tree in one setState.
   void _scan() {
     final root = widget.root;
     if (!root.existsSync()) {
       _roots = [];
       _missingNote = 'Folder not found';
+      if (mounted) setState(() {});
       return;
     }
-    try {
-      _roots = _buildNodes(root, '');
-      _missingNote = '';
-    } catch (_) {
-      _missingNote = 'Could not read folder';
+    final wasEmpty = _roots.isEmpty;
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        if (wasEmpty) _missingNote = '';
+      });
     }
-    if (mounted) setState(() {});
+    _buildNodesAsync(root).then((nodes) {
+      if (!mounted) return;
+      setState(() {
+        _roots = nodes;
+        _missingNote = nodes.isEmpty ? 'Empty folder' : '';
+        _loading = false;
+      });
+    }).catchError((_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _missingNote = 'Could not read folder';
+      });
+    });
   }
+
+  Future<List<_Node>> _buildNodesAsync(Directory dir) =>
+      Isolate.run(() => _buildNodes(dir, ''));
 
   List<_Node> _buildNodes(Directory dir, String relPath) {
     final nodes = <_Node>[];
     try {
-      final children = dir.listSync().where((e) =>
-          !e.path.contains('${Platform.pathSeparator}.git')).toList();
+      final children = dir.listSync()
+          .where((e) => !CodeStudioService.skippedDirs.contains(_nameOf(e)))
+          .where((e) => !e.path.contains('${Platform.pathSeparator}.git'))
+          .toList();
       children.sort((a, b) {
         final aDir = a is Directory;
         final bDir = b is Directory;
@@ -78,7 +102,7 @@ class ProjectTreeViewState extends State<ProjectTreeView> {
         return a.path.toLowerCase().compareTo(b.path.toLowerCase());
       });
       for (final e in children) {
-        final name = e.path.split(Platform.pathSeparator).last;
+        final name = _nameOf(e);
         if (e is Directory) {
           nodes.add(_Node(
             name: name,
@@ -99,8 +123,20 @@ class ProjectTreeViewState extends State<ProjectTreeView> {
     return nodes;
   }
 
+  static String _nameOf(FileSystemEntity e) =>
+      e.path.split(Platform.pathSeparator).last;
+
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(
+        child: SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+        ),
+      );
+    }
     if (_missingNote.isNotEmpty) {
       return Center(
         child: Text(_missingNote, style: const TextStyle(color: Colors.white38, fontSize: 13)),

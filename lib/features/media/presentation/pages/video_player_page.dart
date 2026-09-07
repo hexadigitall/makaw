@@ -2216,14 +2216,29 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   }
 
   Widget _buildGridVideos() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(8),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 0.85,
-      ),
-      itemCount: _service.allVideos.length,
-      itemBuilder: (_, i) => _gridCard(_service.allVideos[i], i),
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      final cols = _videoColumns(constraints.maxWidth);
+      return GridView.builder(
+        padding: const EdgeInsets.all(8),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 0.85,
+        ),
+        itemCount: _service.allVideos.length,
+        itemBuilder: (_, i) => _gridCard(_service.allVideos[i], i),
+      );
+    });
+  }
+
+  /// Column count for the responsive video grid. Wider / landscape surfaces get
+  /// more columns so tiles stay a reasonable size instead of stretching to the
+  /// full panel width.
+  int _videoColumns(double width) {
+    if (width >= 1600) return 6;
+    if (width >= 1280) return 5;
+    if (width >= 1000) return 4;
+    if (width >= 720) return 3;
+    if (width >= 480) return 2;
+    return 2;
   }
 
   Widget _gridCard(VideoFileInfo v, int index) {
@@ -2741,11 +2756,12 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
                 const SizedBox(width: 8),
               ]),
             ),
-            Expanded(child: GridView.builder(
+            Expanded(child: LayoutBuilder(
+              builder: (_, constraints) => GridView.builder(
               controller: sc,
               padding: const EdgeInsets.all(12),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 0.75,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: _videoColumns(constraints.maxWidth), mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 0.75,
               ),
               itemCount: videos.length,
               itemBuilder: (_, i) => GestureDetector(
@@ -2783,7 +2799,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
                   ),
                 ),
               ),
-            )),
+            ))),
           ],
         ),
       ),

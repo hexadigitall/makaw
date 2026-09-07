@@ -15,12 +15,14 @@ import 'package:highlight/highlight_core.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../data/code_studio_service.dart';
+import '../../data/git_diff_service.dart';
 import '../../data/github_service.dart';
 import '../../data/ide_settings.dart';
 import '../../data/integration_helpers.dart';
 import '../../data/studio_project.dart';
 import '../../data/terminal_engine.dart';
 import '../../data/git_service.dart';
+import '../widgets/git_diff_viewer.dart';
 import '../widgets/project_tree_view.dart';
 import '../widgets/source_control_panel.dart';
 import '../../../../core/widgets/widgets.dart';
@@ -77,6 +79,10 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
   _LeftPanelMode _leftPanelMode = _LeftPanelMode.explorer;
   final GlobalKey<ProjectTreeViewState> _treeKey = GlobalKey<ProjectTreeViewState>();
   final GlobalKey<SourceControlPanelState> _sourceControlKey = GlobalKey<SourceControlPanelState>();
+
+  // Active side-by-side diff mounted in the editor canvas (Git).
+  SideBySideDiff? _activeDiff;
+  String? _diffPath;
 
   // VS Code-style status-bar git info.
   String _branch = '';
@@ -238,6 +244,8 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
       _projectFiles = [];
       _openTabs = [];
       _activeFile = null;
+      _activeDiff = null;
+      _diffPath = null;
       _dirtyPaths.clear();
       _codeController.text = '';
       _filePreviewHtml = '';
@@ -279,8 +287,10 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
     _loadProjectFiles();
   }
 
-  void _loadProjectFiles() {
-    final files = CodeStudioService.listFiles(_project.directory);
+  Future<void> _loadProjectFiles() async {
+    // Walk the tree on a background isolate so opening large folders does not
+    // freeze the window.
+    final files = await CodeStudioService.listFilesAsync(_project.directory);
     if (!mounted) return;
     setState(() {
       _projectFiles = files;
@@ -294,6 +304,10 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
   }
 
   Future<void> _openFileInTab(File file) async {
+    if (_activeDiff != null) {
+      _activeDiff = null;
+      _diffPath = null;
+    }
     if (!_openTabs.any((f) => f.path == file.path)) {
       _openTabs.add(file);
     }
@@ -364,6 +378,25 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
     if (path.endsWith('.json')) return javascript;
     if (path.endsWith('.md') || path.endsWith('.txt')) return null;
     return javascript;
+  }
+
+  /// Mounts the VS Code-style side-by-side diff (HEAD vs working tree) for a
+  /// source-control entry in the central editor canvas.
+  Future<void> _openSideBySideDiff(GitStatusEntry entry) async {
+    final diff = await GitDiffService(_project.directory).loadDiff(entry.path);
+    if (!mounted) return;
+    setState(() {
+      _activeDiff = diff;
+      _diffPath = entry.path;
+    });
+  }
+
+  /// Leaves the side-by-side diff view and returns to the file editor.
+  void _closeSideBySideDiff() {
+    setState(() {
+      _activeDiff = null;
+      _diffPath = null;
+    });
   }
 
   /// Detects the extension from a file name ('' if none).
@@ -1512,7 +1545,7 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
           builder: (ctx, setDialogState) {
             final query = controller.text.trim().toLowerCase();
             if (goToFile) {
-              results = _allProjectFiles()
+              results = _projectFiles
                   .where((f) => query.isEmpty || f.path.toLowerCase().contains(query))
                       .take(50)
                       .map((f) => ListTile(
@@ -1588,29 +1621,6 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
         );
       },
     );
-  }
-
-  List<File> _allProjectFiles() {
-    final files = <File>[];
-    try {
-      final root = _project.directory;
-      if (!root.existsSync()) return files;
-      final stack = <Directory>[root];
-      const skip = {'.git', 'node_modules', 'build', '.dart_tool', '.idea', 'out'};
-      while (stack.isNotEmpty) {
-        final dir = stack.removeLast();
-        try {
-          for (final e in dir.listSync()) {
-            if (e is Directory) {
-              if (!skip.contains(e.path.split(Platform.pathSeparator).last)) stack.add(e);
-            } else if (e is File) {
-              files.add(e);
-            }
-          }
-        } catch (_) {}
-      }
-    } catch (_) {}
-    return files;
   }
 
   // --- 3. MOBILE LAYOUT (Stacked & Gesture Driven) ---
@@ -1742,6 +1752,8 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
                     key: _sourceControlKey,
                     projectDir: _project.directory,
                     onChanged: _refreshAfterFsChanged,
+                    languageResolver: _resolveLanguage,
+                    onPrimaryOpen: _openSideBySideDiff,
                   ),
           ),
         ],
@@ -1903,23 +1915,77 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
     );
   }
 
+  Widget _buildDiffBar() {
+    final path = _diffPath ?? '';
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      color: const Color(0xFF1E293B),
+      child: Row(
+        children: [
+          const Icon(Icons.splitscreen, size: 15, color: Color(0xFF34D399)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              path.isEmpty ? 'Diff' : 'Diff · $path',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+          Tooltip(
+            message: 'Open in Editor',
+            child: InkWell(
+              onTap: () {
+                _closeSideBySideDiff();
+                final f = CodeStudioService.fileIn(_project.directory, path);
+                if (f.existsSync()) _openFileInTab(f);
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: Icon(Icons.open_in_new, size: 16, color: Colors.white70),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Close diff',
+            child: InkWell(
+              onTap: _closeSideBySideDiff,
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: Icon(Icons.close, size: 16, color: Colors.white54),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEditorCanvas() {
     return Container(
       color: const Color(0xFF0F172A),
       child: Column(
         children: [
           if (MediaQuery.of(context).size.width >= 900) _buildEditorTabs(),
+          if (_activeDiff != null) _buildDiffBar(),
           Expanded(
-            child: CodeTheme(
-              data: CodeThemeData(styles: monokaiSublimeTheme),
-              child: SingleChildScrollView(
-                child: CodeField(
-                  controller: _codeController,
-                  gutterStyle: const GutterStyle(showLineNumbers: true, textStyle: TextStyle(color: Colors.white38, fontSize: 13), margin: 16),
-                  textStyle: const TextStyle(fontFamily: 'monospace', fontSize: 14, height: 1.5),
-                ),
-              ),
-            ),
+            child: _activeDiff != null
+                ? GitDiffViewer(
+                    diff: _activeDiff!,
+                    language: _resolveLanguage(_diffPath ?? ''),
+                  )
+                : CodeTheme(
+                    data: CodeThemeData(styles: monokaiSublimeTheme),
+                    child: SingleChildScrollView(
+                      child: CodeField(
+                        controller: _codeController,
+                        gutterStyle: const GutterStyle(showLineNumbers: true, textStyle: TextStyle(color: Colors.white38, fontSize: 13), margin: 16),
+                        textStyle: const TextStyle(fontFamily: 'monospace', fontSize: 14, height: 1.5),
+                      ),
+                    ),
+                  ),
           ),
           // Bottom Status Bar (VS Code style)
           Container(

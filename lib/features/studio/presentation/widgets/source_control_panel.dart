@@ -11,11 +11,15 @@ import '../../data/git_service.dart';
 class SourceControlPanel extends StatefulWidget {
   final Directory projectDir;
   final void Function() onChanged;
+  final dynamic Function(String path)? languageResolver;
+  final void Function(GitStatusEntry entry)? onPrimaryOpen;
 
   const SourceControlPanel({
     super.key,
     required this.projectDir,
     required this.onChanged,
+    this.languageResolver,
+    this.onPrimaryOpen,
   });
 
   @override
@@ -259,7 +263,13 @@ class SourceControlPanelState extends State<SourceControlPanel> {
 
   Widget _buildEntry(GitStatusEntry e) {
     return InkWell(
-      onTap: () => _showDiff(e),
+      onTap: () {
+        if (widget.onPrimaryOpen != null) {
+          widget.onPrimaryOpen!(e);
+        } else {
+          _showDiff(e);
+        }
+      },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(

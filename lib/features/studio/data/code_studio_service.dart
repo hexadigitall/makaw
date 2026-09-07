@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 /// File / folder CRUD helpers for the Code Studio IDE.
 ///
@@ -6,6 +7,14 @@ import 'dart:io';
 /// explorer operations contained to a single project directory.
 class CodeStudioService {
   CodeStudioService._();
+
+  /// Directory names that are never surfaced in the explorer / file lists
+  /// (vendor, build, VCS and cache folders) so huge trees stay responsive.
+  static const List<String> skippedDirs = <String>[
+    '.git', 'node_modules', '.dart_tool', 'build', '.idea', 'out', 'dist',
+    '.pub', '.venv', 'venv', '__pycache__', '.next', '.nuxt', '.cache',
+    '.gradle', 'Pods', '.pytest_cache', 'coverage', '.mypy_cache',
+  ];
 
   /// Resolves [relativePath] against [root] and returns a normalized [File].
   static File fileIn(Directory root, String relativePath) {
@@ -59,6 +68,39 @@ class CodeStudioService {
         .whereType<File>()
         .where((f) => !f.path.contains('${Platform.pathSeparator}.git${Platform.pathSeparator}'))
         .toList();
+  }
+
+  /// Lists all non-vendor files under [root] without blocking the UI thread.
+  ///
+  /// The directory walk runs on a background isolate, so loading very large
+  /// folders no longer freezes the window. Skips [skippedDirs] subtrees.
+  static Future<List<File>> listFilesAsync(Directory root) async {
+    final rootPath = root.path;
+    final paths = await Isolate.run<List<String>>(() {
+      final r = Directory(rootPath);
+      if (!r.existsSync()) return const <String>[];
+      final results = <String>[];
+      final pending = <Directory>[r];
+      while (pending.isNotEmpty) {
+        final dir = pending.removeLast();
+        List<FileSystemEntity> children;
+        try {
+          children = dir.listSync();
+        } catch (_) {
+          continue;
+        }
+        for (final e in children) {
+          if (e is Directory) {
+            final name = e.path.split(Platform.pathSeparator).last;
+            if (!skippedDirs.contains(name)) pending.add(e);
+          } else if (e is File) {
+            results.add(e.path);
+          }
+        }
+      }
+      return results;
+    });
+    return [for (final p in paths) File(p)];
   }
 
   /// Relative path of [file] from [root], using forward slashes.

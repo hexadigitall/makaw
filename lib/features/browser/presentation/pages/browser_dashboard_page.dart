@@ -199,6 +199,16 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
     );
   }
 
+  /// Responsive column count for the Browser Dashboard action grid. Wide and
+  /// landscape surfaces get more columns so tiles keep a compact size.
+  int _gridColumns(double width) {
+    if (width >= 1150) return 6;
+    if (width >= 900) return 5;
+    if (width >= 640) return 4;
+    if (width >= 420) return 3;
+    return 2;
+  }
+
   Widget _buildBrowserDashboardGrid(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -231,15 +241,19 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
           ),
           const SizedBox(height: 18),
 
-          // 2x3 Action Grid
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 3,
-            mainAxisSpacing: 14,
-            crossAxisSpacing: 12,
-            childAspectRatio: 0.95,
-            children: [
+          // Responsive Action Grid — more columns on wide / landscape surfaces
+          // so tiles keep a sensible size instead of stretching full width.
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final cols = _gridColumns(constraints.maxWidth);
+              return GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: cols,
+                mainAxisSpacing: 14,
+                crossAxisSpacing: 12,
+                childAspectRatio: 1.0,
+                children: [
               _buildToolButton(
                 icon: Icons.add,
                 label: 'New Tab',
@@ -271,6 +285,8 @@ class _BrowserDashboardPageState extends State<BrowserDashboardPage> {
                 onTap: widget.onOpenSettings,
               ),
             ],
+                );
+            },
           ),
         ],
       ),
