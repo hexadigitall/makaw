@@ -21,6 +21,7 @@ android {
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        buildToolsVersion = "35.0.0"
     }
 
     val keystorePropertiesFile = rootProject.file("key.properties")
