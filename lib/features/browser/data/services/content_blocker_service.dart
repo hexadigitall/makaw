@@ -78,6 +78,8 @@ class ContentBlockerService {
   /// Check if a URL should be blocked.
   bool shouldBlock(String url) {
     if (!enabled) return false;
+    // Never block trusted sites / search engines + AI tools at the page level.
+    if (_isTrustedHost(url)) return false;
     if (blockAds && _isAd(url)) return true;
     if (blockTrackers && _isTracker(url)) return true;
     if (blockMalware && _isMalware(url)) return true;
@@ -85,6 +87,39 @@ class ContentBlockerService {
     if (blockTypoSquatting && _isTypoSquat(url)) return true;
     return false;
   }
+
+  /// Hosts that must never be matched by broad ad/tracker substrings.
+  static const _trustedHosts = <String>{
+    'google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com',
+    'googlevideo.com', 'youtube.com', 'youtu.be', 'ytimg.com', 'ggpht.com',
+    'bing.com', 'live.com', 'microsoft.com', 'microsoftonline.com',
+    'office.com', 'msn.com', 'duckduckgo.com', 'yahoo.com', 'yandex.com',
+    'openai.com', 'chatgpt.com', 'anthropic.com', 'claude.ai',
+    'perplexity.ai', 'gemini.google.com', 'copilot.microsoft.com',
+    'facebook.com', 'fbcdn.net', 'instagram.com', 'cdninstagram.com',
+    'twitter.com', 'x.com', 'twimg.com', 'linkedin.com', 'licdn.com',
+    'reddit.com', 'redd.it', 'redditstatic.com',
+    'amazon.com', 'media-amazon.com', 'apple.com', 'icloud.com',
+    'github.com', 'githubusercontent.com', 'github.io',
+    'stackoverflow.com', 'cloudflare.com', 'wikipedia.org', 'wikimedia.org',
+    'netflix.com', 'spotify.com', 'discord.com', 'telegram.org',
+  };
+
+  static bool _isTrustedHost(String url) {
+    try {
+      final host = Uri.parse(url).host.toLowerCase();
+      if (host.isEmpty) return false;
+      var h = host;
+      while (h.isNotEmpty) {
+        if (_trustedHosts.contains(h)) return true;
+        final dot = h.indexOf('.');
+        if (dot < 0) break;
+        h = h.substring(dot + 1);
+      }
+    } catch (_) {}
+    return false;
+  }
+
 
   bool _isAd(String url) => _adPatterns.any((p) => url.contains(p));
   bool _isTracker(String url) => _trackerPatterns.any((p) => url.contains(p));
@@ -123,8 +158,7 @@ class ContentBlockerService {
     'retargetad.com', 'smartadserver.com', 'spacash.com', 'specificmedia.com',
     'sumo.com', 'trafficadbar.com', 'trafficfactory.com', 'tribalad.com',
     'underconstruction.com', 'valuead.com', 'venturead.com', 'vibrantmedia.com',
-    'web广告.com', 'xad.com', 'yieldmanager.com', 'zedo.com', '/ad/',
-    '/ads/', '/advert', '/banner/', '/campaign', '/pagead/',
+    'web广告.com', 'xad.com', 'yieldmanager.com', 'zedo.com',
   ];
 
   static const _trackerPatterns = [

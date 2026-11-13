@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webfeed/webfeed.dart';
+import 'package:xml/xml.dart' as xml;
 import 'package:geolocator/geolocator.dart';
 import '../../domain/entities/entities.dart';
 export '../../domain/entities/entities.dart';
@@ -428,44 +428,107 @@ class NewsFeedService {
   static List<Map<String, Object?>> _parseFeedItems(String body) {
     final out = <Map<String, Object?>>[];
     try {
-      final feed = RssFeed.parse(body);
-      for (final item in feed.items ?? []) {
-        String? imageUrl;
-        if (item.media?.contents != null && item.media!.contents!.isNotEmpty) {
-          imageUrl = item.media!.contents!.first.url;
-        }
-        if (imageUrl == null && item.media?.thumbnails != null && item.media!.thumbnails!.isNotEmpty) {
-          imageUrl = item.media!.thumbnails!.first.url;
-        }
-        if (imageUrl == null && item.enclosure != null) {
-          final enc = item.enclosure!;
-          if (enc.url != null && (enc.type == null || enc.type!.startsWith('image/'))) {
-            imageUrl = enc.url;
-          }
-        }
-        if (imageUrl == null && item.description != null) {
-          for (final pattern in [
-            RegExp(r'<img[^>]+src="([^"]+)"'),
-            RegExp(r"<img[^>]+src='([^']+)'"),
-          ]) {
-            final m = pattern.firstMatch(item.description!);
-            if (m != null) {
-              imageUrl = m.group(1);
-              if (imageUrl!.startsWith('//')) imageUrl = 'https:$imageUrl';
-              break;
-            }
-          }
-        }
+      final doc = xml.XmlDocument.parse(body.trim());
+      final root = doc.rootElement;
+      final items = <xml.XmlElement>[];
+      if (root.localName == 'rss') {
+        items.addAll(root.findAllElements('item'));
+      } else if (root.localName == 'feed') {
+        items.addAll(root.findAllElements('entry'));
+      } else {
+        items.addAll(root.findAllElements('item'));
+        items.addAll(root.findAllElements('entry'));
+      }
+      for (final item in items) {
+        final title = _rssText(item, 'title')?.trim() ?? '';
+        final link = _rssLink(item);
+        if (title.isEmpty || link.isEmpty) continue;
+        final description = _rssDescription(item);
+        final imageUrl = _rssImage(item, description);
         out.add({
-          'title': item.title?.trim() ?? '',
-          'link': item.link ?? '',
-          'description': item.description?.trim(),
-          'pubDate': item.pubDate?.toIso8601String(),
+          'title': title,
+          'link': link,
+          'description': description,
+          'pubDate': _rssDate(item),
           'imageUrl': imageUrl,
         });
       }
     } catch (_) {}
     return out;
+  }
+
+  static String? _rssText(xml.XmlElement element, String name) {
+    for (final child in element.childElements) {
+      if (child.localName == name) {
+        final text = child.innerText.trim();
+        if (text.isNotEmpty) return text;
+      }
+    }
+    return null;
+  }
+
+  static String _rssLink(xml.XmlElement item) {
+    for (final child in item.childElements) {
+      if (child.localName != 'link') continue;
+      final rel = child.getAttribute('rel');
+      if (rel != null && rel != 'alternate') continue;
+      final href = child.getAttribute('href');
+      if (href != null && href.isNotEmpty) return href;
+      final text = child.innerText.trim();
+      if (text.isNotEmpty) return text;
+    }
+    return '';
+  }
+
+  static String? _rssDescription(xml.XmlElement item) =>
+      _rssText(item, 'description') ??
+      _rssText(item, 'summary') ??
+      _rssText(item, 'content');
+
+  static String? _rssDate(xml.XmlElement item) =>
+      _rssText(item, 'pubDate') ??
+      _rssText(item, 'published') ??
+      _rssText(item, 'updated');
+
+  static String? _rssImage(xml.XmlElement item, String? description) {
+    for (final e in item.descendants.whereType<xml.XmlElement>()) {
+      if (e.localName == 'content' || e.localName == 'thumbnail') {
+        final ns = e.name.namespaceUri;
+        if (ns != null && ns.contains('media')) {
+          final url = e.getAttribute('url');
+          if (url != null && url.isNotEmpty) return _absolutizeUrl(url);
+        }
+      }
+    }
+    for (final child in item.childElements) {
+      if (child.localName == 'enclosure') {
+        final url = child.getAttribute('url');
+        final type = child.getAttribute('type');
+        if (url != null &&
+            url.isNotEmpty &&
+            (type == null || type.startsWith('image/'))) {
+          return _absolutizeUrl(url);
+        }
+      }
+    }
+    if (description != null) {
+      for (final pattern in [
+        RegExp(r'<img[^>]+src="([^"]+)"'),
+        RegExp(r"<img[^>]+src='([^']+)'"),
+      ]) {
+        final m = pattern.firstMatch(description);
+        if (m != null) return _absolutizeUrl(m.group(1)!);
+      }
+    }
+    return null;
+  }
+
+  static String? _absolutizeUrl(String url) {
+    final u = url.trim();
+    if (u.isEmpty) return null;
+    if (u.startsWith('//')) return 'https:$u';
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+    return u;
   }
 
   // ---- Legacy API (backwards compat) ----
@@ -493,44 +556,17 @@ class NewsFeedService {
     try {
       final response = await http.get(Uri.parse(cat.feedUrl));
       if (response.statusCode != 200) return [];
-      final feed = RssFeed.parse(response.body);
-      final items = feed.items?.map((item) {
-            String? imageUrl;
-            if (item.media?.contents != null && item.media!.contents!.isNotEmpty) {
-              imageUrl = item.media!.contents!.first.url;
-            }
-            if (imageUrl == null && item.media?.thumbnails != null && item.media!.thumbnails!.isNotEmpty) {
-              imageUrl = item.media!.thumbnails!.first.url;
-            }
-            if (imageUrl == null && item.enclosure != null) {
-              final enc = item.enclosure!;
-              if (enc.url != null && (enc.type == null || enc.type!.startsWith('image/'))) {
-                imageUrl = enc.url;
-              }
-            }
-            if (imageUrl == null && item.description != null) {
-              final imgMatch = RegExp(r'<img[^>]+src="([^"]+)"').firstMatch(item.description!);
-              if (imgMatch != null) {
-                imageUrl = imgMatch.group(1);
-                if (imageUrl!.startsWith('//')) imageUrl = 'https:$imageUrl';
-              }
-              if (imageUrl == null) {
-                final imgMatch2 = RegExp(r"<img[^>]+src='([^']+)'").firstMatch(item.description!);
-                if (imgMatch2 != null) {
-                  imageUrl = imgMatch2.group(1);
-                  if (imageUrl!.startsWith('//')) imageUrl = 'https:$imageUrl';
-                }
-              }
-            }
-            return NewsItem(
-              title: item.title?.trim() ?? 'Untitled',
-              url: item.link ?? '',
-              summary: item.description?.trim(),
-              imageUrl: imageUrl,
-              pubDate: item.pubDate,
-              source: categoryName,
-            );
-          }).toList() ?? [];
+      final rawItems = _parseFeedItems(response.body);
+      final items = rawItems.map((raw) {
+        return NewsItem(
+          title: (raw['title'] as String? ?? 'Untitled').trim(),
+          url: raw['link'] as String? ?? '',
+          summary: raw['description'] as String?,
+          imageUrl: raw['imageUrl'] as String?,
+          pubDate: DateTime.tryParse(raw['pubDate'] as String? ?? ''),
+          source: categoryName,
+        );
+      }).toList();
       _lastFetch[categoryName] = DateTime.now();
       return items;
     } catch (_) {

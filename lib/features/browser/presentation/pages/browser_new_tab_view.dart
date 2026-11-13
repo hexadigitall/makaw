@@ -6,7 +6,6 @@ import '../../data/services/browser_search_service.dart';
 import '../../domain/entities/recent_page_item.dart';
 import '../../../news/data/services/news_feed_service.dart';
 import '../../../news/presentation/widgets/discover_news_feed_widget.dart';
-import '../../../../core/widgets/widgets.dart';
 
 /// The three visual states of the Browser New Tab view.
 ///
@@ -39,6 +38,10 @@ class BrowserNewTabView extends StatefulWidget {
   final NewsFeedService? newsFeedService;
   final bool autofocus;
 
+  /// On desktop the shell already renders the tab strip + browser chrome, so
+  /// the NTP must not draw its own top bar. Off-desktop it does.
+  final bool isDesktop;
+
   const BrowserNewTabView({
     super.key,
     required this.onOpenDashboard,
@@ -55,6 +58,7 @@ class BrowserNewTabView extends StatefulWidget {
     required this.tabCount,
     this.newsFeedService,
     this.autofocus = false,
+    this.isDesktop = false,
   });
 
   @override
@@ -216,206 +220,127 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
 
   // ── IDLE ──────────────────────────────────────────────────────────────────
   Widget _buildIdleView(BuildContext context) {
+    final desktop = widget.isDesktop;
     return ColoredBox(
       color: _surface,
       child: Material(
         color: Colors.transparent,
         child: SafeArea(
           child: Column(
-          children: [
-            _buildTopBar(context),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    const SizedBox(height: 28),
-                    const Text(
-                      'Makaw',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 36,
-                        letterSpacing: -0.5,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    _buildIdleOmnibox(context),
-                    const SizedBox(height: 24),
-                    _buildShortcutsGrid(context),
-                    const SizedBox(height: 24),
-                    _buildRecentPages(context),
-                    const SizedBox(height: 24),
-                    if (widget.newsFeedService != null)
-                      DiscoverNewsFeedWidget(
-                        service: widget.newsFeedService!,
-                        onArticleSelected: _openArticle,
-                      ),
-                    const SizedBox(height: 20),
-                  ],
+            children: [
+              if (!desktop) _buildTopBar(context),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: desktop ? 48 : 20,
+                    vertical: desktop ? 36 : 12,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const _ChromeBrandRow(),
+                      const SizedBox(height: 30),
+                      _buildChromeSearchBar(context),
+                      const SizedBox(height: 40),
+                      _buildShortcutsGrid(context),
+                      if (widget.newsFeedService != null) ...[
+                        const SizedBox(height: 44),
+                        _buildDiscoverHeader(context),
+                        const SizedBox(height: 18),
+                        DiscoverNewsFeedWidget(
+                          service: widget.newsFeedService!,
+                          onArticleSelected: _openArticle,
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
   }
 
-  Widget _buildIdleOmnibox(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        setState(() => _state = NewTabState.focused);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _focusNode.requestFocus();
-        });
-      },
-      borderRadius: BorderRadius.circular(26),
-      child: Container(
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        decoration: BoxDecoration(
-          color: _card,
-          borderRadius: BorderRadius.circular(26),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
+  Widget _buildDiscoverHeader(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 16,
+          decoration: BoxDecoration(
+            color: const Color(0xFF00A7C2),
+            borderRadius: BorderRadius.circular(2),
+          ),
         ),
-        child: const Row(
-          children: [
-            Icon(Icons.search, color: Colors.white38, size: 22),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Search or enter address...',
-                style: TextStyle(color: Colors.white54, fontSize: 14),
+        const SizedBox(width: 10),
+        const Text(
+          'Discover',
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _focusOmnibox() {
+    setState(() => _state = NewTabState.focused);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  Widget _buildChromeSearchBar(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 584),
+      child: InkWell(
+        onTap: _focusOmnibox,
+        borderRadius: BorderRadius.circular(28),
+        child: Container(
+          height: 46,
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          decoration: BoxDecoration(
+            color: _card,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white.withOpacity(0.16)),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.search, color: Colors.white38, size: 20),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Search Google or type a URL',
+                  style: TextStyle(color: Colors.white54, fontSize: 14),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildShortcutsGrid(BuildContext context) {
-    final items = List<(String, String)>.of(widget.shortcuts);
-    final count = items.length + (widget.onEditShortcuts != null ? 1 : 0);
-    return SizedBox(
-      height: 96,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: count,
-        separatorBuilder: (_, __) => const SizedBox(width: 16),
-        itemBuilder: (context, i) {
-          if (widget.onEditShortcuts != null && i == items.length) {
-            return _ShortcutTile.edit(onTap: widget.onEditShortcuts!);
-          }
-          final s = items[i];
-          return _ShortcutTile(label: s.$1, url: s.$2, onTap: () => _submit(s.$2));
-        },
-      ),
-    );
-  }
-
-  Widget _buildRecentPages(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Recent Pages',
-                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-              if (widget.recentPages.isNotEmpty && widget.onClearRecentPages != null)
-                InkWell(
-                  onTap: widget.onClearRecentPages,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.delete_sweep, color: Colors.white38, size: 15),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Clear',
-                          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11, fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (widget.recentPages.isEmpty)
-            Text(
-              'No pages visited yet. Start browsing to see recent pages here.',
-              style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
-            )
-          else
-                    ...widget.recentPages.take(4).map(
-                  (p) => InkWell(
-                    onTap: () => _submit(p.url),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF243247),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.language_rounded, color: Colors.white38, size: 18),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  p.title.isEmpty ? p.url : p.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                                ),
-                                if (p.title.isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    Uri.tryParse(p.url)?.host ?? p.url,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          if (widget.onRemoveRecentPage != null)
-                            TappableIcon(
-                              icon: Icons.close,
-                              iconSize: 16,
-                              color: Colors.white38,
-                              onTap: () => widget.onRemoveRecentPage!(p),
-                              tooltip: 'Remove',
-                              target: 34,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-        ],
-      ),
+    final items = List<(String, String)>.of(widget.shortcuts).take(9).toList();
+    if (widget.onEditShortcuts == null && items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Wrap(
+      spacing: 18,
+      runSpacing: 14,
+      children: [
+        for (final s in items)
+          _ShortcutTile(label: s.$1, url: s.$2, onTap: () => _submit(s.$2)),
+        if (widget.onEditShortcuts != null)
+          _ShortcutTile.edit(onTap: widget.onEditShortcuts!),
+      ],
     );
   }
 
@@ -626,27 +551,26 @@ class _ShortcutTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(16),
       child: SizedBox(
-        width: 72,
+        width: 84,
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: 56,
+              height: 56,
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: const Color(0xFF243247),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: Colors.white.withOpacity(0.08)),
               ),
-              child: Icon(
-                isEdit ? Icons.edit_outlined : Icons.language_rounded,
-                color: const Color(0xFF60A5FA),
-                size: 24,
-              ),
+              child: isEdit
+                  ? const Icon(Icons.edit_outlined, color: Color(0xFF60A5FA), size: 22)
+                  : _SiteIcon(url: url!, label: label!),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
               isEdit ? 'Edit' : (label ?? ''),
               maxLines: 1,
@@ -656,6 +580,56 @@ class _ShortcutTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Chrome-style favicon fallback: a rounded tile in a per-host color carrying
+/// the site's initial letter. Mirrors the letter-avatar NTP shortcuts.
+class _SiteIcon extends StatelessWidget {
+  final String url;
+  final String label;
+
+  const _SiteIcon({required this.url, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final host = (Uri.tryParse(url)?.host ?? label).toUpperCase();
+    final letter = host.isNotEmpty ? host[0] : (label.isNotEmpty ? label[0].toUpperCase() : '?');
+    final palette = [
+      const Color(0xFF00635D), const Color(0xFF1E5B87), const Color(0xFF5C2B86),
+      const Color(0xFF7A4E00), const Color(0xFF6B5B00), const Color(0xFF00703C),
+      const Color(0xFF90140F), const Color(0xFF6B1F54), const Color(0xFF0062A3),
+    ];
+    final color = palette[host.hashCode.abs() % palette.length];
+    return Container(
+      width: 36,
+      height: 36,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      child: Text(
+        letter,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// Chrome NTP wordmark row: small logo in the top-left, no headline text.
+class _ChromeBrandRow extends StatelessWidget {
+  const _ChromeBrandRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      'assets/makaw_logo_28.png',
+      width: 34,
+      height: 34,
+      fit: BoxFit.contain,
     );
   }
 }

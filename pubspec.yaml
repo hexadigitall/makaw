@@ -1,6 +1,6 @@
 name: makaw
-description: Makaw — Full-featured hybrid browser, code studio & creative platform
-version: 1.0.47+47
+description: Makaw â€” Full-featured hybrid browser, code studio & creative platform
+version: 1.0.2+102
 publish_to: 'none'
 
 environment:
@@ -38,7 +38,6 @@ dependencies:
   just_audio: ^0.9.39
   pdfrx: ^1.0.83
   flutter_epub_viewer: ^1.2.1
-  webfeed: ^0.7.0
   flutter_video_thumbnail: ^0.0.2
   geolocator: ^11.0.0
   flutter_riverpod: ^2.6.1
@@ -54,12 +53,16 @@ dependencies:
   ffmpeg_kit_flutter_new: ^4.6.2
   sqflite_common_ffi: ^2.4.2+1
   video_player_win: ^3.2.2
+  shadcn_ui: ^0.56.3
+  flutter_animate: ^4.5.2
+  lucide_icons: ^0.257.0
+  xml: ^7.0.1
 msix_config:
   display_name: Makaw
   publisher_display_name: Hexadigitall
   identity_name: com.hexadigitall.makaw
   publisher: CN=Hexadigitall
-  msix_version: 1.0.47.0
+  msix_version: 1.0.2.0
   logo_path: assets/makaw_logo_transparent-correct.png
   capabilities:
     - internetClient

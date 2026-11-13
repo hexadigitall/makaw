@@ -58,11 +58,14 @@ import 'features/documents/presentation/widgets/recent_activity_section.dart';
 import 'features/terminal/presentation/terminal_sessions_page.dart';
 import 'features/terminal/presentation/recent_terminal_sections.dart';
 import 'features/studio/presentation/pages/makaw_ide_workspace.dart';
+import 'features/studio/presentation/pages/makaw_desktop_ide_screen.dart';
 import 'features/studio/data/studio_project.dart';
 import 'features/browser/domain/entities/entities.dart';
 import 'features/browser/presentation/pages/tab_tray_page.dart';
 import 'features/browser/presentation/pages/qr_scanner_page.dart';
 import 'features/browser/presentation/pages/browser_active_page.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
+import 'core/theme/makaw_theme.dart';
 import 'features/browser/presentation/pages/browser_dashboard_page.dart';
 import 'features/browser/presentation/pages/browser_new_tab_view.dart';
 import 'features/news/data/services/news_feed_service.dart';
@@ -411,35 +414,41 @@ class _MakawAppState extends ConsumerState<MakawApp> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Makaw',
-      debugShowCheckedModeBanner: false,
+    return ShadApp.custom(
       themeMode: _themeModeValue,
-      theme: ThemeData.light().copyWith(
-        scaffoldBackgroundColor: Color(0xFFF1F5F9),
-        primaryColor: Color(0xFFE2E8F0),
-        colorScheme: ColorScheme.light(
-          primary: Color(0xFF6366F1),
-          secondary: kPrimaryBlue,
-          surface: Color(0xFFFFFFFF),
-        ),
-        cardColor: Color(0xFFF8FAFC),
-        appBarTheme: AppBarTheme(backgroundColor: Color(0xFFE2E8F0), foregroundColor: kSurfaceBase),
-        textTheme: TextTheme(bodyMedium: TextStyle(color: kSurfaceElevated)),
-      ),
-      darkTheme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: kSurfaceBase,
-        primaryColor: kSurfaceElevated,
-        colorScheme: ColorScheme.dark(
-          primary: kPrimaryBlue,
-          secondary: Color(0xFF6366F1),
-          surface: kSurfaceElevated,
-        ),
-        cardColor: kSurfaceBorder,
-        appBarTheme: AppBarTheme(backgroundColor: kSurfaceElevated),
-      ),
-      home: MakawHome(themeMode: _themeMode, onThemeChanged: setThemeMode),
-      navigatorObservers: [_hubRouteObserver],
+      darkTheme: MakawTheme.darkTheme,
+      appBuilder: (_) {
+        return MaterialApp(
+          title: 'Makaw',
+          debugShowCheckedModeBanner: false,
+          themeMode: _themeModeValue,
+          theme: ThemeData.light().copyWith(
+            scaffoldBackgroundColor: Color(0xFFF1F5F9),
+            primaryColor: Color(0xFFE2E8F0),
+            colorScheme: ColorScheme.light(
+              primary: Color(0xFF6366F1),
+              secondary: kPrimaryBlue,
+              surface: Color(0xFFFFFFFF),
+            ),
+            cardColor: Color(0xFFF8FAFC),
+            appBarTheme: AppBarTheme(backgroundColor: Color(0xFFE2E8F0), foregroundColor: kSurfaceBase),
+            textTheme: TextTheme(bodyMedium: TextStyle(color: kSurfaceElevated)),
+          ),
+          darkTheme: ThemeData.dark().copyWith(
+            scaffoldBackgroundColor: kSurfaceBase,
+            primaryColor: kSurfaceElevated,
+            colorScheme: ColorScheme.dark(
+              primary: kPrimaryBlue,
+              secondary: Color(0xFF6366F1),
+              surface: kSurfaceElevated,
+            ),
+            cardColor: kSurfaceBorder,
+            appBarTheme: AppBarTheme(backgroundColor: kSurfaceElevated),
+          ),
+          home: MakawHome(themeMode: _themeMode, onThemeChanged: setThemeMode),
+          navigatorObservers: [_hubRouteObserver],
+        );
+      },
     );
   }
 }
@@ -456,8 +465,8 @@ class MakawHome extends ConsumerStatefulWidget {
 
 class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserver {
   String _currentView = 'browser';
-  VoidCallback? _pendingNav;
-  bool _navScheduled = false;
+  final List<VoidCallback> _navQueue = [];
+  bool _drainingNav = false;
   ViewMode _viewMode = ViewMode.home;
   BrowserSubView _browserSubView = BrowserSubView.browsing;
   bool get _isBrowserDashboard => _browserSubView == BrowserSubView.dashboard;
@@ -466,6 +475,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool get _isMakawHome => _viewMode == ViewMode.home;
   bool _ready = false;
   bool _miniPlayerDismissed = false;
+  int? _lastMusicSongId;
+  bool _sessionLoaded = false;
   Database? _db;
   String _projectPath = '';
   List<Map<String, dynamic>> _projects = [];
@@ -545,27 +556,34 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     final page = _buildFeaturePage(view);
     if (page == null) return;
     final wasBrowsing = !_showHomeScreen;
-    Navigator.of(context).push(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => _wrapDesktopShell(page),
-      transitionDuration: Duration(milliseconds: 200),
-      reverseTransitionDuration: Duration(milliseconds: 150),
-      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-    )).then((_) {
-      if (mounted) {
-        _urlController.clear();
-        setState(() {
-          // Return to whichever sub-view was active before the pushed page.
-          switch (_browserSubView) {
-            case BrowserSubView.dashboard:
-              _viewMode = ViewMode.home;
-            case BrowserSubView.newTab:
-              _viewMode = ViewMode.newTab;
-            case BrowserSubView.browsing:
-              _viewMode = ViewMode.browsing;
-          }
-        });
-        if (wasBrowsing) _syncUrlController();
-      }
+    if (!mounted) return;
+    // Deferred through the queue: tapping an item while a hub/tool route is
+    // still animating would otherwise throw '!_debugLocked' and freeze every
+    // subsequent tap on the app.
+    _scheduleNavigation(() {
+      if (!mounted) return;
+      Navigator.of(context).push(PageRouteBuilder(
+        pageBuilder: (_, __, ___) => _wrapDesktopShell(page),
+        transitionDuration: const Duration(milliseconds: 200),
+        reverseTransitionDuration: const Duration(milliseconds: 150),
+        transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+      )).then((_) {
+        if (mounted) {
+          _urlController.clear();
+          setState(() {
+            // Return to whichever sub-view was active before the pushed page.
+            switch (_browserSubView) {
+              case BrowserSubView.dashboard:
+                _viewMode = ViewMode.home;
+              case BrowserSubView.newTab:
+                _viewMode = ViewMode.newTab;
+              case BrowserSubView.browsing:
+                _viewMode = ViewMode.browsing;
+            }
+          });
+          if (wasBrowsing) _syncUrlController();
+        }
+      });
     });
   }
 
@@ -650,6 +668,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   DocumentService _documentService = DocumentService();
   bool _isFullscreen = false;
   double _lastScrollY = 0;
+  double _pendingScrollRestore = 0;
   bool _browserDockVisible = true;
   String? _pendingOpenFilePath;
   String? _pendingOpenMimeType = '';
@@ -699,6 +718,12 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   void _onMusicChanged() {
     // A setState issued during widget build throws; defer to the next frame.
     if (!mounted) return;
+    final songId = _musicService.currentSong?.id;
+    if (songId != _lastMusicSongId) {
+      // A new track started: bring the player back even if it was dismissed.
+      _lastMusicSongId = songId;
+      _miniPlayerDismissed = false;
+    }
     if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
       setState(() {});
     } else {
@@ -710,7 +735,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    // Do NOT save on `inactive`: Windows fires it during startup, before the
+    // saved screen has been restored, which would overwrite it with defaults.
+    if (state == AppLifecycleState.paused) {
       _saveSession();
     }
     if (state == AppLifecycleState.resumed) {
@@ -1173,41 +1200,58 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     final tabsJson = prefs.getString('saved_tabs');
     if (tabsJson != null) {
       try {
+        // Do NOT revive a saved multi-tab session as live webviews at boot:
+        // every tab mounts a platform InAppWebView up front, and the stacked
+        // platform views trip a Flutter layout stack-overflow on Windows
+        // (LayoutBuilder recursion under the webviews — #191188 crash family).
+        // Instead, carry the session's URLs over as Recent Tabs (one tap on
+        // the New Tab page reopens them) and always boot with a single empty
+        // tab, which is the layout state every stable boot used.
         final tabs = jsonDecode(tabsJson) as List;
-        if (tabs.isNotEmpty) {
-          _browserTabs.clear();
-          for (final t in tabs) {
-            final isIncognito = t['incognito'] as bool? ?? false;
-            if (isIncognito) continue;
-            final id = DateTime.now().microsecondsSinceEpoch + _browserTabs.length;
-            _browserTabs.add(BrowserTab(
-              id: id,
-              url: t['url'] as String? ?? '',
-              title: t['title'] as String? ?? '',
-              incognito: false,
-              historyStack: (t['historyStack'] as List<dynamic>?)?.cast<String>() ?? [],
-              historyIndex: t['historyIndex'] as int? ?? 0,
-            ));
-            setState(() {});
-          }
-          if (_browserTabs.isNotEmpty) {
-            final activeId = prefs.getInt('active_tab_id');
-            if (activeId != null) {
-              final idx = _browserTabs.indexWhere((t) => t.id == activeId);
-              _activeBrowserTabId = idx >= 0 ? activeId : _browserTabs.first.id;
-            } else {
-              _activeBrowserTabId = _browserTabs.first.id;
-            }
-          }
+        for (final t in tabs) {
+          final url = t['url'] as String? ?? '';
+          if (url.isEmpty) continue;
+          _recentTabs.removeWhere((rt) => rt['url'] == url);
+          _recentTabs.insert(0, {'url': url, 'title': t['title'] as String? ?? url});
+          if (_recentTabs.length > _maxRecentTabs) _recentTabs.removeLast();
         }
+        if (_recentTabs.isNotEmpty && mounted) setState(() {});
       } catch (_) {}
     }
     if (_browserTabs.isEmpty) {
       _initBrowserTab();
     }
+    _activeBrowserTabId = _browserTabs.isEmpty ? 0 : _browserTabs.first.id;
+
+    // Restore the last screen the user was on (home / new tab / a web page)
+    // plus the page scroll position, so relaunching feels like resuming.
+    final lastMode = prefs.getString('last_view_mode');
+    final lastUrl = prefs.getString('last_browser_url') ?? '';
+    final lastScroll = prefs.getDouble('last_scroll_y') ?? 0;
+    if (lastMode == ViewMode.browsing.name &&
+        lastUrl.isNotEmpty &&
+        !_isBlockedRedirect(lastUrl) &&
+        _browserTabs.isNotEmpty) {
+      final tab = _browserTabs.first;
+      tab.url = lastUrl;
+      tab.pushHistory(lastUrl);
+      _viewMode = ViewMode.browsing;
+      _browserSubView = BrowserSubView.browsing;
+      _pendingScrollRestore = lastScroll;
+      _loadInActiveTab(lastUrl);
+      debugPrint('MAKAW-SESSION restore browsing url=$lastUrl scroll=$lastScroll');
+    } else if (lastMode == ViewMode.newTab.name) {
+      _viewMode = ViewMode.newTab;
+    } else if (lastMode == ViewMode.home.name) {
+      _viewMode = ViewMode.home;
+    }
+    _sessionLoaded = true;
+    if (mounted) setState(() {});
   }
 
   Future<void> _saveSession() async {
+    // Never persist defaults before the saved session has been read.
+    if (!_sessionLoaded) return;
     final prefs = await SharedPreferences.getInstance();
     final savedTabs = _browserTabs.where((t) => !t.incognito).toList();
     final tabsJson = jsonEncode(savedTabs.map((t) => {
@@ -1220,6 +1264,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     await prefs.setString('saved_tabs', tabsJson);
     final activeTab = _activeTab;
     await prefs.setInt('active_tab_id', activeTab.incognito ? (savedTabs.isNotEmpty ? savedTabs.first.id : 0) : _activeBrowserTabId);
+    await prefs.setString('last_view_mode', _viewMode.name);
+    await prefs.setString('last_browser_url', activeTab.incognito ? '' : activeTab.url);
+    await prefs.setDouble('last_scroll_y', _lastScrollY);
   }
 
   // ─── Browser Tabs ───────────────────────────────────────────────────────────
@@ -1438,9 +1485,38 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     _saveSession();
     final c = _activeWebview;
     if (c != null) {
-      c.loadUrl(urlRequest: URLRequest(url: WebUri(url))).catchError((_) {});
+      _loadInActiveTab(url);
     } else {
       _pendingNavigationUrl = url;
+    }
+  }
+
+  /// Loads [url] into the active tab's webview. Failures are logged instead of
+  /// swallowed and retried once next frame — the webview of a fresh NTP tab is
+  /// often still attaching its platform view when the user hits search/Enter.
+  Future<void> _loadInActiveTab(String url) async {
+    final c = _activeWebview;
+    if (c == null) {
+      _pendingNavigationUrl = url;
+      return;
+    }
+    try {
+      await c.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+      debugPrint('MAKAW-NAV LOADED ok url=$url');
+    } catch (e, st) {
+      debugPrint('MAKAW-NAV LOAD FAIL url=$url err=$e\n$st');
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final c2 = _activeWebview;
+        if (c2 == null) return;
+        try {
+          await c2.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+          debugPrint('MAKAW-NAV LOADED (retry) url=$url');
+        } catch (e2) {
+          debugPrint('MAKAW-NAV LOAD FAIL(2) url=$url err=$e2');
+          _pendingNavigationUrl = url;
+          if (mounted) setState(() {});
+        }
+      });
     }
   }
 
@@ -1499,7 +1575,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       final c = _activeWebview;
       if (c != null) {
         debugPrint('MAKAW-NAV isNtp directLoad url=$url');
-        c.loadUrl(urlRequest: URLRequest(url: WebUri(url))).catchError((_) {});
+        _loadInActiveTab(url);
       } else {
         _pendingNavigationUrl = url;
         debugPrint('MAKAW-NAV isNtp setPending=$_pendingNavigationUrl');
@@ -2337,7 +2413,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     if (enable) {
       c.setSettings(settings: InAppWebViewSettings(
         javaScriptEnabled: true,
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        userAgent: _desktopUA,
       ));
     } else {
       c.setSettings(settings: InAppWebViewSettings(
@@ -2478,6 +2554,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   @override
   void dispose() {
+    _saveSession();
     WidgetsBinding.instance.removeObserver(this);
     _urlFocusNode.removeListener(_onUrlFocusChanged);
     _musicService.removeListener(_onMusicChanged);
@@ -2617,6 +2694,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
             ),
           ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _buildGlobalMiniPlayer(),
+          ),
         ],
       ),
     );
@@ -2632,12 +2715,22 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   Widget _buildDesktopRootPortal() {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
-      body: DesktopPortalShell(
-        onOpenEcosystem: _openEcosystem,
-        onGoHome: _goToMakawHome,
-        child: SafeArea(
-          child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
-        ),
+      body: Stack(
+        children: [
+          DesktopPortalShell(
+            onOpenEcosystem: _openEcosystem,
+            onGoHome: _goToMakawHome,
+            child: SafeArea(
+              child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _buildGlobalMiniPlayer(),
+          ),
+        ],
       ),
     );
   }
@@ -2675,14 +2768,24 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   /// pending action runs.
   void _scheduleNavigation(VoidCallback action) {
     if (!mounted) return;
-    _pendingNav = action;
-    if (_navScheduled) return;
-    _navScheduled = true;
+    _navQueue.add(action);
+    _drainNavQueue();
+  }
+
+  /// Drains queued navigations one per frame. Each callback runs in a
+  /// post-frame callback so it can never trip the Navigator's '!_debugLocked'
+  /// assertion; queuing (rather than a single pending slot) means rapid taps
+  /// are never silently dropped.
+  void _drainNavQueue() {
+    if (_drainingNav || !mounted) return;
+    _drainingNav = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _navScheduled = false;
-      final a = _pendingNav;
-      _pendingNav = null;
-      if (a != null && mounted) a();
+      _drainingNav = false;
+      if (!mounted) return;
+      if (_navQueue.isEmpty) return;
+      final next = _navQueue.removeAt(0);
+      next();
+      if (_navQueue.isNotEmpty) _drainNavQueue();
     });
   }
 
@@ -2862,6 +2965,31 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     return MakawIdeWorkspace(project: StudioProject(root));
   }
 
+  /// Pushes the Code Studio workspace for [root]. On desktop this is the
+  /// full VS Code-style [MakawDesktopIdeScreen]; elsewhere it falls back to
+  /// the adaptive [MakawIdeWorkspace]. Both return to the Code Studio hub.
+  void _openStudioWorkspace(Directory root) {
+    final destination = (Responsive.isDesktop(context))
+        ? MakawDesktopIdeScreen(
+            project: StudioProject(root),
+            onBackToStudioHub: () {
+              final nav = Navigator.of(context);
+              if (nav.canPop()) nav.pop();
+            },
+          )
+        : MakawIdeWorkspace(project: StudioProject(root));
+    if (!mounted) return;
+    _scheduleNavigation(() {
+      if (!mounted) return;
+      Navigator.of(context).push(PageRouteBuilder(
+        pageBuilder: (_, __, ___) => _wrapDesktopShell(destination),
+        transitionDuration: const Duration(milliseconds: 200),
+        reverseTransitionDuration: const Duration(milliseconds: 150),
+        transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+      ));
+    });
+  }
+
   /// Recent / saved projects shown on the Code Studio hub.
   Widget _buildRecentProjectsSection() {
     final projects = List<Map<String, dynamic>>.from(_projects);
@@ -2909,14 +3037,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                 subtitle: Text('${p['language'] ?? 'javascript'}',
                     style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
                 trailing: const Icon(Icons.open_in_new, color: Color(0xFF94A3B8), size: 18),
-                onTap: () {
-                  Navigator.of(context).push(PageRouteBuilder(
-                    pageBuilder: (_, __, ___) => _wrapDesktopShell(MakawIdeWorkspace(project: StudioProject(Directory(_projectPath)))),
-                    transitionDuration: const Duration(milliseconds: 200),
-                    reverseTransitionDuration: const Duration(milliseconds: 150),
-                    transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-                  ));
-                },
+                onTap: () => _openStudioWorkspace(Directory(_projectPath)),
               ),
             ),
       ],
@@ -3005,6 +3126,15 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     }
   }
 
+  /// Global mini player overlay: shown on every screen except the full Music
+  /// player itself, so playback controls follow the user around the app.
+  Widget _buildGlobalMiniPlayer() {
+    if (_musicService.currentSong == null) return const SizedBox.shrink();
+    if (_currentView == 'music') return const SizedBox.shrink();
+    if (_miniPlayerDismissed) return const SizedBox.shrink();
+    return _buildMiniMusicPlayer();
+  }
+
   Widget _buildMiniMusicPlayer() {
     final song = _musicService.currentSong;
     if (song == null) return SizedBox.shrink();
@@ -3087,6 +3217,13 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                       constraints: BoxConstraints(minWidth: 32, minHeight: 32),
                       padding: EdgeInsets.zero,
                       onPressed: () => _musicService.nextSong(),
+                    ),
+                    IconButton(
+                      tooltip: 'Queue',
+                      icon: Icon(Icons.queue_music, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7), size: 20),
+                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                      padding: EdgeInsets.zero,
+                      onPressed: _showMiniPlayerQueue,
                     ),
                   ],
                 ),
@@ -3822,28 +3959,17 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         : _isBrowserNewTab
             ? ColoredBox(color: kSurfaceBase, child: _buildBrowserNewTabSurface())
             : _buildBrowsingSurface();
-    // Idle dashboard / new-tab surfaces are not a full-bleed webview, so on the
-    // wide desktop the column must not stretch edge-to-edge or it looks blown
-    // up. The active browsing surface stays full width like a real browser.
-    if (isDesktopBrowser && (_isBrowserDashboard || _isBrowserNewTab)) {
-      surface = LayoutBuilder(
-        builder: (context, constraints) {
-          final maxW = constraints.maxWidth > 1160 ? 1160.0 : constraints.maxWidth;
-          return Align(
-            alignment: Alignment.topCenter,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxW),
-              child: surface,
-            ),
-          );
-        },
-      );
-    }
     // Tab webviews are mounted ONCE and stay alive under every sub-surface:
     // switching dashboard/newTab/browsing never destroys/recreates platform
     // views. Previously each sub-view swap unmounted the InAppWebView stack,
     // churning the inappwebview_windows text-input client and crashing at boot
     // with the "view ID is null" attach storm. Overlays must be opaque.
+    //
+    // NOTE: the dashboard/new-tab surfaces intentionally do NOT get the
+    // desktop max-width wrapper here. A LayoutBuilder + Align + ConstrainedBox
+    // layered under/over the stacked platform webview feeds it unbounded
+    // constraints during size negotiation and recurses forever (Flutter
+    // layout stack overflow on Windows).
     final host = Stack(
       children: [
         if (_browserTabs.isNotEmpty) _buildWebviewArea(),
@@ -4051,6 +4177,7 @@ TappableIcon(
           .toList(),
       shortcuts: _shortcuts,
       tabCount: _browserTabs.length,
+      isDesktop: Responsive.isDesktop(context) && !kIsWeb,
     );
   }
 
@@ -4126,7 +4253,6 @@ TappableIcon(
             ),
           ),
         ),
-        if (!showHome && !isTypeView && _musicService.currentSong != null) _buildMiniMusicPlayer(),
       ],
     );
   }
@@ -4334,106 +4460,95 @@ TappableIcon(
   Widget _buildIncognitoLandingPage() {
     return Container(
       color: kIncognitoBg,
-      padding: EdgeInsets.symmetric(horizontal: 24),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 80, height: 80,
-              decoration: BoxDecoration(
-                color: kIncognitoPurple.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.visibility_off, color: kIncognitoPurple, size: 40),
-            ),
-            SizedBox(height: 24),
-            Text(
-              'You\'re browsing privately',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            SizedBox(height: 12),
-            Text(
-              'Your activity won\'t be saved in this browser.',
-              style: TextStyle(
-                color: Colors.white54,
-                fontSize: 14,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 36),
-            // Omnibox
-            GestureDetector(
-              onTap: () {
-                setState(() {
-                  _typeViewFromHome = true;
-                  _searchSuggestions = [];
-                  _suggestions = [];
-                  _browserSubView = BrowserSubView.browsing;
-                  _viewMode = ViewMode.typeView;
-                });
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _urlFocusNode.requestFocus();
-                });
-              },
-              child: Container(
-                width: double.infinity,
-                padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Incognito mark — Chrome shows a plain glasses silhouette.
+              Container(
+                width: 72, height: 72,
                 decoration: BoxDecoration(
                   color: kIncognitoInput,
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: kIncognitoPurple.withValues(alpha: 0.3)),
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                child: Row(
-                  children: [
-                    Icon(Icons.search, color: Colors.white54, size: 22),
-                    SizedBox(width: 12),
-                    Text(
-                      'Search privately',
-                      style: TextStyle(color: Colors.white38, fontSize: 16),
-                    ),
-                    Spacer(),
-                    Icon(Icons.qr_code_scanner, color: Colors.white38, size: 22),
-                  ],
+                child: Icon(Icons.visibility_off, color: Colors.white.withValues(alpha: 0.9), size: 38),
+              ),
+              const SizedBox(height: 26),
+              Text(
+                "You've gone incognito",
+                style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Now you can browse privately. Other people who use this device won\'t see your activity, so you can browse more freely. This won\'t change how data is collected by websites you visit and the services they use, including Google.',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 14, height: 1.5),
+              ),
+              const SizedBox(height: 28),
+              // Privacy bullets — same rows Chrome shows in the incognito NTP.
+              _buildIncognitoBullet(Icons.history_rounded,
+                  "Chrome won't save your browsing history, cookies and site data, or information entered in forms."),
+              const SizedBox(height: 16),
+              _buildIncognitoBullet(Icons.download_rounded,
+                  'Downloads you start and bookmarks you save will be kept on your device.'),
+              const SizedBox(height: 16),
+              _buildIncognitoBullet(Icons.public_rounded,
+                  'Your activity might still be visible to websites you visit.'),
+              const SizedBox(height: 36),
+              // Search
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _typeViewFromHome = true;
+                    _searchSuggestions = [];
+                    _suggestions = [];
+                    _browserSubView = BrowserSubView.browsing;
+                    _viewMode = ViewMode.typeView;
+                  });
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _urlFocusNode.requestFocus();
+                  });
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: kIncognitoInput,
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.search, color: Colors.white54, size: 22),
+                      SizedBox(width: 12),
+                      Text(
+                        'Search Google or type a URL',
+                        style: TextStyle(color: Colors.white38, fontSize: 16),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            SizedBox(height: 40),
-            // Privacy features
-            _buildIncognitoFeature(Icons.history, 'Activity is erased', 'Tabs, history, and cookies are deleted when you close all incognito tabs'),
-            SizedBox(height: 20),
-            _buildIncognitoFeature(Icons.lock_outline, 'Safer connection', 'Pages you visit won\'t be saved to this device'),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildIncognitoFeature(IconData icon, String title, String subtitle) {
+  Widget _buildIncognitoBullet(IconData icon, String text) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 40, height: 40,
-          decoration: BoxDecoration(
-            color: kIncognitoPurple.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, color: kIncognitoAccent, size: 20),
-        ),
-        SizedBox(width: 14),
+        Icon(icon, color: Colors.white54, size: 20),
+        const SizedBox(width: 14),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500)),
-              SizedBox(height: 3),
-              Text(subtitle, style: TextStyle(color: Colors.white38, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
-            ],
+          child: Text(
+            text,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 14, height: 1.4),
           ),
         ),
       ],
@@ -4938,6 +5053,8 @@ TappableIcon(
 
   static const _stealthUA = 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36';
 
+  static const _desktopUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
   static final _blockedRedirectDomains = [
     'popads.net','popcash.net','exoclick.com','propellerads.com','adsterra.com',
     'hilltopads.com','clickadu.com','trafficjunky.com','juicyads.com','trafficfactory.com',
@@ -4968,6 +5085,39 @@ TappableIcon(
     for (final k in _blockedRedirectKeywords) {
       if (lower.contains(k)) return true;
     }
+    return false;
+  }
+
+  static const _trustedHosts = <String>{
+    'google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com',
+    'googlevideo.com', 'youtube.com', 'youtu.be', 'ytimg.com', 'ggpht.com',
+    'bing.com', 'live.com', 'microsoft.com', 'microsoftonline.com',
+    'office.com', 'msn.com', 'duckduckgo.com', 'yahoo.com', 'yandex.com',
+    'openai.com', 'chatgpt.com', 'anthropic.com', 'claude.ai',
+    'perplexity.ai', 'gemini.google.com', 'copilot.microsoft.com',
+    'facebook.com', 'fbcdn.net', 'instagram.com', 'cdninstagram.com',
+    'twitter.com', 'x.com', 'twimg.com', 'linkedin.com', 'licdn.com',
+    'reddit.com', 'redd.it', 'redditstatic.com',
+    'amazon.com', 'media-amazon.com', 'apple.com', 'icloud.com',
+    'github.com', 'githubusercontent.com', 'github.io',
+    'stackoverflow.com', 'cloudflare.com', 'wikipedia.org', 'wikimedia.org',
+    'netflix.com', 'spotify.com', 'discord.com', 'telegram.org',
+  };
+
+  /// True for search engines, AI tools and major platforms that must always be
+  /// allowed to load (and must never get the injected ad-blocker script).
+  static bool _isTrustedSite(String url) {
+    try {
+      final host = Uri.parse(url).host.toLowerCase();
+      if (host.isEmpty) return false;
+      var h = host;
+      while (h.isNotEmpty) {
+        if (_trustedHosts.contains(h)) return true;
+        final dot = h.indexOf('.');
+        if (dot < 0) break;
+        h = h.substring(dot + 1);
+      }
+    } catch (_) {}
     return false;
   }
 
@@ -5013,8 +5163,9 @@ TappableIcon(
 ''';
 
   Widget _buildTabWebView(BrowserTab tab) {
+    final isDesktop = Responsive.isDesktop(context) && !kIsWeb;
     final settings = InAppWebViewSettings(
-      userAgent: _stealthUA,
+      userAgent: isDesktop ? _desktopUA : _stealthUA,
       javaScriptEnabled: true,
       javaScriptCanOpenWindowsAutomatically: true,
       supportMultipleWindows: true,
@@ -5030,7 +5181,7 @@ TappableIcon(
       domStorageEnabled: true,
       databaseEnabled: true,
       allowFileAccess: true,
-      preferredContentMode: Responsive.isDesktop(context) && !kIsWeb
+      preferredContentMode: isDesktop
           ? UserPreferredContentMode.DESKTOP
           : UserPreferredContentMode.MOBILE,
       offscreenPreRaster: false,
@@ -5063,11 +5214,28 @@ TappableIcon(
       pullToRefreshController: _supportsPullToRefresh ? _pullToRefreshController : null,
       onCreateWindow: (ctrl, request) async {
         final targetUrl = request.request.url?.toString() ?? '';
-        if (targetUrl.isEmpty || targetUrl == 'about:blank' || _isBlockedRedirect(targetUrl)) {
-          return false;
+        // Deterministic popup policy. Returning `false` here makes WebView2
+        // fall back to loading the popup URL *into the current tab* — that
+        // double-handling is what made pages appear to open "at random". We
+        // always return true: real http(s) popups become a new Makaw tab,
+        // blanks and blocked ad-popunders are swallowed.
+        if (targetUrl.isEmpty || targetUrl == 'about:blank') {
+          debugPrint('MAKAW-POPUP swallow blank');
+          return true;
         }
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+          debugPrint('MAKAW-POPUP swallow scheme $targetUrl');
+          return true;
+        }
+        if (_isBlockedRedirect(targetUrl) ||
+            _contentBlocker.shouldBlockUrl(targetUrl) ||
+            _adBlocker.isBlocked(targetUrl)) {
+          debugPrint('MAKAW-POPUP blocked $targetUrl');
+          return true;
+        }
+        debugPrint('MAKAW-POPUP open-new-tab $targetUrl');
         _navigateOrOpenNewTab(targetUrl);
-        return false;
+        return true;
       },
       onWebViewCreated: (ctrl) {
         _tabControllers[tab.id] = ctrl;
@@ -5076,9 +5244,11 @@ TappableIcon(
         if (_pendingNavigationUrl != null && tab.id == _activeBrowserTabId) {
           final pending = _pendingNavigationUrl!;
           _pendingNavigationUrl = null;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
+WidgetsBinding.instance.addPostFrameCallback((_) {
             debugPrint('MAKAW-WV LOAD pending=$pending');
-            ctrl.loadUrl(urlRequest: URLRequest(url: WebUri(pending))).catchError((_) {});
+            ctrl.loadUrl(urlRequest: URLRequest(url: WebUri(pending))).catchError((e) {
+              debugPrint('MAKAW-WV pending FAIL url=$pending err=$e');
+            });
           });
         }
 
@@ -5222,6 +5392,10 @@ TappableIcon(
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
           return NavigationActionPolicy.CANCEL;
         }
+        // Trusted search engines, AI tools and major platforms are always allowed.
+        if (_isTrustedSite(url)) {
+          return NavigationActionPolicy.ALLOW;
+        }
         // 2. Block known ad/tracker/malware domains
         if (_contentBlocker.shouldBlockUrl(url)) {
           return NavigationActionPolicy.CANCEL;
@@ -5280,6 +5454,17 @@ TappableIcon(
         final tabId = tab.id;
         _tabProgress[tabId] = 100;
         if (urlStr == 'about:blank') return;
+        if (_pendingScrollRestore > 0 && tabId == _activeBrowserTabId) {
+          final targetY = _pendingScrollRestore;
+          _pendingScrollRestore = 0;
+          Future.delayed(const Duration(milliseconds: 400), () {
+            if (!mounted) return;
+            ctrl.evaluateJavascript(
+              source: 'window.scrollTo(0, ${targetY.toStringAsFixed(0)});',
+            ).catchError((_) {});
+            debugPrint('MAKAW-SESSION restored scroll y=$targetY');
+          });
+        }
         if (tabId == _activeBrowserTabId) {
           _pullToRefreshController?.endRefreshing();
           setState(() {
@@ -5299,7 +5484,8 @@ TappableIcon(
         }
         final cbScript = _contentBlocker.fullUserScript;
         final urlLower = urlStr.toLowerCase();
-        final skipBlocker = urlLower.contains('accounts.google') ||
+        final skipBlocker = _isTrustedSite(urlStr) ||
+            urlLower.contains('accounts.google') ||
             urlLower.contains('consent.google') ||
             urlLower.contains('play.google') ||
             urlLower.contains('myaccount.google') ||
@@ -6476,12 +6662,7 @@ try {
                         final dir = Directory(p.join(_projectPath, 'snippets'))..createSync(recursive: true);
                         await File(p.join(dir.path, 'snippet.dart')).writeAsString(s['code'] ?? '');
                         if (!mounted) return;
-                        Navigator.of(context).push(PageRouteBuilder(
-                          pageBuilder: (_, __, ___) => _wrapDesktopShell(MakawIdeWorkspace(project: StudioProject(Directory(_projectPath)))),
-                          transitionDuration: const Duration(milliseconds: 200),
-                          reverseTransitionDuration: const Duration(milliseconds: 150),
-                          transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-                        ));
+                        _openStudioWorkspace(Directory(_projectPath));
                         _showToast('Snippet added to project');
                       },
                     );
@@ -6523,14 +6704,7 @@ try {
                   title: Text(name, style: TextStyle(fontSize: 14)),
                   subtitle: Text('$lang  •  ${updated.toString().substring(0, 10)}', style: TextStyle(fontSize: 11, color: Colors.grey)),
                   trailing: Icon(Icons.open_in_new, size: 16, color: kPrimaryBlue),
-                  onTap: () {
-                    Navigator.of(context).push(PageRouteBuilder(
-                      pageBuilder: (_, __, ___) => _wrapDesktopShell(MakawIdeWorkspace(project: StudioProject(Directory(_projectPath)))),
-                      transitionDuration: const Duration(milliseconds: 200),
-                      reverseTransitionDuration: const Duration(milliseconds: 150),
-                      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-                    ));
-                  },
+                  onTap: () => _openStudioWorkspace(Directory(_projectPath)),
                 ),
               );
             },

@@ -3,3 +3,4 @@ export 'adaptive_container.dart';
 export 'adaptive_modal.dart';
 export 'adaptive_action_button.dart';
 export 'tappable_icon.dart';
+export 'makaw_glass_surface.dart';

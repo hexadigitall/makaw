@@ -23,14 +23,52 @@ class AdBlockerService {
   // ── Hardcoded ad network domains (full domain only, no bare substrings) ───
   // ── Path-based patterns (require full URL match, not just domain) ─────────
   static const _rawPathPatterns = [
-    '/redirect?', '/out.php', '/go.php', '/click?',
-    '/adclick', '/trackclick', '/clicktrack',
+    '/redirect?', '/out.php', '/adclick', '/trackclick', '/clicktrack',
   ];
 
   // ── Query parameter patterns (block if URL contains these) ────────────────
   static const _rawQueryPatterns = [
     'adurl=', 'clickid=', 'aff_id=',
   ];
+
+  /// Domains that must never be blocked as a whole. EasyList/AdGuard contain
+  /// many *path*-scoped rules (e.g. `||google.com/adsense/`); if a parser turns
+  /// those into bare-domain blocks it breaks core sites and, critically, the
+  /// static-asset host `gstatic.com` that Google/Bing search pages load from.
+  static const _allowlistedDomains = <String>{
+    'google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com',
+    'googlevideo.com', 'google-analytics.com', 'googletagmanager.com',
+    'youtube.com', 'youtu.be', 'ytimg.com', 'ggpht.com',
+    'bing.com', 'live.com', 'microsoft.com', 'microsoftonline.com',
+    'office.com', 'msn.com', 'windows.com', 'windowsupdate.com',
+    'duckduckgo.com', 'yahoo.com', 'yandex.com', 'baidu.com',
+    'openai.com', 'chatgpt.com', 'anthropic.com', 'claude.ai',
+    'perplexity.ai', 'gemini.google.com', 'copilot.microsoft.com',
+    'facebook.com', 'fbcdn.net', 'instagram.com', 'cdninstagram.com',
+    'twitter.com', 'x.com', 'twimg.com', 'linkedin.com', 'licdn.com',
+    'reddit.com', 'redd.it', 'redditstatic.com',
+    'amazon.com', 'media-amazon.com', 'ssl-images-amazon.com',
+    'apple.com', 'icloud.com', 'mzstatic.com',
+    'github.com', 'githubusercontent.com', 'github.io',
+    'stackoverflow.com', 'stackexchange.com', 'cloudflare.com',
+    'wikipedia.org', 'wikimedia.org', 'netflix.com', 'spotify.com',
+    'whatsapp.com', 'telegram.org', 'discord.com', 'discordapp.com',
+  };
+
+  /// True if [host] (or one of its parents) is allowlisted.
+  static bool _isAllowlistedHost(String host) {
+    if (host.isEmpty) return false;
+    final h = host.toLowerCase();
+    if (_allowlistedDomains.contains(h)) return true;
+    var dot = h.indexOf('.');
+    while (dot != -1 && dot < h.length - 1) {
+      final parent = h.substring(dot + 1);
+      if (_allowlistedDomains.contains(parent)) return true;
+      dot = h.indexOf('.', dot + 1);
+    }
+    return false;
+  }
+
 
   /// Extracts the registrable domain from a URL for Set lookups.
   static String _extractDomain(String url) {
@@ -100,6 +138,9 @@ class AdBlockerService {
     final domain = _extractDomain(url);
     if (domain.isEmpty) return false;
 
+    // Never block trusted/popular sites or search engines.
+    if (_isAllowlistedHost(domain)) return false;
+
     // Fast domain lookup (Set.contains is O(1))
     if (_hardcodedDomains.contains(domain)) return true;
     if (_dynamicDomains.contains(domain)) return true;
@@ -128,8 +169,8 @@ class AdBlockerService {
 
   // ── Dynamic blacklist fetching + caching ─────────────────────────────────
 
-  static const _cacheKey = 'adblocker_dynamic_domains_v2';
-  static const _cacheTimestampKey = 'adblocker_last_update_v2';
+  static const _cacheKey = 'adblocker_dynamic_domains_v3';
+  static const _cacheTimestampKey = 'adblocker_last_update_v3';
   static const _cacheDuration = Duration(days: 7);
 
   /// Fetches EasyList + AdGuard popup list, with local caching.
@@ -142,7 +183,7 @@ class AdBlockerService {
     if (lastUpdate != null && (now - lastUpdate) < _cacheDuration.inMilliseconds) {
       final cached = prefs.getStringList(_cacheKey);
       if (cached != null && cached.isNotEmpty) {
-        _dynamicDomains.addAll(cached);
+        _dynamicDomains.addAll(cached.where((d) => !_isAllowlistedHost(d)));
         _loaded = true;
         onBlacklistUpdated?.call();
         return;
@@ -195,24 +236,42 @@ class AdBlockerService {
       if (line.contains('##^')) continue;
 
       // ||domain^ pattern (most common in EasyList)
+      // IMPORTANT: only accept rules that target the *whole domain*. Rules such
+      // as `||google.com/adsense/` or `||site.com/ads/banner.png` are
+      // path-scoped and must NOT be collapsed to a bare-domain block — doing so
+      // over-blocks core sites (google.com, gstatic.com, facebook.com, ...).
       if (line.startsWith('||')) {
         final rest = line.substring(2);
-        final domain = rest
-            .split('^')
-            .first
+        final beforeCaret = rest.split('^').first;
+        final afterCaret = rest.contains('^') ? rest.substring(rest.indexOf('^') + 1) : '';
+        final candidate = beforeCaret
             .split('/')
+            .first
+            .split(r'$')
             .first
             .toLowerCase()
             .trim();
-        if (domain.isNotEmpty && domain.contains('.') && !domain.contains('*') && domain.length < 60) {
-          out.add(domain);
+        // Reject if the rule scopes to a path (a '/' before the domain separator)
+        final hasPathScope = beforeCaret.contains('/');
+        // Accept `||domain^`, `||domain^$options`; reject `||domain^path...`
+        final hasSubpathAfter = afterCaret.isNotEmpty && !afterCaret.startsWith(r'$');
+        final isPureDomain = candidate.contains('.') &&
+            !candidate.contains('*') &&
+            !candidate.contains('^') &&
+            candidate.length < 60;
+        if (isPureDomain &&
+            !hasPathScope &&
+            !hasSubpathAfter &&
+            !_isAllowlistedHost(candidate)) {
+          out.add(candidate);
         }
       }
       // Simple bare domain (no path, no wildcards, no options)
       else if (!line.startsWith('/') && !line.contains('*') &&
                !line.contains('[') && !line.contains('#') &&
                !line.contains(',') && line.contains('.') &&
-               !line.contains('^')) {
+               !line.contains('^') && !line.contains('/') &&
+               !_isAllowlistedHost(line.toLowerCase().trim())) {
         final domain = line.toLowerCase().trim();
         if (domain.length < 60 && domain.contains('.')) {
           out.add(domain);
