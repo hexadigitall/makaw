@@ -4,6 +4,7 @@ class HistoryItem {
   final String title;
   final int timestamp;
   final String? faviconUrl;
+  final int visitCount;
 
   HistoryItem({
     this.id,
@@ -11,6 +12,7 @@ class HistoryItem {
     required this.title,
     required this.timestamp,
     this.faviconUrl,
+    this.visitCount = 1,
   });
 
   Map<String, dynamic> toMap() {
@@ -20,6 +22,7 @@ class HistoryItem {
       'title': title,
       'time': DateTime.fromMillisecondsSinceEpoch(timestamp).toIso8601String(),
       'favicon_url': faviconUrl,
+      'visit_count': visitCount,
     };
   }
 
@@ -37,6 +40,7 @@ class HistoryItem {
       title: map['title'] as String? ?? '',
       timestamp: ts,
       faviconUrl: map['favicon_url'] as String?,
+      visitCount: (map['visit_count'] as int?) ?? 1,
     );
   }
 

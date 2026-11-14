@@ -141,10 +141,11 @@ class _TabTrayPageState extends State<TabTrayPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 32, height: 32,
-              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
-              child: Center(child: Text('M', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
+            Image.asset(
+              'assets/makaw_logo_28.png',
+              width: 32,
+              height: 32,
+              errorBuilder: (_, __, ___) => Icon(Icons.public_rounded, color: Colors.white, size: 24),
             ),
             SizedBox(height: 6),
             Text('New Tab', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 10)),
@@ -291,6 +292,22 @@ class _TabTrayPageState extends State<TabTrayPage> {
                       Icon(_showIncognito ? Icons.visibility_off : Icons.tab, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4), size: 48),
                       SizedBox(height: 12),
                       Text(_searchQuery.isNotEmpty ? 'No matching tabs' : 'No ${_showIncognito ? 'incognito ' : ''}tabs', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6))),
+                      if (_searchQuery.isEmpty) ...[
+                        SizedBox(height: 16),
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _showIncognito ? _kIncognitoPurple : kAccentTeal,
+                          ),
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            _showIncognito
+                                ? widget.onCreateIncognitoTab?.call()
+                                : widget.onCreateTab();
+                          },
+                          icon: Icon(_showIncognito ? Icons.visibility_off : Icons.add, size: 18),
+                          label: Text(_showIncognito ? 'New Incognito Tab' : 'New Tab'),
+                        ),
+                      ],
                     ],
                   ),
                 )

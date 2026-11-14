@@ -13,6 +13,7 @@ import 'features/viewer/presentation/pages/document_viewer_page.dart';
 import 'features/history/data/history_service.dart';
 import 'features/history/domain/history_item.dart';
 import 'features/history/presentation/pages/makaw_history_page.dart';
+import 'features/ai/presentation/pages/ai_chat_page.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
@@ -66,7 +67,6 @@ import 'features/browser/presentation/pages/qr_scanner_page.dart';
 import 'features/browser/presentation/pages/browser_active_page.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'core/theme/makaw_theme.dart';
-import 'features/browser/presentation/pages/browser_dashboard_page.dart';
 import 'features/browser/presentation/pages/browser_new_tab_view.dart';
 import 'features/news/data/services/news_feed_service.dart';
 import 'features/browser/presentation/providers/download_manager_provider.dart';
@@ -245,11 +245,10 @@ enum ViewMode { home, newTab, typeView, browsing }
 
 /// Top-level browser state machine for the Browser ecosystem home layer.
 ///
-/// - [dashboard]: the Browser Hub (Browser Dashboard) — the place the top-left
-///   Home icon always returns to, never the Makaw root portal.
+/// There is no Browser "Hub": the browser Home target is the New Tab page.
 /// - [newTab]: the idle/focused/typing New Tab surface.
 /// - [browsing]: the live webview browsing surface (omnibox + page).
-enum BrowserSubView { dashboard, newTab, browsing }
+enum BrowserSubView { newTab, browsing }
 
 class ConflictPart {
   String ours = '';
@@ -469,7 +468,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool _drainingNav = false;
   ViewMode _viewMode = ViewMode.home;
   BrowserSubView _browserSubView = BrowserSubView.browsing;
-  bool get _isBrowserDashboard => _browserSubView == BrowserSubView.dashboard;
   bool get _isBrowserNewTab => _browserSubView == BrowserSubView.newTab;
   bool get _showHomeScreen => _viewMode == ViewMode.home || _viewMode == ViewMode.newTab;
   bool get _isMakawHome => _viewMode == ViewMode.home;
@@ -573,8 +571,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           setState(() {
             // Return to whichever sub-view was active before the pushed page.
             switch (_browserSubView) {
-              case BrowserSubView.dashboard:
-                _viewMode = ViewMode.home;
               case BrowserSubView.newTab:
                 _viewMode = ViewMode.newTab;
               case BrowserSubView.browsing:
@@ -711,9 +707,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   // AI
   String _aiApiKey = '';
-  GenerativeModel? _aiModel;
-  final List<Map<String, String>> _aiMessages = [];
-  bool _aiLoading = false;
 
   void _onMusicChanged() {
     // A setState issued during widget build throws; defer to the next frame.
@@ -763,6 +756,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_homeInitialized) return;
       _homeInitialized = true;
+      // Resolve the real WebView UA before any tab is created so restored tabs
+      // also get a version-consistent User-Agent (see _resolveMobileUserAgent).
+      try {
+        await _resolveMobileUserAgent();
+      } catch (_) {}
       try {
         await _loadSavedSession();
       } catch (_) {}
@@ -1076,7 +1074,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
     _db = await openDatabase(
       p.join(dir.path, 'makaw.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE projects (
@@ -1095,6 +1093,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
             title TEXT,
             time TEXT NOT NULL,
             favicon_url TEXT,
+            visit_count INTEGER NOT NULL DEFAULT 1,
             UNIQUE(url)
           )
         ''');
@@ -1118,6 +1117,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           } catch (_) {}
           try {
             await db.execute('CREATE INDEX IF NOT EXISTS idx_history_time ON history(time DESC)');
+          } catch (_) {}
+        }
+        if (oldVersion < 4) {
+          try {
+            await db.execute('ALTER TABLE history ADD COLUMN visit_count INTEGER NOT NULL DEFAULT 1');
           } catch (_) {}
         }
       },
@@ -1371,8 +1375,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     setState(() {
       _browserTabs.removeWhere((t) => t.id == id);
       if (_browserTabs.isEmpty) {
-        _goHome();
+        // Closing the last tab lands on the New Tab page — never a dead end.
         _activeBrowserTabId = 0;
+        _browserSubView = BrowserSubView.newTab;
+        _viewMode = ViewMode.newTab;
       } else if (_activeBrowserTabId == id) {
         final next = _browserTabs[idx > 0 ? idx - 1 : 0];
         _activeBrowserTabId = next.id;
@@ -1395,7 +1401,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     _ignoreUrlChanges = true;
     if (!_showHomeScreen) _urlController.text = url;
     _ignoreUrlChanges = false;
-    _addHistoryEntry(url, url);
     _saveSession();
     setState(() {
       _browserSubView = BrowserSubView.browsing;
@@ -1420,30 +1425,28 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     });
   }
 
-  void _addHistoryEntry(String url, String title) {
-    if (_activeTab.incognito) return;
-    final existing = _browserHistory.indexWhere((e) => e['url'] == url);
+  void _addHistoryEntry(String url, String title, {bool incognito = false}) {
+    if (incognito) return;
+    final key = HistoryService.normalizeUrl(url);
+    if (key == null) return;
+    final entryTitle = title.isEmpty ? key : title;
+    final existing = _browserHistory.indexWhere((e) => e['url'] == key);
     if (existing >= 0) {
       final entry = _browserHistory.removeAt(existing);
       final count = (entry['visit_count'] as int? ?? 1) + 1;
       entry['time'] = DateTime.now().toIso8601String();
       entry['visit_count'] = count;
+      entry['title'] = entryTitle;
       _browserHistory.insert(0, entry);
     } else {
-      _browserHistory.insert(0, <String, dynamic>{'url': url, 'title': title, 'time': DateTime.now().toIso8601String(), 'visit_count': 1});
+      _browserHistory.insert(0, <String, dynamic>{'url': key, 'title': entryTitle, 'time': DateTime.now().toIso8601String(), 'visit_count': 1});
     }
     if (_browserHistory.length > 500) _browserHistory.removeRange(500, _browserHistory.length);
     HistoryService.addEntry(HistoryItem(
-      url: url,
-      title: title,
+      url: key,
+      title: entryTitle,
       timestamp: DateTime.now().millisecondsSinceEpoch,
     )).catchError((_) {});
-  }
-
-  void _updateHistoryTitle(String url, String title) {
-    final idx = _browserHistory.indexWhere((e) => e['url'] == url);
-    if (idx >= 0) _browserHistory[idx]['title'] = title;
-    HistoryService.updateTitle(url, title).catchError((_) {});
   }
 
   void _typeViewNavigate(String raw) {
@@ -1481,7 +1484,6 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _searchSuggestions = [];
       _suggestions = [];
     });
-    _addHistoryEntry(url, url);
     _saveSession();
     final c = _activeWebview;
     if (c != null) {
@@ -1596,29 +1598,25 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _viewMode = ViewMode.browsing;
         _searchSuggestions = [];
       });
-      _addHistoryEntry(url, url);
-      _saveSession();
     }
   }
 
   Future<void> _showTabSwitcher() async {
     await _captureCurrentTabSnapshot();
     if (!mounted) return;
-    if (_browserTabs.isEmpty) {
-      _createBrowserTab();
-      return;
-    }
-    final activeTab = _browserTabs.firstWhere(
-      (t) => t.id == _activeBrowserTabId,
-      orElse: () => _browserTabs.first,
-    );
+    final activeTab = _browserTabs.isEmpty
+        ? null
+        : _browserTabs.firstWhere(
+            (t) => t.id == _activeBrowserTabId,
+            orElse: () => _browserTabs.first,
+          );
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => TabTrayPage(
           tabs: _browserTabs,
           activeTabId: _activeBrowserTabId,
           snapshots: _tabSnapshots,
-          initialIsIncognito: activeTab.incognito,
+          initialIsIncognito: activeTab?.incognito ?? false,
           onSwitchTab: (id) {
             _switchBrowserTab(id);
           },
@@ -2629,11 +2627,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             onPopInvokedWithResult: (didPop, _) async {
               if (didPop) return;
               if (_currentView == 'browser') {
-                // Browser home layers: back from the hub or New Tab surface.
-                if (_browserSubView == BrowserSubView.dashboard) {
-                  _moveTaskToBack();
-                  return;
-                }
+                // Browser home layers: back from the New Tab surface exits.
                 if (_browserSubView == BrowserSubView.newTab) {
                   if (_browserTabs.length > 1) {
                     _closeBrowserTab(_activeBrowserTabId);
@@ -2647,7 +2641,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   _urlFocusNode.unfocus();
                   _suggestDebounce?.cancel();
                   if (_browserTabs.isEmpty) {
-                    _showBrowserDashboard();
+                    _goBrowserHome();
                     return;
                   }
                   final tab = _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.first);
@@ -2672,7 +2666,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   }
                 }
                 // No back history: if browsing, go to New Tab. If on New Tab with
-                // no extra tabs, go Home (dashboard) then minimize.
+                // no extra tabs, minimize the app.
                 if (_viewMode == ViewMode.browsing) {
                   _goToNtp();
                   return;
@@ -2747,14 +2741,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     if (ecosystem == null) return;
     if (ecosystem.id == 'browser') {
       // The browser renders in-place as the app's main surface: pop any pushed
-      // hub/tool routes, then switch to the browser dashboard (NOT the Makaw
-      // Root Portal grid — tapping Browser must open the web browser).
-      if (!mounted) return;
-      _scheduleNavigation(() {
-        if (!mounted) return;
-        Navigator.of(context).popUntil((r) => r.isFirst);
-        _openBrowserDashboard();
-      });
+      // hub/tool routes, then open the last tab (or the New Tab page) — never
+      // the Makaw Root Portal grid.
+      _openBrowserTab();
       return;
     }
     final hub = ecosystem;
@@ -3044,16 +3033,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     );
   }
 
-  /// Opens the Browser Ecosystem Hub (Browser Dashboard) as a standalone page.
-  /// Opens the Browser Ecosystem Hub (Browser Dashboard) in place — the top
-  /// Home target for the browser ecosystem.
-  void _openBrowserDashboard() {
-    if (_currentView != 'browser') {
-      setState(() => _currentView = 'browser');
-    }
-    _showBrowserDashboard();
-  }
-
   /// Deferred one-step pop: taps that land while a route transition is in
   /// flight otherwise throw '!_debugLocked' in the Navigator, freezing the app.
   void _popStep() {
@@ -3071,7 +3050,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       return;
     }
     if (tool.view == 'browser') {
-      _openBrowserDashboard();
+      _openBrowserTab();
       return;
     }
     final page = _buildFeaturePage(tool.view);
@@ -3588,7 +3567,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           IconButton(
             icon: Icon(Icons.apps_rounded, size: 20, color: iconColor),
             tooltip: 'All apps',
-            onPressed: _showBrowserDashboard,
+            onPressed: _showTabSwitcher,
           ),
           IconButton(
             icon: Icon(Icons.more_horiz, size: 20, color: iconColor),
@@ -3637,8 +3616,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         IconButton(
           icon: Icon(Icons.home_outlined, size: 20),
           color: iconColor,
-          tooltip: 'Makaw Home',
-          onPressed: _showBrowserDashboard,
+          tooltip: 'New Tab',
+          onPressed: _goBrowserHome,
         ),
       ],
     );
@@ -3954,18 +3933,16 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   Widget _buildBrowserContent() {
     final isDesktopBrowser = Responsive.isDesktop(context) && !kIsWeb;
-    Widget surface = _isBrowserDashboard
-        ? ColoredBox(color: kSurfaceBase, child: _buildBrowserDashboardSurface())
-        : _isBrowserNewTab
-            ? ColoredBox(color: kSurfaceBase, child: _buildBrowserNewTabSurface())
-            : _buildBrowsingSurface();
+    Widget surface = _isBrowserNewTab
+        ? ColoredBox(color: kSurfaceBase, child: _buildBrowserNewTabSurface())
+        : _buildBrowsingSurface();
     // Tab webviews are mounted ONCE and stay alive under every sub-surface:
-    // switching dashboard/newTab/browsing never destroys/recreates platform
-    // views. Previously each sub-view swap unmounted the InAppWebView stack,
+    // switching newTab/browsing never destroys/recreates platform views.
+    // Previously each sub-view swap unmounted the InAppWebView stack,
     // churning the inappwebview_windows text-input client and crashing at boot
     // with the "view ID is null" attach storm. Overlays must be opaque.
     //
-    // NOTE: the dashboard/new-tab surfaces intentionally do NOT get the
+    // NOTE: the new-tab surface intentionally does NOT get the
     // desktop max-width wrapper here. A LayoutBuilder + Align + ConstrainedBox
     // layered under/over the stacked platform webview feeds it unbounded
     // constraints during size negotiation and recurses forever (Flutter
@@ -4119,46 +4096,10 @@ TappableIcon(
     );
   }
 
-  /// In-place Browser Hub (dashboard) — the Home target for the browser.
-  Widget _buildBrowserDashboardSurface() {
-    if (_isIncognitoActive) return _buildIncognitoLandingPage();
-    return BrowserDashboardPage(
-      onBackToMakawHome: _goToMakawHome,
-      onNewTab: () {
-        _enterBrowserSubView(BrowserSubView.newTab);
-        _createBrowserTab(incognito: _isIncognitoActive);
-      },
-      onOpenBookmarks: _showBookmarksDialog,
-      onOpenHistory: () => _switchToView('history'),
-      onOpenDownloads: () => _switchToView('downloads'),
-      onOpenPasswords: () => _switchToView('passwords'),
-      onOpenSettings: _showBrowserSettings,
-      onAskAiAboutPage: _showAIChat,
-      onSearchOrNavigate: _navigateOrOpenNewTab,
-      onSearchFocused: _goToNtp,
-      onOpenQrScanner: _scanQRCode,
-      onToggleShield: () {
-        final shield = !_contentBlocker.isEnabled;
-        _contentBlocker.enabled = shield;
-        _showToast(shield ? 'Content blocking enabled' : 'Content blocking disabled');
-        _activeWebview?.reload().catchError((_) {});
-      },
-      recentPages: _browserHistory
-          .take(5)
-          .map((e) => RecentPageItem(
-                title: (e['title'] as String? ?? e['url'] as String? ?? '').toString(),
-                url: (e['url'] as String? ?? '').toString(),
-                visitedAt: DateTime.tryParse(e['time'] as String? ?? '') ?? DateTime.now(),
-              ))
-          .toList(),
-    );
-  }
-
   /// In-place New Tab surface (idle / focused / typing).
   Widget _buildBrowserNewTabSurface() {
     if (_isIncognitoActive) return _buildIncognitoLandingPage();
     return BrowserNewTabView(
-      onOpenDashboard: _showBrowserDashboard,
       onOpenMenu: _showEllipsisMenu,
       onShowTabs: _showTabSwitcher,
       onNewTab: () => _createBrowserTab(incognito: _isIncognitoActive),
@@ -4239,7 +4180,7 @@ TappableIcon(
             canGoForward: tab.canGoForward,
             onBack: () => _activeWebview?.goBack(),
             onForward: () => _activeWebview?.goForward(),
-            onHome: _showBrowserDashboard,
+            onHome: _goBrowserHome,
             onTabs: _showTabSwitcher,
             onMenu: _showEllipsisMenu,
             onStop: () => _activeWebview?.stopLoading(),
@@ -4287,15 +4228,13 @@ TappableIcon(
     );
   }
 
-  /// Central state-machine transition for the Browser ecosystem home layer.
+  /// Central state-machine transition for the Browser home layer.
   void _enterBrowserSubView(BrowserSubView view) {
     _searchSuggestions = [];
     _suggestions = [];
     setState(() {
       _browserSubView = view;
       switch (view) {
-        case BrowserSubView.dashboard:
-          _viewMode = ViewMode.home;
         case BrowserSubView.newTab:
           _viewMode = ViewMode.newTab;
         case BrowserSubView.browsing:
@@ -4305,21 +4244,21 @@ TappableIcon(
     });
   }
 
-  /// Returns to the Browser Hub (dashboard). The top-left Home icon always
-  /// lands here — never the Makaw root portal.
-  void _showBrowserDashboard() {
-    _enterBrowserSubView(BrowserSubView.dashboard);
+  /// Browser home is the New Tab page. There is no separate "Browser Hub".
+  void _goBrowserHome() {
+    _enterBrowserSubView(BrowserSubView.newTab);
+    if (mounted) _saveSession();
   }
 
   void _goHome() {
-    _showBrowserDashboard();
+    _goBrowserHome();
   }
 
-  void _goToNtp() {
+  void _goToNtp({bool focusOmnibox = false}) {
     // Desktop never autofocuses the NTP search: an autofocused TextField racing
     // webview platform-view mount/destroy on Windows triggers the plugin's
     // text-input attach storm ("view ID is null") that kills the app.
-    _ntpAutofocus = kIsWeb || Responsive.isMobile(context);
+    _ntpAutofocus = focusOmnibox && (kIsWeb || Responsive.isMobile(context));
     _enterBrowserSubView(BrowserSubView.newTab);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ntpAutofocus = false;
@@ -4348,16 +4287,34 @@ TappableIcon(
     });
   }
 
+  /// Opens the Browser directly — last session tab or New Tab page, never a Hub.
+  void _openBrowserTab() {
+    _scheduleNavigation(() {
+      if (!mounted) return;
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      setState(() => _currentView = 'browser');
+      if (_browserTabs.isEmpty) {
+        _createBrowserTab();
+        return;
+      }
+      final tab = _activeBrowserTab;
+      if (tab.url.isEmpty) {
+        _goToNtp();
+      } else {
+        _enterBrowserSubView(BrowserSubView.browsing);
+        _syncUrlController();
+      }
+    });
+  }
   // ─── Makaw Root Portal Footer Menu (main Makaw menu) ────────────────────────
 
   Widget _buildBottomNavBar() {
-    const items = [
-      (Icons.code_rounded, Color(0xFF818CF8), 'Studio', 'code_studio'),
-      (Icons.terminal_rounded, Color(0xFF22D3EE), 'Terminal', 'terminal'),
-      (Icons.edit_document, Color(0xFFFBBF24), 'Docs', 'documents'),
-      (Icons.video_collection_outlined, Color(0xFFF87171), 'Media', 'media'),
-      (Icons.language_rounded, Color(0xFF00A7C2), 'Browser', 'browser'),
-      (Icons.folder_outlined, Color(0xFF34D399), 'Files', 'files'),
+    final items = <(IconData, Color, String, VoidCallback)>[
+      (Icons.home_rounded, const Color(0xFF94A3B8), 'Home', _goToMakawHome),
+      (Icons.video_collection_outlined, const Color(0xFFF87171), 'Media', () => _openEcosystem('media')),
+      (Icons.language_rounded, const Color(0xFF00A7C2), 'Browser', _openBrowserTab),
+      (Icons.folder_outlined, const Color(0xFF34D399), 'Files', () => _switchToView('files')),
+      (Icons.code_rounded, const Color(0xFF818CF8), 'Studio', () => _switchToView('studio')),
     ];
     return Material(
       color: const Color(0xFF0B1120),
@@ -4368,7 +4325,7 @@ TappableIcon(
           child: Row(
             children: [
               for (final it in items)
-                _footerItem(it.$1, it.$2, it.$3, () => _openEcosystem(it.$4)),
+                _footerItem(it.$1, it.$2, it.$3, it.$4),
             ],
           ),
         ),
@@ -5051,7 +5008,35 @@ TappableIcon(
     }
   }
 
-  static const _stealthUA = 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36';
+  /// Fallback mobile UA used until the real WebView UA is resolved. Must stay
+  /// coherent with the installed WebView's major version: a stale pinned UA
+  /// (e.g. Chrome/120 while the system WebView is 156) makes User-Agent Client
+  /// Hints disagree and Google serves blank AI Mode / consent pages.
+  static String _stealthUA = 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36';
+
+  /// Reads the platform WebView UA and strips the `wv`/`Version/4.0` WebView
+  /// markers so sites see a plain mobile Chrome with the *correct* version.
+  Future<void> _resolveMobileUserAgent() async {
+    if (kIsWeb) return;
+    if (!(defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS)) {
+      return;
+    }
+    try {
+      final ua = await InAppWebViewController.getDefaultUserAgent();
+      if (ua == null || ua.isEmpty) return;
+      final cleaned = ua
+          .replaceAll(RegExp(r';\s*wv\b'), '')
+          .replaceAll('Version/4.0 ', '')
+          .trim();
+      if (cleaned.isNotEmpty && cleaned != _stealthUA) {
+        _stealthUA = cleaned;
+        debugPrint('MAKAW-UA resolved=$cleaned');
+      }
+    } catch (e) {
+      debugPrint('MAKAW-UA resolve failed: $e');
+    }
+  }
 
   static const _desktopUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -5212,6 +5197,20 @@ TappableIcon(
         UserScript(source: _antiTapjackScript(), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
       ]),
       pullToRefreshController: _supportsPullToRefresh ? _pullToRefreshController : null,
+      onConsoleMessage: (ctrl, message) {
+        final level = message.messageLevel;
+        final text = message.message;
+        if (level == ConsoleMessageLevel.ERROR ||
+            text.toLowerCase().contains('google') ||
+            text.toLowerCase().contains('ai mode')) {
+          debugPrint('MAKAW-CONSOLE [$level] $text');
+        }
+      },
+      onReceivedHttpError: (ctrl, request, response) {
+        if (request.isForMainFrame ?? false) {
+          debugPrint('MAKAW-HTTP ${response.statusCode} ${request.url}');
+        }
+      },
       onCreateWindow: (ctrl, request) async {
         final targetUrl = request.request.url?.toString() ?? '';
         // Deterministic popup policy. Returning `false` here makes WebView2
@@ -5477,10 +5476,15 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!tab.incognito) {
           try {
             final title = await ctrl.getTitle();
-            if (title != null && title.isNotEmpty && title != 'about:blank') {
-              _updateHistoryTitle(urlStr, title);
-            }
-          } catch (_) {}
+            final pageTitle = (title == null || title.isEmpty || title == 'about:blank')
+                ? urlStr
+                : title;
+            // History is written on load STOP (not start) so redirect hops and
+            // tracking variants don't pollute it with duplicate rows.
+            _addHistoryEntry(urlStr, pageTitle);
+          } catch (_) {
+            _addHistoryEntry(urlStr, urlStr);
+          }
         }
         final cbScript = _contentBlocker.fullUserScript;
         final urlLower = urlStr.toLowerCase();
@@ -5528,6 +5532,9 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
         if (tab.id == _activeBrowserTabId) setState(() {});
       },
       onReceivedError: (ctrl, request, error) {
+        if (request.isForMainFrame ?? false) {
+          debugPrint('MAKAW-WVERROR ${error.type} ${error.description} ${request.url}');
+        }
         if ((request.isForMainFrame ?? false) && tab.id == _activeBrowserTabId) {
           _tabErrorUrls[tab.id] = request.url.toString();
           _tabErrorMessages[tab.id] = error.description;
@@ -6274,14 +6281,11 @@ try {
   Future<void> _loadAiKey() async {
     final prefs = await SharedPreferences.getInstance();
     _aiApiKey = prefs.getString('gemini_api_key') ?? '';
-    if (_aiApiKey.isNotEmpty) {
-      _aiModel = GenerativeModel(model: 'gemini-2.0-flash', apiKey: _aiApiKey);
-    }
   }
 
-  void _showAISettings() {
+  Future<String?> _showAISettings() {
     final ctrl = TextEditingController(text: _aiApiKey);
-    showDialog(
+    return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: kSurfaceElevated,
@@ -6319,8 +6323,7 @@ try {
               final prefs = await SharedPreferences.getInstance();
               await prefs.setString('gemini_api_key', key);
               _aiApiKey = key;
-              _aiModel = GenerativeModel(model: 'gemini-2.0-flash', apiKey: key);
-              if (ctx.mounted) Navigator.of(ctx).pop();
+              if (ctx.mounted) Navigator.of(ctx).pop(key);
               _showToast('AI configured');
             },
             child: Text('Save'),
@@ -6332,154 +6335,13 @@ try {
 
   void _showAIChat() {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => _buildAIChatPage(),
+      builder: (_) => AiChatPage(
+        apiKey: _aiApiKey,
+        onOpenSettings: _showAISettings,
+      ),
     ));
   }
 
-  Widget _buildAIChatPage() {
-    final msgCtrl = TextEditingController();
-    final scrollCtrl = ScrollController();
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.auto_awesome, size: 20, color: kAccentTeal),
-          SizedBox(width: 8),
-          Text('AI Assistant'),
-        ]),
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface), onPressed: () => Navigator.of(context).pop()),
-        actions: [
-          if (_aiMessages.isNotEmpty)
-            IconButton(
-              icon: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-              onPressed: () => setState(() => _aiMessages.clear()),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _aiMessages.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.auto_awesome, size: 48, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                        SizedBox(height: 12),
-                        Text('Ask me anything', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 16)),
-                        SizedBox(height: 4),
-                        Text('Powered by Gemini', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 12)),
-                        if (_aiApiKey.isEmpty) ...[
-                          SizedBox(height: 20),
-                          TextButton.icon(
-                            onPressed: () { Navigator.of(context).pop(); _showAISettings(); },
-                            icon: Icon(Icons.settings, size: 16),
-                            label: Text('Set API Key'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    controller: scrollCtrl,
-                    padding: EdgeInsets.all(12),
-                    itemCount: _aiMessages.length,
-                    itemBuilder: (_, i) {
-                      final msg = _aiMessages[i];
-                      final isUser = msg['role'] == 'user';
-                      return Align(
-                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          margin: EdgeInsets.only(bottom: 8),
-                          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isUser ? kAccentTeal.withOpacity(0.2) : Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(16).copyWith(
-                              bottomRight: isUser ? Radius.zero : null,
-                              bottomLeft: isUser ? null : Radius.zero,
-                            ),
-                          ),
-                          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
-                          child: Text(msg['text'] ?? '', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          if (_aiLoading)
-            Padding(
-              padding: EdgeInsets.all(8),
-              child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: kAccentTeal)),
-            ),
-          Container(
-            color: Theme.of(context).colorScheme.surface,
-            padding: EdgeInsets.fromLTRB(12, 8, 12, MediaQuery.of(context).padding.bottom + 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: msgCtrl,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: 'Type a message...',
-                      hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                      filled: true,
-                      fillColor: Theme.of(context).cardColor,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      isDense: true,
-                    ),
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (v) {
-                      if (v.trim().isNotEmpty) _aiSendMessage(v.trim());
-                      msgCtrl.clear();
-                    },
-                  ),
-                ),
-                SizedBox(width: 8),
-                IconButton(
-                  icon: Icon(Icons.send_rounded, color: kAccentTeal),
-                  onPressed: () {
-                    if (msgCtrl.text.trim().isNotEmpty) {
-                      _aiSendMessage(msgCtrl.text.trim());
-                      msgCtrl.clear();
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _aiSendMessage(String text) async {
-    if (_aiApiKey.isEmpty) {
-      _showToast('Set API key in Settings > AI Settings');
-      return;
-    }
-    setState(() {
-      _aiMessages.add({'role': 'user', 'text': text});
-      _aiLoading = true;
-    });
-    try {
-      _aiModel ??= GenerativeModel(model: 'gemini-2.0-flash', apiKey: _aiApiKey);
-      final chat = _aiModel!.startChat();
-      final content = Content.text(text);
-      final response = await chat.sendMessage(content);
-      setState(() {
-        _aiMessages.add({'role': 'model', 'text': response.text ?? 'No response'});
-        _aiLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _aiMessages.add({'role': 'model', 'text': 'Error: $e'});
-        _aiLoading = false;
-      });
-    }
-  }
 
   // ─── QR Scanner ──────────────────────────────────────────────────────────────
 

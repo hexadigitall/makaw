@@ -27,7 +27,7 @@ class BrowserActivePage extends StatefulWidget {
 
   final VoidCallback onBack;
   final VoidCallback onForward;
-  final VoidCallback onHome; // -> Browser Dashboard
+  final VoidCallback onHome; // -> New Tab page
   final VoidCallback onTabs;
   final VoidCallback onMenu;
   final bool showDock;
@@ -181,6 +181,21 @@ class _BrowserActivePageState extends State<BrowserActivePage>
           child: Stack(
             children: [
               Positioned.fill(child: widget.child),
+              if (widget.isLoading && !widget.hasError)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: LinearProgressIndicator(
+                    value: widget.progress <= 0 || widget.progress >= 1
+                        ? null
+                        : widget.progress.clamp(0.0, 1.0),
+                    minHeight: 2.5,
+                    backgroundColor: Colors.transparent,
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                        Color(0xFF00A7C2)),
+                  ),
+                ),
               if (widget.hasError)
                 Positioned.fill(
                   child: BrowserErrorView(

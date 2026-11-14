@@ -17,6 +17,7 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
   List<HistoryItem> _allItems = [];
   bool _isLoading = true;
   String _searchQuery = '';
+  final Set<String> _expanded = {};
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
 
@@ -45,6 +46,36 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
     }
   }
 
+  /// Collapses legacy rows that differ only by tracking params / `www.` into a
+  /// single entry per canonical URL, summing visits and keeping the newest hit.
+  List<HistoryItem> get _items {
+    final byUrl = <String, HistoryItem>{};
+    for (final item in _allItems) {
+      final key = HistoryService.normalizeUrl(item.url) ?? item.url;
+      final existing = byUrl[key];
+      if (existing == null) {
+        byUrl[key] = HistoryItem(
+          url: key,
+          title: item.title,
+          timestamp: item.timestamp,
+          faviconUrl: item.faviconUrl,
+          visitCount: item.visitCount,
+        );
+        continue;
+      }
+      byUrl[key] = HistoryItem(
+        url: key,
+        title: existing.title.isEmpty ? item.title : existing.title,
+        timestamp: existing.timestamp > item.timestamp ? existing.timestamp : item.timestamp,
+        faviconUrl: existing.faviconUrl ?? item.faviconUrl,
+        visitCount: existing.visitCount + item.visitCount,
+      );
+    }
+    final items = byUrl.values.toList()
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return items;
+  }
+
   Map<String, List<HistoryItem>> get _groupedItems {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -52,7 +83,7 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
     final weekAgo = today.subtract(Duration(days: 7));
 
     final Map<String, List<HistoryItem>> groups = {};
-    for (final item in _allItems) {
+    for (final item in _items) {
       final itemDate = item.dateTime;
       String label;
       if (!itemDate.isBefore(today)) {
@@ -125,7 +156,7 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
               }),
               _actionTile(Icons.delete_outline, 'Delete', () async {
                 Navigator.of(ctx).pop();
-                await HistoryService.deleteEntry(item.id!);
+                await HistoryService.deleteByUrl(item.url);
                 await _loadHistory();
               }, color: Color(0xFFF87171)),
             ],
@@ -261,14 +292,14 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
             ),
           IconButton(
             icon: Icon(Icons.delete_sweep, color: Color(0xFFF87171)),
-            onPressed: _allItems.isEmpty ? null : _showClearBrowsingDataDialog,
+            onPressed: _items.isEmpty ? null : _showClearBrowsingDataDialog,
             tooltip: 'Clear browsing data',
           ),
         ],
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: Color(0xFF00897B)))
-          : _allItems.isEmpty
+          : _items.isEmpty
               ? _buildEmptyState()
               : _buildGroupedList(),
     );
@@ -337,70 +368,150 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
   }
 
   Widget _buildHistoryTile(HistoryItem item) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          widget.onNavigate(item.url);
-          Navigator.of(context).pop();
-        },
-        onLongPress: () => _showItemActions(item),
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Color(0xFF1E293B),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: item.googleFaviconUrl.isNotEmpty
-                      ? Image.network(
-                          item.googleFaviconUrl,
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Icon(Icons.language, color: Color(0xFF00897B), size: 22),
-                        )
-                      : Icon(Icons.language, color: Color(0xFF00897B), size: 22),
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    final expanded = _expanded.contains(item.url);
+    return Dismissible(
+      key: ValueKey('history_${item.url}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Color(0xFFF87171).withValues(alpha: 0.85),
+        alignment: Alignment.centerRight,
+        padding: EdgeInsets.only(right: 20),
+        child: Icon(Icons.delete_outline, color: Colors.white, size: 24),
+      ),
+      onDismissed: (_) async {
+        setState(() => _allItems.removeWhere((e) {
+          final key = HistoryService.normalizeUrl(e.url) ?? e.url;
+          return key == item.url;
+        }));
+        await HistoryService.deleteByUrl(item.url);
+      },
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            widget.onNavigate(item.url);
+            Navigator.of(context).pop();
+          },
+          onLongPress: () => _showItemActions(item),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Text(
-                      item.displayTitle,
-                      style: TextStyle(color: Colors.white, fontSize: 14),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Color(0xFF1E293B),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: item.googleFaviconUrl.isNotEmpty
+                            ? Image.network(
+                                item.googleFaviconUrl,
+                                width: 40,
+                                height: 40,
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, __, ___) => Icon(Icons.language, color: Color(0xFF00897B), size: 22),
+                              )
+                            : Icon(Icons.language, color: Color(0xFF00897B), size: 22),
+                      ),
                     ),
-                    SizedBox(height: 3),
-                    Text(
-                      '${item.domain} \u00b7 ${_formatTime(item.timestamp)}',
-                      style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.displayTitle,
+                            style: TextStyle(color: Colors.white, fontSize: 14),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          SizedBox(height: 3),
+                          GestureDetector(
+                            onTap: () => setState(() {
+                              expanded ? _expanded.remove(item.url) : _expanded.add(item.url);
+                            }),
+                            behavior: HitTestBehavior.opaque,
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    '${item.domain} \u00b7 ${_formatTime(item.timestamp)}'
+                                    '${item.visitCount > 1 ? ' \u00b7 ${item.visitCount} visits' : ''}',
+                                    style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Icon(
+                                  expanded ? Icons.expand_less : Icons.expand_more,
+                                  size: 16,
+                                  color: Color(0xFF64748B),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    IconButton(
+                      icon: Icon(Icons.more_vert, color: Colors.white38, size: 18),
+                      onPressed: () => _showItemActions(item),
+                      padding: EdgeInsets.zero,
+                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
                     ),
                   ],
                 ),
-              ),
-              SizedBox(width: 8),
-              IconButton(
-                icon: Icon(Icons.more_vert, color: Colors.white38, size: 18),
-                onPressed: () => _showItemActions(item),
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-              ),
-            ],
+                if (expanded)
+                  Container(
+                    margin: EdgeInsets.only(left: 52, top: 8),
+                    padding: EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.url,
+                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          'Last visited ${_formatFullTime(item.timestamp)}',
+                          style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                        ),
+                        if (item.visitCount > 1) ...[
+                          SizedBox(height: 4),
+                          Text(
+                            'Visited ${item.visitCount} times',
+                            style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  String _formatFullTime(int timestamp) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final dt = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    final hour = dt.hour > 12 ? dt.hour - 12 : dt.hour == 0 ? 12 : dt.hour;
+    final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year} at '
+        '$hour:${dt.minute.toString().padLeft(2, '0')} $ampm';
   }
 }

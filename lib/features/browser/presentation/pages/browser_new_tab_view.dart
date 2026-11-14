@@ -23,7 +23,6 @@ enum NewTabState { idle, focused, typing }
 /// delegated to the host via callbacks so the widget never needs to know how
 /// tabs are opened or how the hub is switched.
 class BrowserNewTabView extends StatefulWidget {
-  final VoidCallback onOpenDashboard;
   final VoidCallback onOpenMenu;
   final VoidCallback onShowTabs;
   final VoidCallback onNewTab;
@@ -44,7 +43,6 @@ class BrowserNewTabView extends StatefulWidget {
 
   const BrowserNewTabView({
     super.key,
-    required this.onOpenDashboard,
     required this.onOpenMenu,
     required this.onShowTabs,
     required this.onNewTab,
@@ -176,19 +174,14 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
   Color get _surface => const Color(0xFF0F172A);
   Color get _card => const Color(0xFF1E293B);
 
-  // ── Shared top chrome (Home / tabs / overflow) ────────────────────────────
+  // ── Shared top chrome (tabs / overflow) ───────────────────────────────────
   Widget _buildTopBar(BuildContext context, {Color? bg}) {
+    final count = widget.tabCount;
     return Container(
       color: bg ?? const Color(0xFF0B1120),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
-          IconButton(
-            tooltip: 'Makaw Browser Home',
-            icon: const Icon(Icons.home_outlined, color: Colors.white),
-            onPressed: widget.onOpenDashboard,
-          ),
-          const Spacer(),
           InkWell(
             onTap: widget.onShowTabs,
             customBorder: RoundedRectangleBorder(
@@ -198,16 +191,17 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.smartphone_rounded, color: Colors.white70, size: 20),
+                  const Icon(Icons.filter_none_rounded, color: Colors.white70, size: 20),
                   const SizedBox(width: 6),
                   Text(
-                    '${widget.tabCount}',
+                    count == 0 ? '+' : '$count',
                     style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
             ),
           ),
+          const Spacer(),
           IconButton(
             tooltip: 'Menu',
             icon: const Icon(Icons.more_horiz, color: Colors.white),
