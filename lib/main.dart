@@ -5094,7 +5094,7 @@ TappableIcon(
     'bing.com', 'live.com', 'microsoft.com', 'microsoftonline.com',
     'office.com', 'msn.com', 'duckduckgo.com', 'yahoo.com', 'yandex.com',
     'openai.com', 'chatgpt.com', 'anthropic.com', 'claude.ai',
-    'perplexity.ai', 'gemini.google.com', 'copilot.microsoft.com',
+    'perplexity.ai', 'gemini.google.com', 'labs.google', 'copilot.microsoft.com',
     'facebook.com', 'fbcdn.net', 'instagram.com', 'cdninstagram.com',
     'twitter.com', 'x.com', 'twimg.com', 'linkedin.com', 'licdn.com',
     'reddit.com', 'redd.it', 'redditstatic.com',
@@ -5504,8 +5504,10 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
         }
         _injectPasswordScripts(ctrl, url.toString());
         _injectFilePickerScript(ctrl);
-        _injectMediaSnifferScript(ctrl);
-        _injectDownloadInterceptorScript(ctrl);
+        if (!skipBlocker) {
+          _injectMediaSnifferScript(ctrl);
+          _injectDownloadInterceptorScript(ctrl);
+        }
         _injectMediaSessionBridge(ctrl);
       },
       onDownloadStartRequest: (ctrl, downloadStartRequest) async {
@@ -5933,24 +5935,32 @@ try {
     return origOpen ? origOpen.apply(this, arguments) : null;
   };
 
-  // Intercept fetch() for binary attachment downloads
+  // Intercept fetch() for binary attachment downloads.
+  // NOTE: must stay fully transparent — never consume the body, never retry on
+  // error (a retry here caused streaming pages such as Google AI Mode to hang
+  // and show "This response timed out").
   var origFetch = window.fetch;
   if (origFetch) {
     window.fetch = function(input, init) {
-      return origFetch.apply(this, arguments).then(function(response) {
-        var url = typeof input === 'string' ? input : (input.url || '');
-        var ctype = response.headers && response.headers.get ? response.headers.get('content-type') || '' : '';
-        var cd = response.headers && response.headers.get ? response.headers.get('content-disposition') || '' : '';
-        var isBinary = cd.indexOf('attachment') >= 0 || ctype.indexOf('octet-stream') >= 0;
-        if (isBinary && url.startsWith('http')) {
-          var fn = '';
-          var match = cd.match(/filename="?([^"]+)"?/);
-          if (match) fn = match[1];
-          if (!fn) fn = url.split('/').pop().split('?')[0];
-          sendDownload(url, fn);
-        }
+      var req = input;
+      var args = arguments;
+      return origFetch.apply(this, args).then(function(response) {
+        try {
+          if (!response || !response.headers || typeof response.headers.get !== 'function') return response;
+          var url = typeof req === 'string' ? req : ((req && req.url) || '');
+          var ctype = response.headers.get('content-type') || '';
+          var cd = response.headers.get('content-disposition') || '';
+          var isBinary = cd.indexOf('attachment') >= 0 || ctype.indexOf('octet-stream') >= 0;
+          if (isBinary && url.indexOf('http') === 0) {
+            var fn = '';
+            var match = cd.match(/filename="?([^"]+)"?/);
+            if (match) fn = match[1];
+            if (!fn) fn = url.split('/').pop().split('?')[0];
+            sendDownload(url, fn);
+          }
+        } catch (e) {}
         return response;
-      }).catch(function(e) { return origFetch.apply(this, arguments); });
+      }, function(err) { throw err; });
     };
   }
 
