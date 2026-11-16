@@ -26,6 +26,9 @@ class BrowserNewTabView extends StatefulWidget {
   final VoidCallback onOpenMenu;
   final VoidCallback onShowTabs;
   final VoidCallback onNewTab;
+  /// Returns to the Makaw portal home. The NTP is the browser's root screen,
+  /// so without this the portal is unreachable from the browser.
+  final VoidCallback onGoHome;
   final Function(String queryOrUrl) onNavigate;
   final VoidCallback onOpenBookmarks;
   final VoidCallback? onEditShortcuts;
@@ -46,6 +49,7 @@ class BrowserNewTabView extends StatefulWidget {
     required this.onOpenMenu,
     required this.onShowTabs,
     required this.onNewTab,
+    required this.onGoHome,
     required this.onNavigate,
     required this.onOpenBookmarks,
     this.onEditShortcuts,
@@ -182,6 +186,11 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
+          IconButton(
+            tooltip: 'Makaw Home',
+            icon: const Icon(Icons.home_rounded, color: Colors.white70, size: 22),
+            onPressed: widget.onGoHome,
+          ),
           InkWell(
             onTap: widget.onShowTabs,
             customBorder: RoundedRectangleBorder(
@@ -232,7 +241,10 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const _ChromeBrandRow(),
+                      GestureDetector(
+                        onTap: widget.onGoHome,
+                        child: const _ChromeBrandRow(),
+                      ),
                       const SizedBox(height: 30),
                       _buildChromeSearchBar(context),
                       const SizedBox(height: 40),

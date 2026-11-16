@@ -35,7 +35,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
 import 'features/browser/data/services/content_blocker_service.dart';
 import 'features/browser/presentation/providers/download_service.dart';
 import 'core/services/update_service.dart';
@@ -1246,8 +1245,16 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       debugPrint('MAKAW-SESSION restore browsing url=$lastUrl scroll=$lastScroll');
     } else if (lastMode == ViewMode.newTab.name) {
       _viewMode = ViewMode.newTab;
+      _browserSubView = BrowserSubView.newTab;
     } else if (lastMode == ViewMode.home.name) {
       _viewMode = ViewMode.home;
+      _browserSubView = BrowserSubView.newTab;
+    } else if (lastMode != null) {
+      // A stale/invalid saved screen: land on the New Tab page, never on an
+      // empty browsing surface with no URL and no way back. (A truly fresh
+      // install has no lastMode and keeps the default portal home.)
+      _viewMode = ViewMode.newTab;
+      _browserSubView = BrowserSubView.newTab;
     }
     _sessionLoaded = true;
     if (mounted) setState(() {});
@@ -3744,6 +3751,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   children: [
                     _ellipsisItem(Icons.tab, 'New Tab', () { Navigator.of(ctx).pop(); Future.microtask(() => _createBrowserTab(incognito: _isIncognitoActive)); }),
                     _ellipsisItem(Icons.visibility_off, 'New Incognito', () { Navigator.of(ctx).pop(); Future.microtask(() => _createBrowserTab(incognito: true)); }),
+                    _ellipsisItem(Icons.home_rounded, 'Makaw Home', () { Navigator.of(ctx).pop(); Future.microtask(_goToMakawHome); }),
                     _ellipsisItem(Icons.folder, 'Add to Group', () { _showToast('Tab groups coming soon'); Navigator.of(ctx).pop(); }),
                     _ellipsisItem(Icons.history, 'History', () { Navigator.of(ctx).pop(); _switchToView('history'); }),
                     _ellipsisItem(Icons.delete_sweep, 'Delete Browsing Data', () {
@@ -4103,6 +4111,7 @@ TappableIcon(
       onOpenMenu: _showEllipsisMenu,
       onShowTabs: _showTabSwitcher,
       onNewTab: () => _createBrowserTab(incognito: _isIncognitoActive),
+      onGoHome: _goToMakawHome,
       onNavigate: _navigateOrOpenNewTab,
       onOpenBookmarks: _showBookmarksDialog,
       onEditShortcuts: _showEditShortcutsDialog,
@@ -5024,7 +5033,7 @@ TappableIcon(
     }
     try {
       final ua = await InAppWebViewController.getDefaultUserAgent();
-      if (ua == null || ua.isEmpty) return;
+      if (ua.isEmpty) return;
       final cleaned = ua
           .replaceAll(RegExp(r';\s*wv\b'), '')
           .replaceAll('Version/4.0 ', '')
@@ -5849,7 +5858,7 @@ try {
     if (meta) metaSrc = meta.getAttribute('content') || '';
     if (isDownloadableUrl(metaSrc) && !seen[metaSrc]) {
       seen[metaSrc] = true;
-      results.push({url: metaSrc, type: metaSrc.match(/\\\\.(jpg|jpeg|png|gif|webp)/i) ? 'image' : 'video', title: extractTitle(metaSrc, null), formats: []});
+      results.push({url: metaSrc, type: metaSrc.match(/\\.(jpg|jpeg|png|gif|webp)/i) ? 'image' : 'video', title: extractTitle(metaSrc, null), formats: []});
     }
 
     // 8. Embed/iframe sources
@@ -5864,10 +5873,10 @@ try {
     // 9. Inline scripts for URLs
     document.querySelectorAll('script:not([src])').forEach(function(s) {
       var text = s.textContent || '';
-      var urlMatches = text.match(/https?:\\\\/\\\\/[^\\\\"'\\\\s]+(?:mp4|webm|mkv|m3u8|mpd|jpg|jpeg|png|pdf)(?:[?#][^\\\\"'\\\\s]*)?/gi);
+      var urlMatches = text.match(/https?:\\/\\/[^\\"'\\s]+(?:mp4|webm|mkv|m3u8|mpd|jpg|jpeg|png|pdf)(?:[?#][^\\"'\\s]*)?/gi);
       if (urlMatches) {
         urlMatches.forEach(function(u) {
-          u = u.replace(/\\\\u0026/g, '&').replace(/\\\\\//g, '/');
+          u = u.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
           if (isDownloadableUrl(u) && !seen[u]) {
             seen[u] = true;
             results.push({url: u, type: classifyExt(u.split('?')[0].split('.').pop().toLowerCase()), title: '', formats: []});
