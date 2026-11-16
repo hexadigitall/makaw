@@ -795,6 +795,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _videoService.loadPlaylists();
         _videoService.loadResumePositions();
         _videoService.scanAllVideos();
+        VideoPlayerService.shared = _videoService;
         ref.read(videoPlayerServiceProvider.notifier).state = _videoService;
         _documentService.loadFavorites();
         ref.read(documentServiceProvider.notifier).state = _documentService;
@@ -4414,6 +4415,17 @@ TappableIcon(
         onTap: () => _switchToView('media'),
       ));
     }
+    final inProgressVideo = _videoService.lastInProgress;
+    if (inProgressVideo != null) {
+      items.add(HomeActivityItem(
+        title: p.basename(inProgressVideo),
+        subtitle:
+            'Continue watching · ${_homeClock(_videoService.resumePosition(inProgressVideo))}',
+        icon: Icons.movie_outlined,
+        accent: const Color(0xFF818CF8),
+        onTap: () => _openFile(inProgressVideo),
+      ));
+    }
     if (_browserHistory.isNotEmpty) {
       final entry = _browserHistory.first;
       final url = entry['url']?.toString() ?? '';
@@ -4470,6 +4482,16 @@ TappableIcon(
       ));
     }
     return items;
+  }
+
+  String _homeClock(int ms) {
+    final total = ms ~/ 1000;
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+    final mm = m.toString().padLeft(2, '0');
+    final ss = s.toString().padLeft(2, '0');
+    return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
   }
 
   String _homeAgo(String? iso) {

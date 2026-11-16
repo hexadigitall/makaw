@@ -7,6 +7,10 @@ import '../../../../core/platform/platform_paths.dart';
 export '../../domain/entities/video_file_info.dart';
 
 class VideoPlayerService extends ChangeNotifier {
+  /// App-wide instance so pushed player routes can persist/restore watch
+  /// positions without threading the service through every constructor.
+  static VideoPlayerService? shared;
+
   List<VideoFileInfo> _allVideos = [];
   List<VideoFileInfo> get allVideos => _allVideos;
 
@@ -39,6 +43,21 @@ class VideoPlayerService extends ChangeNotifier {
     final pos = d['pos'] ?? 0;
     final dur = d['dur'] ?? 1;
     return dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+  }
+
+  /// Path of the in-progress video with the furthest watch position, if any.
+  /// Used by Home to offer a real "Continue watching" entry.
+  String? get lastInProgress {
+    String? best;
+    var bestPos = 0;
+    _resumeData.forEach((path, data) {
+      final pos = data['pos'] ?? 0;
+      if (pos > bestPos) {
+        bestPos = pos;
+        best = path;
+      }
+    });
+    return best;
   }
 
   bool isCompleted(String filePath, {int thresholdSec = 45}) {

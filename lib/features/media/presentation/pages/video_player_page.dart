@@ -127,6 +127,11 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   Timer? _doubleTapTimer;
   Timer? _hideTimer;
 
+  // Resume/watch-progress persistence
+  final VideoPlayerService _resumeService =
+      VideoPlayerService.shared ?? VideoPlayerService();
+  DateTime _lastResumeSave = DateTime.fromMillisecondsSinceEpoch(0);
+
   @override
   void initState() {
     super.initState();
@@ -171,6 +176,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     _controller!.initialize().then((_) {
       if (!mounted) return;
       _controller!.addListener(_onVideoEvent);
+      _restoreResume();
       _controller!.play();
       setState(() => _initialized = true);
       _startAutoHide();
@@ -190,6 +196,37 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   void _onVideoEvent() {
     if (!mounted || _controller == null) return;
     setState(() => _isPlaying = _controller!.value.isPlaying);
+    final now = DateTime.now();
+    if (now.difference(_lastResumeSave).inSeconds >= 5) {
+      _lastResumeSave = now;
+      _persistWatchProgress();
+    }
+  }
+
+  void _restoreResume() {
+    final path = _currentFile();
+    if (path == null || path.isEmpty) return;
+    if (!_resumeService.hasResume(path)) return;
+    final pos = _resumeService.resumePosition(path);
+    if (pos <= 0) return;
+    _controller?.seekTo(Duration(milliseconds: pos));
+    _lastResumeSave = DateTime.now();
+  }
+
+  void _persistWatchProgress() {
+    final c = _controller;
+    final path = _currentFile();
+    if (c == null || path == null || path.isEmpty) return;
+    final value = c.value;
+    if (!value.isInitialized) return;
+    final pos = value.position.inMilliseconds;
+    final dur = value.duration.inMilliseconds;
+    if (pos <= 0 || dur <= 0) return;
+    if (dur - pos <= 20000) {
+      _resumeService.clearResume(path);
+      return;
+    }
+    _resumeService.saveResume(path, pos, dur);
   }
 
   String? _currentFile() {
@@ -225,6 +262,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     _overlayTimer?.cancel();
     _doubleTapTimer?.cancel();
     _hideTimer?.cancel();
+    _persistWatchProgress();
     _controller?.removeListener(_onVideoEvent);
     _controller?.dispose();
     SystemChrome.restoreSystemUIOverlays();
@@ -239,7 +277,12 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
 
   void _togglePlay() {
     if (_controller == null) return;
-    _controller!.value.isPlaying ? _controller!.pause() : _controller!.play();
+    if (_controller!.value.isPlaying) {
+      _controller!.pause();
+      _persistWatchProgress();
+    } else {
+      _controller!.play();
+    }
     _startAutoHide();
   }
 
@@ -382,6 +425,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   void _cycleDim() { final idx = _modes.indexOf(_dimensionMode); setState(() => _dimensionMode = _modes[(idx + 1) % _modes.length]); }
 
   void _switchVideo(int index) {
+    _persistWatchProgress();
     _controller?.removeListener(_onVideoEvent);
     _controller?.pause();
     _controller?.dispose();
