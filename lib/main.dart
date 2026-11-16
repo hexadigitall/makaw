@@ -74,6 +74,7 @@ import 'app/providers/service_providers.dart';
 import 'features/browser/presentation/pages/media_sniffer_page.dart';
 import 'core/widgets/responsive.dart';
 import 'core/widgets/widgets.dart';
+import 'features/portal/domain/home_activity.dart';
 import 'features/portal/presentation/pages/makaw_home_portal_page.dart';
 import 'features/portal/presentation/pages/universal_search_palette.dart';
 import 'features/portal/presentation/pages/desktop_portal_shell.dart';
@@ -516,6 +517,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   // Browser history
   List<Map<String, dynamic>> _browserHistory = [];
+  List<FileRecent> _homeRecentFiles = [];
   List<String> _searchSuggestions = [];
   List<SuggestionItem> _suggestions = [];
   bool _ignoreUrlChanges = false;
@@ -1150,6 +1152,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       LyricService.init(mgr);
       SubtitleService.init(mgr);
       FileRecentsService.init(mgr);
+    unawaited(_loadHomeRecentFiles());
       await _migrateLegacyShortcuts();
     } catch (_) {}
   }
@@ -4289,6 +4292,7 @@ TappableIcon(
 
   void _goToMakawHome() {
     if (!mounted) return;
+    _loadHomeRecentFiles();
     // Defer to the next frame: popUntil during an active route transition
     // throws '!_debugLocked' in the Navigator and freezes the app.
     _scheduleNavigation(() {
@@ -4389,7 +4393,104 @@ TappableIcon(
       onOpenQrScanner: () => _scanQRCode(),
       onToggleIncognito: () => _goIncognitoNtp(),
       onOpenAiAssistant: () => _showAIChat(),
+      onNewTab: _openBrowserTab,
+      continueItems: _buildHomeContinueItems(),
+      recentItems: _buildHomeRecentItems(),
     );
+  }
+
+  /// Home "Continue" rail: only real in-progress state (playing song, last
+  /// browsed page, last opened file). Nothing is shown when there is none.
+  List<HomeActivityItem> _buildHomeContinueItems() {
+    final items = <HomeActivityItem>[];
+    final song = _musicService.currentSong;
+    if (song != null) {
+      items.add(HomeActivityItem(
+        title: song.displayTitle,
+        subtitle:
+            '${song.displayArtist} · ${_musicService.isPlaying ? 'Playing' : 'Paused'}',
+        icon: Icons.music_note_rounded,
+        accent: const Color(0xFFF87171),
+        onTap: () => _switchToView('media'),
+      ));
+    }
+    if (_browserHistory.isNotEmpty) {
+      final entry = _browserHistory.first;
+      final url = entry['url']?.toString() ?? '';
+      final title = entry['title']?.toString() ?? '';
+      if (url.isNotEmpty) {
+        items.add(HomeActivityItem(
+          title: title.isEmpty ? url : title,
+          subtitle: 'Continue browsing',
+          icon: Icons.language_rounded,
+          accent: const Color(0xFF38BDF8),
+          onTap: () => _navigateInCurrentTab(url),
+        ));
+      }
+    }
+    if (_homeRecentFiles.isNotEmpty) {
+      final file = _homeRecentFiles.first;
+      final name = file.name ?? p.basename(file.path);
+      items.add(HomeActivityItem(
+        title: name,
+        subtitle: file.isDirectory ? 'Folder' : 'File',
+        icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
+        accent: const Color(0xFF34D399),
+        onTap: () => _openFileExplorerAt(file.path),
+      ));
+    }
+    return items;
+  }
+
+  /// Home "Recent" list: recent files plus recently visited pages (excluding
+  /// the page already surfaced under Continue).
+  List<HomeActivityItem> _buildHomeRecentItems() {
+    final items = <HomeActivityItem>[];
+    for (final file in _homeRecentFiles.take(3)) {
+      final name = file.name ?? p.basename(file.path);
+      items.add(HomeActivityItem(
+        title: name,
+        subtitle: file.isDirectory ? 'Folder' : 'File',
+        icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
+        accent: const Color(0xFF34D399),
+        onTap: () => _openFileExplorerAt(file.path),
+      ));
+    }
+    final start = _browserHistory.isEmpty ? 0 : 1;
+    for (final entry in _browserHistory.skip(start).take(4)) {
+      final url = entry['url']?.toString() ?? '';
+      if (url.isEmpty) continue;
+      final title = entry['title']?.toString() ?? '';
+      items.add(HomeActivityItem(
+        title: title.isEmpty ? url : title,
+        subtitle: 'Browser · ${_homeAgo(entry['time']?.toString())}',
+        icon: Icons.public_rounded,
+        accent: const Color(0xFF38BDF8),
+        onTap: () => _navigateInCurrentTab(url),
+      ));
+    }
+    return items;
+  }
+
+  String _homeAgo(String? iso) {
+    if (iso == null) return 'recently';
+    final t = DateTime.tryParse(iso);
+    if (t == null) return 'recently';
+    final diff = DateTime.now().difference(t);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  Future<void> _loadHomeRecentFiles() async {
+    try {
+      final recents = await FileRecentsService.getRecents(limit: 8);
+      if (!mounted) return;
+      setState(() => _homeRecentFiles = recents);
+    } catch (e) {
+      debugPrint('MAKAW-HOME recents failed: $e');
+    }
   }
 
   /// Opens the Universal Search & Command Palette — a distinct tools/files
@@ -5212,7 +5313,7 @@ TappableIcon(
       initialSettings: settings,
       initialUrlRequest: URLRequest(url: WebUri(initialUrl)),
       initialUserScripts: UnmodifiableListView([
-        UserScript(source: _antiTapjackScript(), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
+        UserScript(source: _checkedScript('anti-tapjack', _antiTapjackScript()), injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
       ]),
       pullToRefreshController: _supportsPullToRefresh ? _pullToRefreshController : null,
       onConsoleMessage: (ctrl, message) {
@@ -5522,7 +5623,9 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
             urlLower.contains('x.com') ||
             urlLower.contains('linkedin.com');
         if (!skipBlocker && cbScript.isNotEmpty) {
-          ctrl.evaluateJavascript(source: cbScript).catchError((_) {});
+          ctrl
+              .evaluateJavascript(source: _checkedScript('blocker', cbScript))
+              .catchError((_) {});
         }
         _injectPasswordScripts(ctrl, url.toString());
         _injectFilePickerScript(ctrl);
@@ -5593,9 +5696,16 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
     );
   }
 
+  /// Wraps an injected script so a parse/runtime error is logged with the
+  /// script's name instead of an anonymous "Uncaught SyntaxError".
+  String _checkedScript(String name, String source) {
+    return '(function(){try{eval(${jsonEncode(source)});}catch(e){'
+        "console.log('MAKAW-SCRIPT-ERR $name: '+(e&&e.message?e.message:e));}})();";
+  }
+
   void _injectPasswordScripts(InAppWebViewController c, String url) {
     final escapedUrl = url.replaceAll("'", "\\'");
-    c.evaluateJavascript(source: '''
+    c.evaluateJavascript(source: _checkedScript('password-save', '''
 (function() {
   if (window._makawPwdSave) return;
   window._makawPwdSave = true;
@@ -5611,18 +5721,18 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
     }));
   });
 })();
-''').catchError((_) {});
+''')).catchError((_) {});
 
     final domain = Uri.tryParse(url)?.host.replaceFirst('www.', '') ?? '';
     if (domain.isNotEmpty) {
-      c.evaluateJavascript(source: '''
+      c.evaluateJavascript(source: _checkedScript('password-autofill', '''
 try {
   PasswordAutofillChannel.postMessage(JSON.stringify({
     url: '$escapedUrl',
     domain: '$domain'
   }));
 } catch(e) {}
-''').catchError((_) {});
+''')).catchError((_) {});
     }
   }
 
@@ -5645,7 +5755,7 @@ try {
   }
 
   void _injectFilePickerScript(InAppWebViewController c) {
-    c.evaluateJavascript(source: '''
+    c.evaluateJavascript(source: _checkedScript('file-picker', '''
 (function() {
   if (window._makawFilePicker) return;
   window._makawFilePicker = true;
@@ -5680,11 +5790,11 @@ try {
     }
   });
 })();
-''').catchError((_) {});
+''')).catchError((_) {});
   }
 
   void _injectMediaSnifferScript(InAppWebViewController c) {
-    c.evaluateJavascript(source: '''
+    c.evaluateJavascript(source: _checkedScript('media-sniffer', '''
 (function() {
   if (window._makawMediaSnifferIntervalIds) {
     window._makawMediaSnifferIntervalIds.forEach(clearInterval);
@@ -5918,11 +6028,11 @@ try {
   history.pushState = function() { origPushState.apply(this, arguments); setTimeout(scanMedia, 800); };
   window.addEventListener('popstate', function() { setTimeout(scanMedia, 800); });
 })();
-''').catchError((_) {});
+''')).catchError((_) {});
   }
 
   void _injectDownloadInterceptorScript(InAppWebViewController c) {
-    c.evaluateJavascript(source: '''
+    c.evaluateJavascript(source: _checkedScript('download', '''
 (function() {
   if (window._makawDownloadIntervalIds) {
     window._makawDownloadIntervalIds.forEach(clearInterval);
@@ -6022,11 +6132,11 @@ try {
     }
   }, 2000));
 })();
-''').catchError((_) {});
+''')).catchError((_) {});
   }
 
   void _injectMediaSessionBridge(InAppWebViewController c) {
-    c.evaluateJavascript(source: '''
+    c.evaluateJavascript(source: _checkedScript('media-session', '''
 (function() {
   if (window._makawMediaSessionInit) return;
   window._makawMediaSessionInit = true;
@@ -6099,7 +6209,7 @@ try {
   });
   if (document.body) obs.observe(document.body, {childList: true, subtree: true});
 })();
-''').catchError((_) {});
+''')).catchError((_) {});
   }
 
   void _showSavePasswordDialog() {

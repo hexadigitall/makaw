@@ -2,7 +2,13 @@ import 'package:flutter/material.dart';
 import '../../../../core/widgets/responsive.dart';
 import '../../../../core/widgets/adaptive_container.dart';
 import '../../domain/launcher_item.dart';
+import '../../domain/home_activity.dart';
 
+/// The Makaw Home dashboard.
+///
+/// Home only surfaces real state: the top bar holds search + AI, then come
+/// "Continue" and "Recent" lists built from actual app activity. When there is
+/// nothing to show a section is omitted instead of rendering an empty card.
 class MakawHomePortalPage extends StatelessWidget {
   final Function(String route) onNavigate;
   final void Function(String ecosystemId) onOpenEcosystem;
@@ -10,6 +16,9 @@ class MakawHomePortalPage extends StatelessWidget {
   final VoidCallback onToggleIncognito;
   final VoidCallback onOpenAiAssistant;
   final VoidCallback onOpenSearch;
+  final VoidCallback onNewTab;
+  final List<HomeActivityItem> continueItems;
+  final List<HomeActivityItem> recentItems;
   final Widget? recentActivity;
 
   const MakawHomePortalPage({
@@ -20,198 +29,107 @@ class MakawHomePortalPage extends StatelessWidget {
     required this.onToggleIncognito,
     required this.onOpenAiAssistant,
     required this.onOpenSearch,
+    required this.onNewTab,
+    this.continueItems = const [],
+    this.recentItems = const [],
     this.recentActivity,
   }) : super(key: key);
+
+  static const _bg = Color(0xFF0F172A);
+  static const _surface = Color(0xFF1E293B);
+  static const _surfaceHigh = Color(0xFF334155);
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: _bg,
       body: SafeArea(
-        child: _buildContent(context),
-      ),
-    );
-  }
-
-  Widget _buildContent(BuildContext context) {
-    return AdaptiveContainer(
-      child: SingleChildScrollView(
-        padding: EdgeInsets.symmetric(
-          horizontal: Responsive.isMobile(context) ? 20 : 32,
-          vertical: Responsive.isMobile(context) ? 16 : 24,
+        child: AdaptiveContainer(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.symmetric(
+              horizontal: Responsive.isMobile(context) ? 16 : 32,
+              vertical: Responsive.isMobile(context) ? 12 : 24,
+            ),
+            child: Responsive.isDesktop(context)
+                ? _buildDesktopLayout(context)
+                : _buildMobileLayout(context),
+          ),
         ),
-        child: Responsive.isDesktop(context)
-            ? _buildDesktopLayout(context)
-            : _buildMobileLayout(context),
       ),
     );
   }
 
-  // ─── Desktop / Tablet layout: two-column, centered, wide ─────────────────
-  Widget _buildDesktopLayout(BuildContext context) {
-    final isWide = Responsive.isDesktop(context);
-    final searchWidth = isWide ? Responsive.desktopMax * 0.55 : Responsive.desktopMax * 0.7;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  // ─── Top bar: identity + search + AI ──────────────────────────────────────
+  Widget _buildTopBar(BuildContext context) {
+    final isDesktop = Responsive.isDesktop(context);
+    return Row(
       children: [
-        const SizedBox(height: 16),
-
-        // 1. Brand Identity Header
-        Row(
-          children: [
-            const Text(
-              'Makaw',
-              style: TextStyle(
-                fontFamily: 'Outfit',
-                fontSize: 44,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withOpacity(0.08)),
-              ),
-              child: const Text(
-                'Command Center',
-                style: TextStyle(color: Colors.white60, fontSize: 12, fontWeight: FontWeight.w500),
-              ),
-            ),
-          ],
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.asset(
+            'assets/makaw_logo_28.png',
+            width: isDesktop ? 30 : 26,
+            height: isDesktop ? 30 : 26,
+            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(width: 10),
         Text(
-          'Browse · Build · Create — one hub for the entire Makaw ecosystem.',
-          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14),
-        ),
-        const SizedBox(height: 28),
-
-        // 2. Universal Search & Command Palette
-        ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: searchWidth),
-          child: _buildUniversalSearchBar(context),
-        ),
-        const SizedBox(height: 28),
-
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Main column: Launcher Hub + AI banner
-            Expanded(
-              flex: 5,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildLauncherHub(context, desktopColumns: isWide ? 4 : 3),
-                  const SizedBox(height: 20),
-                  _buildAiAssistantBanner(context),
-                ],
-              ),
-            ),
-            const SizedBox(width: 24),
-            // Sidebar: Recent Activity + highlights
-            Expanded(
-              flex: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  recentActivity ?? _buildRecentActivitySection(),
-                  const SizedBox(height: 20),
-                  _buildFeatureHighlights(context),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  // ─── Mobile layout: single column per spec ───────────────────────────────
-  Widget _buildMobileLayout(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const SizedBox(height: 12),
-
-        // 1. Center Wordmark
-        const Text(
           'Makaw',
           style: TextStyle(
             fontFamily: 'Outfit',
-            fontSize: 38,
+            fontSize: isDesktop ? 24 : 20,
             fontWeight: FontWeight.bold,
             color: Colors.white,
-            letterSpacing: -0.5,
+            letterSpacing: -0.3,
           ),
         ),
-        const SizedBox(height: 24),
-
-        // 2. Universal Search & Command Palette
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            'Search & Command Palette',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+        const SizedBox(width: 16),
+        Expanded(child: _buildUniversalSearchBar(context)),
+        const SizedBox(width: 8),
+        _TopBarAction(
+          icon: Icons.auto_awesome,
+          tooltip: 'AI Assistant',
+          gradient: true,
+          onTap: onOpenAiAssistant,
         ),
-        const SizedBox(height: 8),
-
-        _buildUniversalSearchBar(context),
-        const SizedBox(height: 20),
-
-        // 3. Launcher Hub Card
-        _buildLauncherHub(context),
-        const SizedBox(height: 16),
-
-        // 4. AI Assistant Banner (Gradient Action Pill)
-        _buildAiAssistantBanner(context),
-        const SizedBox(height: 16),
-
-        // 5. Recent Activity Card
-        recentActivity ?? _buildRecentActivitySection(),
-        const SizedBox(height: 20),
+        const SizedBox(width: 4),
+        _TopBarAction(
+          icon: Icons.settings_outlined,
+          tooltip: 'Settings',
+          onTap: () => onNavigate('settings'),
+        ),
       ],
     );
   }
 
   Widget _buildUniversalSearchBar(BuildContext context) {
     return Material(
-      color: const Color(0xFF1E293B),
-      borderRadius: BorderRadius.circular(28),
+      color: _surface,
+      borderRadius: BorderRadius.circular(24),
       child: InkWell(
         onTap: onOpenSearch,
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(24),
         child: Container(
-          height: Responsive.isDesktop(context) ? 56 : 52,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          height: Responsive.isDesktop(context) ? 44 : 40,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28),
+            borderRadius: BorderRadius.circular(24),
             border: Border.all(color: Colors.white.withOpacity(0.08)),
           ),
           child: Row(
             children: [
-              const Icon(Icons.travel_explore, color: Colors.white54, size: 22),
-              const SizedBox(width: 12),
+              const Icon(Icons.search, color: Colors.white54, size: 18),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Search tools, files, and folders...',
+                  'Search tools, files, and folders',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Colors.white.withOpacity(0.38), fontSize: 14),
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.38), fontSize: 13),
                 ),
               ),
-              Icon(Icons.search, color: Colors.white.withOpacity(0.6), size: 20),
             ],
           ),
         ),
@@ -219,47 +137,148 @@ class MakawHomePortalPage extends StatelessWidget {
     );
   }
 
+  // ─── Desktop / tablet layout ──────────────────────────────────────────────
+  Widget _buildDesktopLayout(BuildContext context) {
+    final isWide = Responsive.isDesktop(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 4),
+        _buildTopBar(context),
+        const SizedBox(height: 20),
+        Text(
+          'Browse · Build · Create — one workspace for the entire Makaw ecosystem.',
+          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+        ),
+        const SizedBox(height: 22),
+        if (continueItems.isNotEmpty) ...[
+          _buildContinueSection(context, horizontal: true),
+          const SizedBox(height: 20),
+        ],
+        _buildQuickActions(context),
+        const SizedBox(height: 20),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 5,
+              child: _buildLauncherHub(context, desktopColumns: isWide ? 4 : 3),
+            ),
+            const SizedBox(width: 20),
+            Expanded(
+              flex: 3,
+              child: recentItems.isNotEmpty
+                  ? _buildRecentSection(context)
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  // ─── Mobile layout ────────────────────────────────────────────────────────
+  Widget _buildMobileLayout(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildTopBar(context),
+        const SizedBox(height: 18),
+        if (continueItems.isNotEmpty) ...[
+          _buildContinueSection(context),
+          const SizedBox(height: 18),
+        ],
+        _buildQuickActions(context),
+        const SizedBox(height: 16),
+        _buildLauncherHub(context),
+        if (recentItems.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _buildRecentSection(context),
+        ],
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  // ─── Continue ─────────────────────────────────────────────────────────────
+  Widget _buildContinueSection(BuildContext context, {bool horizontal = false}) {
+    final items = continueItems.take(horizontal ? 3 : 2).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(title: 'Continue', icon: Icons.play_circle_outline),
+        const SizedBox(height: 10),
+        if (horizontal)
+          Row(
+            children: [
+              for (var i = 0; i < items.length; i++) ...[
+                if (i > 0) const SizedBox(width: 12),
+                Expanded(child: _ActivityTile(item: items[i], elevated: true)),
+              ],
+            ],
+          )
+        else
+          Column(
+            children: [
+              for (var i = 0; i < items.length; i++) ...[
+                if (i > 0) const SizedBox(height: 8),
+                _ActivityTile(item: items[i], elevated: true),
+              ],
+            ],
+          ),
+      ],
+    );
+  }
+
+  // ─── Quick actions ────────────────────────────────────────────────────────
+  Widget _buildQuickActions(BuildContext context) {
+    final actions = <_QuickAction>[
+      _QuickAction('New Tab', Icons.add_rounded, const Color(0xFF38BDF8), onNewTab),
+      _QuickAction('Search', Icons.travel_explore, const Color(0xFFA78BFA), onOpenSearch),
+      _QuickAction('Files', Icons.folder_outlined, const Color(0xFF34D399), () => onNavigate('files')),
+      _QuickAction('Media', Icons.play_arrow_rounded, const Color(0xFFF87171), () => onNavigate('media')),
+    ];
+    return Row(
+      children: [
+        for (var i = 0; i < actions.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Expanded(child: _QuickActionButton(action: actions[i])),
+        ],
+      ],
+    );
+  }
+
+  // ─── Apps (launcher) ──────────────────────────────────────────────────────
   Widget _buildLauncherHub(BuildContext context, {int? desktopColumns}) {
     final launcherItems = _launcherItems(context);
     final isDesktop = Responsive.isDesktop(context);
-    final columns = isDesktop ? (desktopColumns ?? 3) : 3;
-    final tileSize = isDesktop ? 64.0 : 52.0;
-    final iconSize = isDesktop ? 28.0 : 24.0;
+    final columns = isDesktop ? (desktopColumns ?? 3) : 4;
+    final tileSize = isDesktop ? 56.0 : 46.0;
+    final iconSize = isDesktop ? 26.0 : 22.0;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
+        color: _surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text('🚀', style: TextStyle(fontSize: isDesktop ? 18 : 14)),
-              const SizedBox(width: 8),
-              Text(
-                'Launcher Hub',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: isDesktop ? 17 : 15,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-
+          _SectionHeader(title: 'Apps', icon: Icons.apps_rounded),
+          const SizedBox(height: 12),
           GridView.count(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             crossAxisCount: columns,
-            mainAxisSpacing: 20,
-            crossAxisSpacing: 16,
-            childAspectRatio: 1.0,
-            children: launcherItems.map((item) => _buildGridTile(context, item, tileSize, iconSize)).toList(),
+            mainAxisSpacing: 14,
+            crossAxisSpacing: 10,
+            childAspectRatio: 0.92,
+            children: launcherItems
+                .map((item) => _buildGridTile(context, item, tileSize, iconSize))
+                .toList(),
           ),
         ],
       ),
@@ -299,10 +318,16 @@ class MakawHomePortalPage extends StatelessWidget {
         onTap: () => onOpenEcosystem('browser'),
       ),
       LauncherItem(
-        title: 'File Explorer',
+        title: 'Files',
         icon: Icons.folder_outlined,
         accentColor: const Color(0xFF34D399),
         onTap: () => onOpenEcosystem('files'),
+      ),
+      LauncherItem(
+        title: 'History',
+        icon: Icons.history_rounded,
+        accentColor: const Color(0xFF94A3B8),
+        onTap: () => onNavigate('history'),
       ),
       LauncherItem(
         title: 'Settings',
@@ -313,196 +338,241 @@ class MakawHomePortalPage extends StatelessWidget {
     ];
   }
 
-  Widget _buildGridTile(BuildContext context, LauncherItem item, double tileSize, double iconSize) {
+  Widget _buildGridTile(
+      BuildContext context, LauncherItem item, double tileSize, double iconSize) {
     return InkWell(
       onTap: item.onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Center(
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
+      borderRadius: BorderRadius.circular(14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: tileSize,
+            height: tileSize,
+            decoration: BoxDecoration(
+              color: _surfaceHigh,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(item.icon, color: item.accentColor, size: iconSize),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            item.title,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: Responsive.isDesktop(context) ? 12 : 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Recent ───────────────────────────────────────────────────────────────
+  Widget _buildRecentSection(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionHeader(title: 'Recent', icon: Icons.history_rounded),
+          const SizedBox(height: 8),
+          for (final item in recentItems.take(6)) _ActivityTile(item: item),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  const _SectionHeader({required this.title, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 15, color: const Color(0xFF94A3B8)),
+        const SizedBox(width: 6),
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActivityTile extends StatelessWidget {
+  final HomeActivityItem item;
+  final bool elevated;
+  const _ActivityTile({required this.item, this.elevated = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = item.title.trim().isEmpty ? 'Untitled' : item.title;
+    return Material(
+      color: elevated ? const Color(0xFF1E293B) : Colors.transparent,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: item.onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: EdgeInsets.symmetric(
+              horizontal: elevated ? 14 : 10, vertical: elevated ? 12 : 9),
+          decoration: elevated
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withOpacity(0.06)),
+                )
+              : null,
+          child: Row(
             children: [
               Container(
-                width: tileSize,
-                height: tileSize,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF334155),
-                  borderRadius: BorderRadius.circular(16),
+                  color: item.accent.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(item.icon, color: item.accentColor, size: iconSize),
+                child: Icon(item.icon, size: 18, color: item.accent),
               ),
-              const SizedBox(height: 10),
-              Text(
-                item.title,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: Responsive.isDesktop(context) ? 13 : 12,
-                  fontWeight: FontWeight.w500,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Color(0xFF94A3B8), fontSize: 11),
+                    ),
+                  ],
                 ),
               ),
+              const Icon(Icons.chevron_right, size: 18, color: Color(0xFF64748B)),
             ],
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildAiAssistantBanner(BuildContext context) {
-    return InkWell(
-      onTap: onOpenAiAssistant,
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        height: Responsive.isDesktop(context) ? 72 : 64,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          gradient: const LinearGradient(
-            colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
+class _QuickAction {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  const _QuickAction(this.label, this.icon, this.color, this.onTap);
+}
+
+class _QuickActionButton extends StatelessWidget {
+  final _QuickAction action;
+  const _QuickActionButton({required this.action});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF1E293B),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: action.onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.05)),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF8B5CF6).withOpacity(0.3),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'AI Assistant',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    'Powered by Gemini',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.75),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.white, size: 22),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecentActivitySection() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Recent Activity',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
+              Icon(action.icon, size: 20, color: action.color),
+              const SizedBox(height: 6),
+              Text(
+                action.label,
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600),
               ),
-              Icon(Icons.settings_outlined, color: Colors.white.withOpacity(0.4), size: 18),
             ],
           ),
-          const SizedBox(height: 24),
-          Center(
-            child: Text(
-              'No recent activity',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.35),
-                fontSize: 13,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-        ],
+        ),
       ),
     );
   }
+}
 
-  Widget _buildFeatureHighlights(BuildContext context) {
-    final highlights = [
-      (Icons.bolt, 'Fast browsing', 'Blazing ad & tracker blocking'),
-      (Icons.security, 'Stealth mode', 'One-tap incognito browsing'),
-      (Icons.cloud_queue, 'Cloud sync', 'Projects & snippets everywhere'),
-    ];
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Why Makaw',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
+class _TopBarAction extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool gradient;
+  const _TopBarAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.gradient = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: gradient ? null : const Color(0xFF1E293B),
+              gradient: gradient
+                  ? const LinearGradient(
+                      colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)])
+                  : null,
+              border: gradient
+                  ? null
+                  : Border.all(color: Colors.white.withOpacity(0.06)),
             ),
+            child: Icon(icon, size: 19, color: Colors.white),
           ),
-          const SizedBox(height: 16),
-          ...highlights.map((h) => Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF334155),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(h.$1, color: const Color(0xFF38BDF8), size: 18),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(h.$2, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                      Text(h.$3, style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          )),
-        ],
+        ),
       ),
     );
   }
