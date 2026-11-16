@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 import '../domain/history_item.dart';
 
@@ -5,6 +7,7 @@ class HistoryService {
   static Database? _db;
 
   static const int _pruneDays = 90;
+  static const int _maxStoredVisits = 50;
 
   static void init(Database db) {
     _db = db;
@@ -20,13 +23,41 @@ class HistoryService {
     final url = normalizeUrl(item.url);
     if (url == null) return;
     final title = item.title.isEmpty ? url : item.title;
-    final time = DateTime.fromMillisecondsSinceEpoch(item.timestamp).toIso8601String();
+    final ts = item.timestamp == 0
+        ? DateTime.now().millisecondsSinceEpoch
+        : item.timestamp;
+    final time = DateTime.fromMillisecondsSinceEpoch(ts).toIso8601String();
     try {
-      final updated = await _database.rawUpdate(
-        'UPDATE history SET title = ?, time = ?, visit_count = visit_count + 1 WHERE url = ?',
-        [title, time, url],
+      final existing = await _database.query(
+        'history',
+        columns: ['visit_times'],
+        where: 'url = ?',
+        whereArgs: [url],
+        limit: 1,
       );
-      if (updated > 0) return;
+      if (existing.isNotEmpty) {
+        var times = <int>[];
+        final raw = existing.first['visit_times'] as String?;
+        if (raw != null && raw.isNotEmpty) {
+          try {
+            times = (jsonDecode(raw) as List)
+                .map((e) => (e as num).toInt())
+                .toList();
+          } catch (_) {
+            times = <int>[];
+          }
+        }
+        times.add(ts);
+        if (times.length > _maxStoredVisits) {
+          times = times.sublist(times.length - _maxStoredVisits);
+        }
+        await _database.rawUpdate(
+          'UPDATE history SET title = ?, time = ?, visit_count = visit_count + 1, '
+          'visit_times = ? WHERE url = ?',
+          [title, time, jsonEncode(times), url],
+        );
+        return;
+      }
       await _database.insert(
         'history',
         {
@@ -34,6 +65,8 @@ class HistoryService {
           'title': title,
           'time': time,
           'favicon_url': item.faviconUrl,
+          'visit_count': 1,
+          'visit_times': jsonEncode([ts]),
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );

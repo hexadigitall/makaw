@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
@@ -11,7 +13,19 @@ class AiChatPage extends StatefulWidget {
   final String apiKey;
   final Future<String?> Function()? onOpenSettings;
 
-  const AiChatPage({super.key, required this.apiKey, this.onOpenSettings});
+  /// Optional page context (opened from the Browser AI button). The context is
+  /// sent to the model with each question but never renders as a fake user
+  /// message, and it never touches the WebView.
+  final String? pageTitle;
+  final String? pageUrl;
+
+  const AiChatPage({
+    super.key,
+    required this.apiKey,
+    this.onOpenSettings,
+    this.pageTitle,
+    this.pageUrl,
+  });
 
   @override
   State<AiChatPage> createState() => _AiChatPageState();
@@ -28,6 +42,8 @@ class _AiChatPageState extends State<AiChatPage> {
   GenerativeModel? _model;
   ChatSession? _chat;
   bool _loading = false;
+  bool _lastFailed = false;
+  String _lastQuestion = '';
 
   @override
   void initState() {
@@ -79,6 +95,21 @@ class _AiChatPageState extends State<AiChatPage> {
     });
   }
 
+  String _promptWithContext(String text) {
+    final url = widget.pageUrl ?? '';
+    if (url.isEmpty) return text;
+    final title = widget.pageTitle ?? '';
+    final buffer = StringBuffer()
+      ..writeln('The user is currently viewing this page in their browser:')
+      ..writeln('URL: $url');
+    if (title.isNotEmpty && title != url) buffer.writeln('Title: $title');
+    buffer
+      ..writeln('Use this page as context when answering.')
+      ..writeln()
+      ..write(text);
+    return buffer.toString();
+  }
+
   Future<void> _send(String text) async {
     if (text.isEmpty || _loading) return;
     if (!_ensureSession()) {
@@ -89,17 +120,22 @@ class _AiChatPageState extends State<AiChatPage> {
       return;
     }
     _msgCtrl.clear();
+    _lastQuestion = text;
     final replyIndex = _messages.length + 1;
     setState(() {
       _messages.add({'role': 'user', 'text': text});
       _messages.add({'role': 'model', 'text': ''});
       _loading = true;
+      _lastFailed = false;
     });
     _scrollToEnd();
 
     final buffer = StringBuffer();
     try {
-      await for (final chunk in _chat!.sendMessageStream(Content.text(text))) {
+      final stream = _chat!
+          .sendMessageStream(Content.text(_promptWithContext(text)))
+          .timeout(const Duration(seconds: 45));
+      await for (final chunk in stream) {
         final piece = chunk.text;
         if (piece == null || piece.isEmpty) continue;
         buffer.write(piece);
@@ -109,19 +145,41 @@ class _AiChatPageState extends State<AiChatPage> {
       }
       if (!mounted) return;
       if (buffer.isEmpty) {
-        setState(() => _messages[replyIndex] = {'role': 'model', 'text': 'No response received.'});
+        setState(() {
+          _messages[replyIndex] = {'role': 'model', 'text': 'No response received.'};
+          _lastFailed = true;
+        });
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _messages[replyIndex] = {
-            'role': 'model',
-            'text': 'Error: $e\n\nCheck that the API key is valid and has access '
-                'to gemini-2.0-flash.',
-          });
+      final timedOut = e is TimeoutException;
+      setState(() {
+        _messages[replyIndex] = {
+          'role': 'model',
+          'text': timedOut
+              ? 'AI timed out. Tap Retry to ask again.'
+              : 'Error: $e\n\nCheck that the API key is valid and has access '
+                  'to gemini-2.0-flash.',
+        };
+        _lastFailed = true;
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
       _scrollToEnd();
     }
+  }
+
+  Future<void> _retry() async {
+    if (_lastQuestion.isEmpty || _loading) return;
+    if (_messages.isNotEmpty && _messages.last['role'] == 'model') {
+      setState(() => _messages.removeLast());
+    }
+    if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
+      setState(() => _messages.removeLast());
+    }
+    _chat = null;
+    _ensureSession();
+    await _send(_lastQuestion);
   }
 
   Future<void> _openSettings() async {
@@ -135,6 +193,34 @@ class _AiChatPageState extends State<AiChatPage> {
       _chat = null;
     });
     _ensureSession();
+  }
+
+  Widget _buildContextChip(BuildContext context) {
+    final url = widget.pageUrl ?? '';
+    if (url.isEmpty) return const SizedBox.shrink();
+    final host = Uri.tryParse(url)?.host ?? url;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: _accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.language, size: 16, color: _accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Context: $host',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _accent, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildEmptyState(BuildContext context) {
@@ -153,6 +239,14 @@ class _AiChatPageState extends State<AiChatPage> {
               style: TextStyle(
                   color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                   fontSize: 12)),
+          if ((widget.pageUrl ?? '').isNotEmpty) ...[
+            const SizedBox(height: 20),
+            FilledButton.tonalIcon(
+              onPressed: () => _send('Summarize this page'),
+              icon: const Icon(Icons.summarize_outlined, size: 16),
+              label: const Text('Summarize this page'),
+            ),
+          ],
           if (_key.isEmpty) ...[
             const SizedBox(height: 20),
             TextButton.icon(
@@ -228,6 +322,7 @@ class _AiChatPageState extends State<AiChatPage> {
       ),
       body: Column(
         children: [
+          _buildContextChip(context),
           Expanded(
             child: _messages.isEmpty
                 ? _buildEmptyState(context)
@@ -245,6 +340,18 @@ class _AiChatPageState extends State<AiChatPage> {
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
+            ),
+          if (_lastFailed && !_loading)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _retry,
+                  icon: const Icon(Icons.refresh, size: 16, color: _accent),
+                  label: const Text('Retry', style: TextStyle(color: _accent)),
+                ),
+              ),
             ),
           Container(
             color: Theme.of(context).colorScheme.surface,

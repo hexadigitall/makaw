@@ -60,6 +60,7 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
           timestamp: item.timestamp,
           faviconUrl: item.faviconUrl,
           visitCount: item.visitCount,
+          visitTimes: _mergedTimes(item.visitTimes, item.timestamp),
         );
         continue;
       }
@@ -69,11 +70,26 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
         timestamp: existing.timestamp > item.timestamp ? existing.timestamp : item.timestamp,
         faviconUrl: existing.faviconUrl ?? item.faviconUrl,
         visitCount: existing.visitCount + item.visitCount,
+        visitTimes: _mergedTimes(
+          [...existing.visitTimes, ...item.visitTimes],
+          existing.timestamp > item.timestamp ? existing.timestamp : item.timestamp,
+        ),
       );
     }
     final items = byUrl.values.toList()
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     return items;
+  }
+
+  /// Dedupes visit timestamps and returns the newest first, capped at 10.
+  List<int> _mergedTimes(List<int> times, int fallback) {
+    final seen = <int>{};
+    for (final t in times) {
+      if (t > 0) seen.add(t);
+    }
+    if (seen.isEmpty && fallback > 0) seen.add(fallback);
+    final sorted = seen.toList()..sort((a, b) => b.compareTo(a));
+    return sorted.take(10).toList();
   }
 
   Map<String, List<HistoryItem>> get _groupedItems {
@@ -485,15 +501,28 @@ class _MakawHistoryPageState extends State<MakawHistoryPage> {
                         ),
                         SizedBox(height: 6),
                         Text(
-                          'Last visited ${_formatFullTime(item.timestamp)}',
+                          item.visitCount > 1
+                              ? 'Visited ${item.visitCount} times'
+                              : 'Visited ${_formatFullTime(item.timestamp)}',
                           style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
                         ),
                         if (item.visitCount > 1) ...[
-                          SizedBox(height: 4),
-                          Text(
-                            'Visited ${item.visitCount} times',
-                            style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                          ),
+                          SizedBox(height: 6),
+                          ...item.visitTimes.take(6).map((t) => Padding(
+                                padding: EdgeInsets.only(bottom: 2),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.schedule,
+                                        size: 12, color: Color(0xFF475569)),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      _formatFullTime(t),
+                                      style: TextStyle(
+                                          color: Color(0xFF94A3B8), fontSize: 12),
+                                    ),
+                                  ],
+                                ),
+                              )),
                         ],
                       ],
                     ),

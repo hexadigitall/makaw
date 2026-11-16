@@ -35,6 +35,11 @@ class BrowserActivePage extends StatefulWidget {
   final VoidCallback onStop;
   final VoidCallback onReload;
   final VoidCallback onMediaTap;
+  final VoidCallback onAi;
+
+  /// True when Google is showing its own bot-check page. The note makes clear
+  /// the challenge comes from the site, not from Makaw.
+  final bool showCaptchaNote;
 
   const BrowserActivePage({
     Key? key,
@@ -57,6 +62,8 @@ class BrowserActivePage extends StatefulWidget {
     required this.onStop,
     required this.onReload,
     required this.onMediaTap,
+    required this.onAi,
+    this.showCaptchaNote = false,
   }) : super(key: key);
 
   @override
@@ -163,6 +170,11 @@ class _BrowserActivePageState extends State<BrowserActivePage>
           ),
           _buildStopOrReload(),
           _ActionButton(
+            icon: Icons.auto_awesome,
+            color: const Color(0xFF14B8A6),
+            onPressed: widget.onAi,
+          ),
+          _ActionButton(
             icon: Icons.more_horiz,
             color: Colors.white70,
             onPressed: widget.onMenu,
@@ -202,6 +214,35 @@ class _BrowserActivePageState extends State<BrowserActivePage>
                     failedUrl: widget.failedUrl,
                     errorMessage: widget.errorMessage,
                     onRetry: widget.onReload,
+                  ),
+                ),
+              if (widget.showCaptchaNote && !widget.hasError)
+                Positioned(
+                  top: 10,
+                  left: 12,
+                  right: 12,
+                  child: Material(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(12),
+                    elevation: 3,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          Icon(Icons.shield_outlined,
+                              size: 16, color: Color(0xFF94A3B8)),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Google is checking you\'re not a bot. '
+                              'This challenge comes from Google, not Makaw.',
+                              style: TextStyle(
+                                  color: Color(0xFF94A3B8), fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               if (widget.mediaCount > 0)

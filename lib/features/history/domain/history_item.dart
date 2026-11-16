@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class HistoryItem {
   final int? id;
   final String url;
@@ -6,6 +8,10 @@ class HistoryItem {
   final String? faviconUrl;
   final int visitCount;
 
+  /// Individual visit timestamps (oldest first). Populated going forward; rows
+  /// created before this field existed carry only their single [timestamp].
+  final List<int> visitTimes;
+
   HistoryItem({
     this.id,
     required this.url,
@@ -13,7 +19,8 @@ class HistoryItem {
     required this.timestamp,
     this.faviconUrl,
     this.visitCount = 1,
-  });
+    List<int>? visitTimes,
+  }) : visitTimes = visitTimes ?? const [];
 
   Map<String, dynamic> toMap() {
     return {
@@ -23,6 +30,7 @@ class HistoryItem {
       'time': DateTime.fromMillisecondsSinceEpoch(timestamp).toIso8601String(),
       'favicon_url': faviconUrl,
       'visit_count': visitCount,
+      'visit_times': visitTimes.isEmpty ? null : jsonEncode(visitTimes),
     };
   }
 
@@ -34,6 +42,15 @@ class HistoryItem {
     } catch (_) {
       ts = 0;
     }
+    final rawTimes = map['visit_times'] as String?;
+    var times = <int>[];
+    if (rawTimes != null && rawTimes.isNotEmpty) {
+      try {
+        times = (jsonDecode(rawTimes) as List).map((e) => (e as num).toInt()).toList();
+      } catch (_) {
+        times = const [];
+      }
+    }
     return HistoryItem(
       id: map['id'] as int?,
       url: map['url'] as String? ?? '',
@@ -41,6 +58,7 @@ class HistoryItem {
       timestamp: ts,
       faviconUrl: map['favicon_url'] as String?,
       visitCount: (map['visit_count'] as int?) ?? 1,
+      visitTimes: times,
     );
   }
 

@@ -1073,7 +1073,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
     _db = await openDatabase(
       p.join(dir.path, 'makaw.db'),
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE projects (
@@ -1093,6 +1093,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
             time TEXT NOT NULL,
             favicon_url TEXT,
             visit_count INTEGER NOT NULL DEFAULT 1,
+            visit_times TEXT,
             UNIQUE(url)
           )
         ''');
@@ -1121,6 +1122,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         if (oldVersion < 4) {
           try {
             await db.execute('ALTER TABLE history ADD COLUMN visit_count INTEGER NOT NULL DEFAULT 1');
+          } catch (_) {}
+        }
+        if (oldVersion < 5) {
+          try {
+            await db.execute('ALTER TABLE history ADD COLUMN visit_times TEXT');
           } catch (_) {}
         }
       },
@@ -3752,6 +3758,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     _ellipsisItem(Icons.tab, 'New Tab', () { Navigator.of(ctx).pop(); Future.microtask(() => _createBrowserTab(incognito: _isIncognitoActive)); }),
                     _ellipsisItem(Icons.visibility_off, 'New Incognito', () { Navigator.of(ctx).pop(); Future.microtask(() => _createBrowserTab(incognito: true)); }),
                     _ellipsisItem(Icons.home_rounded, 'Makaw Home', () { Navigator.of(ctx).pop(); Future.microtask(_goToMakawHome); }),
+                    _ellipsisItem(Icons.auto_awesome, 'Ask AI about this page', () { Navigator.of(ctx).pop(); Future.microtask(_showBrowserAiMode); }),
                     _ellipsisItem(Icons.folder, 'Add to Group', () { _showToast('Tab groups coming soon'); Navigator.of(ctx).pop(); }),
                     _ellipsisItem(Icons.history, 'History', () { Navigator.of(ctx).pop(); _switchToView('history'); }),
                     _ellipsisItem(Icons.delete_sweep, 'Delete Browsing Data', () {
@@ -4195,6 +4202,8 @@ TappableIcon(
             onStop: () => _activeWebview?.stopLoading(),
             onReload: _retryActiveTab,
             onMediaTap: _showMediaSnifferPage,
+            onAi: _showBrowserAiMode,
+            showCaptchaNote: _isGoogleCaptchaUrl(tab.url),
             child: Stack(
               children: [
                 if (showHome && !isTypeView) _buildHomeContent(),
@@ -6342,13 +6351,38 @@ try {
     );
   }
 
-  void _showAIChat() {
+  void _showAIChat({String? pageTitle, String? pageUrl}) {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => AiChatPage(
         apiKey: _aiApiKey,
         onOpenSettings: _showAISettings,
+        pageTitle: pageTitle,
+        pageUrl: pageUrl,
       ),
     ));
+  }
+
+  /// Browser AI entry point: a native full-screen page that receives the
+  /// current tab as context. It never injects UI into, or reloads, the WebView
+  /// (a reload on AI timeout used to trigger Google's bot CAPTCHA).
+  /// Google's bot challenge lives at google.com/sorry/... . Detect it so the
+  /// browser can label the challenge as coming from Google, not Makaw.
+  bool _isGoogleCaptchaUrl(String url) {
+    if (url.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+    final host = uri.host.toLowerCase();
+    return (host == 'google.com' || host.endsWith('.google.com')) &&
+        uri.path.startsWith('/sorry');
+  }
+
+  void _showBrowserAiMode() {
+    final tab = _activeTab;
+    final url = tab.url;
+    _showAIChat(
+      pageTitle: tab.title.isEmpty ? null : tab.title,
+      pageUrl: url.isEmpty || url == 'about:blank' ? null : url,
+    );
   }
 
 
