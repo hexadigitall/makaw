@@ -576,6 +576,10 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
               const SingleActivator(LogicalKeyboardKey.keyW, control: true): () => _closeActiveTab(),
               const SingleActivator(LogicalKeyboardKey.tab, control: true): () => _nextEditorTab(),
               const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true): () => _prevEditorTab(),
+              const SingleActivator(LogicalKeyboardKey.backquote, control: true): () => _toggleTerminal(),
+              const SingleActivator(LogicalKeyboardKey.backquote, meta: true): () => _toggleTerminal(),
+              const SingleActivator(LogicalKeyboardKey.keyB, control: true): () => _toggleSidebar(),
+              const SingleActivator(LogicalKeyboardKey.keyB, meta: true): () => _toggleSidebar(),
             },
             child: Column(
               children: [
@@ -682,6 +686,10 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
           ]),
           _menuButton('Terminal', [
             ('New Terminal', Icons.terminal, _openNewTerminal),
+            if (Platform.isWindows)
+              ('Git Bash', Icons.terminal, _openGitBashTerminal),
+            if (Platform.isWindows)
+              ('WSL Shell…', Icons.terminal, _openWslShellDialog),
             ('Restart Shell', Icons.restart_alt, _restartTerminal),
             ('Clear Terminal', Icons.delete_outline, _terminalEngine.clearDisplay),
             ('Interrupt (Ctrl+C)', Icons.stop, _terminalEngine.interrupt),
@@ -769,6 +777,47 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
     ).then((v) {
       if (v != null) _openRecentFolder(v);
     });
+  }
+
+  void _toggleTerminal() {
+    final isDesktop = MediaQuery.of(context).size.width >= 900;
+    if (isDesktop) {
+      setState(() {
+        _showDesktopTerminal = !_showDesktopTerminal;
+        _persistSettings();
+      });
+    } else {
+      setState(() {
+        _currentMobileView = _currentMobileView == MobileIdeView.terminal
+            ? MobileIdeView.editor
+            : MobileIdeView.terminal;
+      });
+    }
+  }
+
+  void _toggleSidebar() {
+    final isDesktop = MediaQuery.of(context).size.width >= 900;
+    if (isDesktop) {
+      setState(() {
+        _showLeftPanel = !_showLeftPanel;
+        _persistSettings();
+      });
+    } else {
+      if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+        Navigator.of(context).pop();
+      } else {
+        _scaffoldKey.currentState?.openDrawer();
+      }
+    }
+  }
+
+  void _openGitBashTerminal() {
+    final ok = _terminalEngine.startGitBash(workingDirectory: _project.directory.path);
+    if (!ok) {
+      _showIdeToast('Git Bash not found at standard installation paths');
+      return;
+    }
+    if (!_showDesktopTerminal) setState(() => _showDesktopTerminal = true);
   }
 
   void _restartTerminal() {
@@ -1315,7 +1364,7 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
                 horizontal: true,
                 inset: 0,
                 onDrag: (dy) => setState(
-                    () => _bottomAreaFraction += dy / totalH),
+                    () => _bottomAreaFraction = (_bottomAreaFraction - dy / totalH).clamp(0.15, 0.6)),
                 onDragEnd: _persistSettings,
               ),
             if (terminalOnBottom || previewOnBottom)
@@ -2076,6 +2125,8 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
                           ('Move to Side', Icons.east, () => _setPanePlacement('Terminal', false)),
                           const _PaneDivider(),
                           ('New Terminal', Icons.terminal, _openNewTerminal),
+                          if (Platform.isWindows)
+                            ('Git Bash', Icons.terminal, _openGitBashTerminal),
                           ('Restart Shell', Icons.restart_alt, _restartTerminal),
                           ('WSL Shell…', Icons.terminal, _openWslShellDialog),
                           ('SSH Remote…', Icons.router, _openSshShellDialog),

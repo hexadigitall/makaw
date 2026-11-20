@@ -37,6 +37,34 @@ class MakawTerminalEngine {
     return 'bash';
   }
 
+  /// Discovers Git Bash executable if installed on Windows.
+  static String? findGitBash() {
+    if (!Platform.isWindows) return null;
+    final candidates = [
+      r'C:\Program Files\Git\bin\bash.exe',
+      r'C:\Program Files\Git\usr\bin\bash.exe',
+      r'C:\Program Files (x86)\Git\bin\bash.exe',
+      if (Platform.environment['LOCALAPPDATA'] != null)
+        '${Platform.environment['LOCALAPPDATA']}\\Programs\\Git\\bin\\bash.exe',
+    ];
+    for (final path in candidates) {
+      if (File(path).existsSync()) return path;
+    }
+    return null;
+  }
+
+  /// Starts a Git Bash session directly on Windows if available.
+  bool startGitBash({String workingDirectory = ''}) {
+    final gitBash = findGitBash();
+    if (gitBash == null) return false;
+    startSession(
+      workingDirectory: workingDirectory,
+      executable: gitBash,
+      arguments: ['--login', '-i'],
+    );
+    return true;
+  }
+
   /// Starts (or restarts) the PTY shell rooted at [workingDirectory] with an
   /// optional custom [executable]+[arguments] (e.g. `wsl.exe` / `ssh`).
   /// Safe (and silently a no-op) on web.
@@ -63,12 +91,15 @@ class MakawTerminalEngine {
 
     final List<(String, String, List<String>)> candidates;
     if (Platform.isWindows) {
-      // Prefer PowerShell, but a broken PowerShell quits within a second of
-      // launch (e.g. "Loading managed Windows PowerShell failed with
-      // 0x8009001d"), so fall back to cmd.exe when that happens.
+      // Prefer PowerShell, but fall back to cmd.exe, Git Bash, or WSL
+      // if PowerShell fails or crashes.
+      final gitBash = findGitBash();
       candidates = [
         ('powershell', 'powershell.exe', ['-NoLogo', '-NoProfile']),
         ('cmd', 'cmd.exe', const []),
+        if (gitBash != null)
+          ('git-bash', gitBash, ['--login', '-i']),
+        ('wsl', 'wsl.exe', const []),
       ];
     } else if (Platform.isAndroid) {
       candidates = [

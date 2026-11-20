@@ -56,7 +56,7 @@
   - [ ] Update Firebase C++ SDK CMake minimum version configuration.
   - [ ] Validate MSIX packaging script with `dart run msix:create`.
 - [ ] **2.3 GitHub Actions Workflow Hardening**
-  - [ ] Verify `.github/workflows/build-android.yml` runs cleanly on JDK 17 with caching.
+  - [x] Verify `.github/workflows/build-android.yml` runs cleanly on JDK 17 with caching (Run ID 44709694251: Split APKs & AAB succeeded in 10m50s).
   - [ ] Verify `.github/workflows/build-windows.yml` outputs signed MSIX and portable zip.
   - [ ] Enable workflow run triggers on PR and main push for continuous validation.
 
@@ -87,13 +87,15 @@
 ---
 
 ### Phase 5: Studio Workspace Modernization (PRD Milestone M2)
-- [ ] **5.1 Unified Desktop/Mobile Studio Workspace**
-  - [ ] Multi-pane resizable layout on Desktop (File tree | Editor | Terminal | Preview).
-  - [ ] Collapsible drawer and bottom tab switching on Mobile.
-  - [ ] Monaco / `flutter_code_editor` configuration with auto-saving and dirty indicator.
-- [ ] **5.2 Native Terminal Integration**
-  - [ ] Windows: Spawn interactive PowerShell / CMD / Git Bash session via PTY.
-  - [ ] Android: Integrate `flutter_pty` with fallback SSH client.
+- [x] **5.1 Unified Desktop/Mobile Studio Workspace**
+  - [x] Multi-pane resizable layout on Desktop (File tree | Editor | Terminal | Preview) with interactive split drag and settings persistence.
+  - [x] Collapsible drawer and bottom tab switching on Mobile.
+  - [x] Monaco / `flutter_code_editor` configuration with auto-saving and dirty indicator.
+  - [x] Desktop keyboard shortcuts: `Ctrl+\`` (toggle terminal), `Ctrl+B` (toggle explorer sidebar), `Ctrl+S` (save file), `Ctrl+P` (command palette), `Ctrl+W` (close tab).
+- [x] **5.2 Native Terminal Integration**
+  - [x] Windows: Spawn interactive PowerShell / CMD / Git Bash session via PTY with `findGitBash()` discovery and `wsl.exe` fallback.
+  - [x] Android: Integrate `flutter_pty` with fallback SSH client.
+  - [x] Unit test suite created and passing: `test/features/studio/studio_terminal_test.dart`.
 - [ ] **5.3 Git Integration**
   - [ ] Visual Git status panel: staged, unstaged, untracked files.
   - [ ] Branch switcher and quick commit UI.
