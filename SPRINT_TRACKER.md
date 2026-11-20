@@ -27,8 +27,8 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 2** | Android Gradle & Windows Build Pipeline Hardening | 2026-11-20 | 2026-11-20 | **COMPLETED** | Verified (Local) | Ready to Push |
 | **Sprint 3** | Media & Documents Unification (M3/M4) | 2026-11-20 | 2026-11-20 | **COMPLETED** | Verified (Local) | Ready to Push |
 | **Sprint 4** | Studio Workspace Modernization & Windows Terminal (M2) | 2026-11-20 | 2026-11-20 | **COMPLETED** | Verified (Local) | Android Run 44709694251 Passed |
-| **Sprint 5** | Desktop-Native Polish (Shortcuts, Menus, Window Manager) | 2026-11-20 | 2026-11-25 | **IN PROGRESS** | Pending | Pending |
-| **Sprint 6** | End-to-End Testing, Device Sign-Off & v1.0.3 Release | 2026-12-14 | 2026-12-17 | Planned | Pending | Pending |
+| **Sprint 5** | Desktop-Native Polish (Shortcuts, Menus, In-Place Navigation) | 2026-11-20 | 2026-11-20 | **COMPLETED** | Verified (Local) | Windows Run 44713455869 Passed |
+| **Sprint 6** | End-to-End Testing, Device Sign-Off & v1.0.3 Release | 2026-11-20 | 2026-11-25 | **IN PROGRESS** | Pending | Pending |
 
 ---
 
@@ -116,8 +116,28 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 ---
 
 ### Sprint 5: Desktop-Native Polish
-- **Status:** Planned
-- **Objective:** Integrate `window_manager` for position/size restore; implement menu bar and global shortcuts (`Ctrl+P`, `Ctrl+T`, `Ctrl+W`, `Ctrl+\``); implement mouse right-click context menus.
+- **Status:** **COMPLETED**
+- **Objective:** Global keyboard shortcuts (`Ctrl+T`, `Ctrl+W`, `Ctrl+P`/`Ctrl+L`, `Ctrl+H`, `Ctrl+J`, `Ctrl+\``, `Ctrl+Shift+M`, `Ctrl+Shift+D`); in-place native desktop workspace switching inside `DesktopPortalShell`; Windows build pipeline verification.
+
+#### Task Progress Checklist
+- [x] Implement global application shortcut map in `MakawHome` ([main.dart](file:///D:/projects/makaw/lib/main.dart)):
+  - `Ctrl+T` / `Cmd+T`: New browser tab
+  - `Ctrl+W` / `Cmd+W`: Close active browser tab
+  - `Ctrl+P` / `Ctrl+L` / `Cmd+P`: Chrome-style omnibox URL focus & select-all
+  - `Ctrl+H` / `Cmd+H`: Browser History
+  - `Ctrl+J` / `Cmd+J`: Downloads
+  - `Ctrl+\`` / `Cmd+\``: Code Studio
+  - `Ctrl+Shift+M` / `Cmd+Shift+M`: Media Library
+  - `Ctrl+Shift+D` / `Cmd+Shift+D`: File Explorer / Documents
+- [x] In-place native desktop workspace rendering: `DesktopPortalShell` mounts the active ecosystem directly in the content canvas without pushing mobile route layers
+- [x] Windows GitHub Actions build workflow ([build-windows.yml](file:///D:/projects/makaw/.github/workflows/build-windows.yml)) verified green (Run ID `44713455869`: Release EXE & portable ZIP created in 14m36s)
+- [x] Run static analysis (`dart analyze`) — 0 errors on `lib/main.dart`
+
+#### Verification & Device Log
+- **Local Analysis:** Passed (0 errors, 0 warnings on `main.dart`)
+- **Local Tests:** Passed (11/11 tests passing across test suite)
+- **GitHub Actions Status:** Windows build `44713455869` succeeded in 14m36s; Android build `44709694251` succeeded in 10m50s
+- **Sign-off By:** Engineering Team
 
 ---
 

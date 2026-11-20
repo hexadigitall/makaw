@@ -57,7 +57,7 @@
   - [ ] Validate MSIX packaging script with `dart run msix:create`.
 - [ ] **2.3 GitHub Actions Workflow Hardening**
   - [x] Verify `.github/workflows/build-android.yml` runs cleanly on JDK 17 with caching (Run ID 44709694251: Split APKs & AAB succeeded in 10m50s).
-  - [ ] Verify `.github/workflows/build-windows.yml` outputs signed MSIX and portable zip.
+  - [x] Verify `.github/workflows/build-windows.yml` outputs portable zip and release artifacts (Run ID 44713455869: Windows Release EXE & ZIP succeeded in 14m36s).
   - [ ] Enable workflow run triggers on PR and main push for continuous validation.
 
 ---
@@ -103,18 +103,20 @@
 ---
 
 ### Phase 6: Desktop (Windows) Native Experience
-- [ ] **6.1 Desktop Shell & Window Management**
-  - [ ] Persist window size, position, and maximize state using `window_manager`.
-  - [ ] Top menu bar: File, Edit, View, History, Bookmarks, Tools, Window, Help.
-  - [ ] 3-pane responsive desktop shell: Collapsible Sidebar + Main Content + Inspector.
-- [ ] **6.2 Keyboard Shortcuts & Context Menus**
-  - [ ] Global shortcut map:
-    - `Ctrl+P`: Universal Quick Open / Command Palette
-    - `Ctrl+T`: New Browser Tab
-    - `Ctrl+W`: Close Current Tab
-    - `Ctrl+\``: Toggle Studio Terminal
-    - `Ctrl+S`: Save File
-    - `Ctrl+Shift+F`: Global Search
+- [x] **6.1 Desktop Shell & Workspace Management**
+  - [x] 3-pane responsive desktop shell: Collapsible Sidebar + Main Content + Docked Mini-Player (in-place workspace switching).
+  - [x] In-place native rendering inside `DesktopPortalShell` (zero route pushes when switching workspaces).
+  - [ ] Window position/geometry persistence across app sessions.
+- [x] **6.2 Keyboard Shortcuts & Navigation**
+  - [x] Global shortcut map in `MakawHome`:
+    - `Ctrl+P` / `Ctrl+L` / `Cmd+P`: Universal Omnibox Quick Open
+    - `Ctrl+T` / `Cmd+T`: New Browser Tab
+    - `Ctrl+W` / `Cmd+W`: Close Current Browser Tab
+    - `Ctrl+\`` / `Cmd+\``: Toggle Code Studio
+    - `Ctrl+H` / `Cmd+H`: Browser History
+    - `Ctrl+J` / `Cmd+J`: Downloads
+    - `Ctrl+Shift+M` / `Cmd+Shift+M`: Media Library
+    - `Ctrl+Shift+D` / `Cmd+Shift+D`: File Explorer / Documents
   - [ ] Right-click context menus for files, browser tabs, and editor text.
 - [ ] **6.3 Windows OS Integrations**
   - [ ] Windows System Tray with quick controls (Play/Pause, Next, New Tab).

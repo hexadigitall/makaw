@@ -2634,9 +2634,36 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       );
     }
     final isDesktop = Responsive.isDesktop(context) && !kIsWeb;
-    if (isDesktop) {
-      return _buildDesktopScaffold();
-    }
+    final scaffold = isDesktop ? _buildDesktopScaffold() : _buildMobileScaffold();
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyT, control: true): () => _createBrowserTab(),
+        const SingleActivator(LogicalKeyboardKey.keyT, meta: true): () => _createBrowserTab(),
+        const SingleActivator(LogicalKeyboardKey.keyW, control: true): () => _closeBrowserTab(_activeBrowserTabId),
+        const SingleActivator(LogicalKeyboardKey.keyW, meta: true): () => _closeBrowserTab(_activeBrowserTabId),
+        const SingleActivator(LogicalKeyboardKey.keyP, control: true): () => _focusUrlBar(),
+        const SingleActivator(LogicalKeyboardKey.keyP, meta: true): () => _focusUrlBar(),
+        const SingleActivator(LogicalKeyboardKey.keyL, control: true): () => _focusUrlBar(),
+        const SingleActivator(LogicalKeyboardKey.keyL, meta: true): () => _focusUrlBar(),
+        const SingleActivator(LogicalKeyboardKey.keyH, control: true): () => _switchToView('history'),
+        const SingleActivator(LogicalKeyboardKey.keyH, meta: true): () => _switchToView('history'),
+        const SingleActivator(LogicalKeyboardKey.keyJ, control: true): () => _switchToView('downloads'),
+        const SingleActivator(LogicalKeyboardKey.keyJ, meta: true): () => _switchToView('downloads'),
+        const SingleActivator(LogicalKeyboardKey.backquote, control: true): () => _switchToView('studio'),
+        const SingleActivator(LogicalKeyboardKey.backquote, meta: true): () => _switchToView('studio'),
+        const SingleActivator(LogicalKeyboardKey.keyM, control: true, shift: true): () => _switchToView('media'),
+        const SingleActivator(LogicalKeyboardKey.keyM, meta: true, shift: true): () => _switchToView('media'),
+        const SingleActivator(LogicalKeyboardKey.keyD, control: true, shift: true): () => _switchToView('files'),
+        const SingleActivator(LogicalKeyboardKey.keyD, meta: true, shift: true): () => _switchToView('files'),
+      },
+      child: Focus(
+        autofocus: true,
+        child: scaffold,
+      ),
+    );
+  }
+
+  Widget _buildMobileScaffold() {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
@@ -2726,6 +2753,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildDesktopRootPortal() {
+    final activeChild = _currentView == 'browser'
+        ? _buildBrowserContent()
+        : (_buildFeaturePage(_currentView) ?? _buildBrowserContent());
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       body: Stack(
@@ -2734,7 +2764,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             onOpenEcosystem: _openEcosystem,
             onGoHome: _goToMakawHome,
             child: SafeArea(
-              child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
+              child: activeChild,
             ),
           ),
           Positioned(
@@ -2750,6 +2780,28 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   /// Opens an ecosystem hub page (desktop + mobile).
   void _openEcosystem(String ecosystemId) {
+    if (Responsive.isDesktop(context) && !kIsWeb) {
+      if (ecosystemId == 'browser') {
+        setState(() => _currentView = 'browser');
+        return;
+      }
+      if (ecosystemId == 'media') {
+        setState(() => _currentView = 'media');
+        return;
+      }
+      if (ecosystemId == 'code_studio' || ecosystemId == 'studio') {
+        setState(() => _currentView = 'studio');
+        return;
+      }
+      if (ecosystemId == 'documents' || ecosystemId == 'files') {
+        setState(() => _currentView = 'files');
+        return;
+      }
+      if (ecosystemId == 'terminal') {
+        setState(() => _currentView = 'terminal');
+        return;
+      }
+    }
     if (ecosystemId == 'browser') {
       _openBrowserTab();
       return;
@@ -3511,6 +3563,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   /// Chrome-style omnibox activation (Ctrl+L / Alt+D / tap): enter type view,
   /// select-all the address.
   void _focusUrlBar() {
+    if (_currentView != 'browser') {
+      setState(() => _currentView = 'browser');
+    }
     setState(() {
       final clean = _cleanDisplayUrl(_urlController.text);
       _typeViewFromHome = _showHomeScreen;
