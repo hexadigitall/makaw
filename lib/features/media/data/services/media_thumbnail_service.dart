@@ -50,6 +50,7 @@ class MediaArtworkWidget extends StatefulWidget {
   final double? height;
   final BorderRadius? borderRadius;
   final BoxFit fit;
+  final Widget? fallback;
   final IconData? fallbackIcon;
   final Color? fallbackColor;
   final Color? iconColor;
@@ -62,6 +63,7 @@ class MediaArtworkWidget extends StatefulWidget {
     this.height,
     this.borderRadius,
     this.fit = BoxFit.cover,
+    this.fallback,
     this.fallbackIcon,
     this.fallbackColor,
     this.iconColor,
@@ -108,16 +110,17 @@ class _MediaArtworkWidgetState extends State<MediaArtworkWidget> {
     final icon = widget.fallbackIcon ?? (widget.isVideo ? Icons.videocam_rounded : Icons.music_note_rounded);
 
     Widget content;
+    final fallbackWidget = widget.fallback ?? _buildFallback(fallbackBg, icon, iconCol);
     if (_bytes != null && _bytes!.isNotEmpty) {
       content = Image.memory(
         _bytes!,
         width: widget.width,
         height: widget.height,
         fit: widget.fit,
-        errorBuilder: (_, __, ___) => _buildFallback(fallbackBg, icon, iconCol),
+        errorBuilder: (_, __, ___) => fallbackWidget,
       );
     } else {
-      content = _buildFallback(fallbackBg, icon, iconCol);
+      content = fallbackWidget;
     }
 
     return ClipRRect(

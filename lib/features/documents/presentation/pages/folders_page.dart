@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../data/services/device_file_browser.dart';
+import '../../../media/data/services/media_thumbnail_service.dart';
 
 /// Full-device File Explorer for the Files / Documents ecosystem.
 ///
@@ -247,6 +249,53 @@ class _FoldersPageState extends State<FoldersPage> {
     );
   }
 
+  static const _videoExts = {'mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp', 'm4v'};
+  static const _audioExts = {'mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'opus'};
+  static const _imgExts = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'};
+
+  Widget _buildLeading(DeviceEntry e) {
+    final ext = e.ext.toLowerCase();
+    if (_imgExts.contains(ext)) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(
+          File(e.path),
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          cacheWidth: 100,
+          cacheHeight: 100,
+          errorBuilder: (_, __, ___) => _defaultLeading(e),
+        ),
+      );
+    }
+    if (_audioExts.contains(ext) || _videoExts.contains(ext)) {
+      return MediaArtworkWidget(
+        filePath: e.path,
+        isVideo: _videoExts.contains(ext),
+        width: 40,
+        height: 40,
+        borderRadius: BorderRadius.circular(8),
+        fallback: _defaultLeading(e),
+      );
+    }
+    return _defaultLeading(e);
+  }
+
+  Widget _defaultLeading(DeviceEntry e) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: _fileColor(e.ext).withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Icon(_fileIcon(e.ext), color: _fileColor(e.ext), size: 20),
+      ),
+    );
+  }
+
   Widget _buildEntry(DeviceEntry e) {
     if (e.isDirectory) {
       return Padding(
@@ -272,11 +321,7 @@ class _FoldersPageState extends State<FoldersPage> {
         clipBehavior: Clip.antiAlias,
         child: ListTile(
           onTap: () => widget.openFile(e.path),
-          leading: Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: _fileColor(e.ext).withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
-            child: Icon(_fileIcon(e.ext), color: _fileColor(e.ext), size: 20),
-          ),
+          leading: _buildLeading(e),
           title: Text(e.name, style: const TextStyle(color: Colors.white, fontSize: 14), overflow: TextOverflow.ellipsis),
           subtitle: Text(e.sizeLabel, style: const TextStyle(color: Color(0xFF666680), fontSize: 11)),
           trailing: PopupMenuButton<String>(
