@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../domain/entities/document_file_info.dart';
 import '../../../../core/platform/platform_paths.dart';
+import '../../../../core/platform/file_exclusion_filter.dart';
 import '../../../../core/storage/file_recents_service.dart';
 export '../../domain/entities/document_file_info.dart';
 
@@ -140,10 +140,11 @@ class DocumentService extends ChangeNotifier {
       for (final entity in entities) {
         if (entity is Directory) {
           final name = entity.uri.pathSegments.isNotEmpty ? entity.uri.pathSegments.last : '';
-          if (_staticSkipDirs.contains(name)) continue;
+          if (_staticSkipDirs.contains(name) || FileExclusionFilter.isSystemDirectory(name)) continue;
           _scanDirStatic(entity.path, found, seenPaths, depth + 1);
         } else if (entity is File) {
           try {
+            if (FileExclusionFilter.shouldExclude(entity.path)) continue;
             final ext = entity.path.toLowerCase().split('.').last;
             if (_staticAllExts.any((e) => e.substring(1) == ext) && seenPaths.add(entity.path)) {
               final stat = entity.statSync();

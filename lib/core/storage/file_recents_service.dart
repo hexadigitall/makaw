@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import '../platform/file_exclusion_filter.dart';
 
 /// A recently-opened file or folder.
 class FileRecent {
@@ -53,7 +54,10 @@ class FileRecentsService {
 
   /// Record an open (upsert by path, incrementing the counter and moving it to
   /// the top of the recents list). Prunes entries above the cap.
+  /// System files, temporary files, and sensitive credentials are automatically excluded.
   static Future<void> record(String path, {bool isDirectory = false}) async {
+    if (FileExclusionFilter.shouldExclude(path)) return;
+    if (isDirectory && FileExclusionFilter.isSystemDirectory(path)) return;
     final now = DateTime.now();
     final existing = await _byPath(path);
     if (existing != null) {

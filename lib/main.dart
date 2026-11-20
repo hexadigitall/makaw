@@ -40,6 +40,7 @@ import 'features/browser/presentation/providers/download_service.dart';
 import 'core/services/update_service.dart';
 import 'core/services/media_notification_service.dart';
 import 'features/media/presentation/pages/video_player_page.dart';
+import 'features/media/presentation/pages/media_library_page.dart';
 import 'features/pdf/presentation/pages/pdf_viewer_page.dart';
 import 'features/viewer/presentation/pages/epub_viewer_page.dart';
 import 'features/viewer/presentation/pages/text_viewer_page.dart';
@@ -595,6 +596,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
       case 'terminal': return _buildTerminalPage();
       case 'downloads': return _browserToolPage(const DownloadsPage());
+      case 'media': return _buildMediaLibraryPage();
       case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => Navigator.of(context).pop());
       case 'music': return _buildMusicPlayerPage();
       case 'images': return _buildImagePage();
@@ -2748,6 +2750,26 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   /// Opens an ecosystem hub page (desktop + mobile).
   void _openEcosystem(String ecosystemId) {
+    if (ecosystemId == 'browser') {
+      _openBrowserTab();
+      return;
+    }
+    if (ecosystemId == 'media') {
+      _switchToView('media');
+      return;
+    }
+    if (ecosystemId == 'code_studio' || ecosystemId == 'studio') {
+      _switchToView('studio');
+      return;
+    }
+    if (ecosystemId == 'documents' || ecosystemId == 'files') {
+      _switchToView('files');
+      return;
+    }
+    if (ecosystemId == 'terminal') {
+      _openTerminalSession(-1);
+      return;
+    }
     Ecosystem? ecosystem;
     for (final e in Ecosystems.all) {
       if (e.id == ecosystemId) {
@@ -3294,6 +3316,38 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildMediaLibraryPage() {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) Navigator.of(context).pop();
+      },
+      child: MediaLibraryPage(
+        musicService: _musicService,
+        videoService: _videoService,
+        imageService: _imageService,
+        onPlaySong: (song, queue) {
+          final idx = queue.indexOf(song);
+          if (idx >= 0) {
+            _musicService.playSong(idx, fromList: queue);
+          } else {
+            _musicService.playSongInfo(song);
+          }
+          _switchToView('music');
+        },
+        onPlayVideo: (video) => _openFile(video.filePath),
+        onOpenImage: (image) => _openFile(image.filePath),
+        onHome: () {
+          if (mounted && Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          } else {
+            _goToMakawHome();
+          }
+        },
       ),
     );
   }
@@ -4026,7 +4080,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.only(left: 6, right: 2),
                     children: [
-                      for (final tab in _browserTabs) _buildDesktopTabChip(tab),
+                      for (final tab in _browserTabs.where((t) => t.incognito == _isIncognitoActive)) _buildDesktopTabChip(tab),
                     ],
                   ),
                 ),
@@ -4225,6 +4279,7 @@ TappableIcon(
     final activeIndex = _browserTabs.indexWhere((t) => t.id == _activeBrowserTabId);
     return Container(
       color: kSurfaceBase,
+      padding: EdgeInsets.only(top: _isFullscreen ? 0 : MediaQuery.of(context).padding.top),
       child: Stack(
         children: [
           if (_browserTabs.isNotEmpty && activeIndex >= 0)
@@ -4334,7 +4389,7 @@ TappableIcon(
   Widget _buildBottomNavBar() {
     final items = <(IconData, Color, String, VoidCallback)>[
       (Icons.home_rounded, const Color(0xFF94A3B8), 'Home', _goToMakawHome),
-      (Icons.video_collection_outlined, const Color(0xFFF87171), 'Media', () => _openEcosystem('media')),
+      (Icons.video_collection_outlined, const Color(0xFFF87171), 'Media', () => _switchToView('media')),
       (Icons.language_rounded, const Color(0xFF00A7C2), 'Browser', _openBrowserTab),
       (Icons.folder_outlined, const Color(0xFF34D399), 'Files', () => _switchToView('files')),
       (Icons.code_rounded, const Color(0xFF818CF8), 'Studio', () => _switchToView('studio')),
