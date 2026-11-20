@@ -12,6 +12,7 @@ import 'package:video_player/video_player.dart';
 import '../../../../core/platform/session_paths.dart';
 import '../../../../core/platform/platform_paths.dart';
 import '../../data/services/video_player_service.dart';
+import '../../data/services/media_thumbnail_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import '../../../../core/storage/subtitle_service.dart';
 
@@ -60,7 +61,13 @@ class _ThumbnailView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(color: const Color(0xFF1A202C), child: const Center(child: Icon(Icons.videocam, color: Color(0xFF818CF8), size: 32)));
+    return MediaArtworkWidget(
+      filePath: filePath,
+      isVideo: true,
+      fallbackColor: const Color(0xFF1A202C),
+      iconColor: const Color(0xFF818CF8),
+      fallbackIcon: Icons.videocam,
+    );
   }
 }
 

@@ -7,6 +7,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:http/http.dart' as http;
 import 'package:palette_generator/palette_generator.dart';
 import '../../data/services/music_player_service.dart';
+import '../../../media/data/services/media_thumbnail_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import 'music_playlist_page.dart';
 import '../../../../core/storage/lyric_service.dart';
@@ -746,7 +747,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
       child: Container(
         color: isSel ? const Color(0xFF2A2A4E) : (isCurrent ? const Color(0xFF1E1E3A) : Colors.transparent),
         child: ListTile(
-          leading: _thumb(),
+          leading: _thumb(song.filePath),
           title: Text(song.displayTitle,
               style: TextStyle(color: isCurrent ? const Color(0xFF818CF8) : Colors.white, fontSize: 14),
               overflow: TextOverflow.ellipsis),
@@ -768,7 +769,18 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     );
   }
 
-  Widget _thumb() {
+  Widget _thumb([String? filePath]) {
+    if (filePath != null && filePath.isNotEmpty) {
+      return MediaArtworkWidget(
+        filePath: filePath,
+        isVideo: false,
+        width: 40,
+        height: 40,
+        borderRadius: BorderRadius.circular(6),
+        fallbackColor: const Color(0xFF2A2A4E),
+        iconColor: const Color(0xFF818CF8),
+      );
+    }
     return Container(
       width: 40, height: 40,
       decoration: BoxDecoration(color: const Color(0xFF2A2A4E), borderRadius: BorderRadius.circular(6)),
@@ -1073,7 +1085,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         child: Row(
           children: [
-            _thumbSmall(),
+            _thumbSmall(s.filePath),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -1111,7 +1123,18 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     );
   }
 
-  Widget _thumbSmall() {
+  Widget _thumbSmall([String? filePath]) {
+    if (filePath != null && filePath.isNotEmpty) {
+      return MediaArtworkWidget(
+        filePath: filePath,
+        isVideo: false,
+        width: 36,
+        height: 36,
+        borderRadius: BorderRadius.circular(6),
+        fallbackColor: const Color(0xFF2A2A4E),
+        iconColor: const Color(0xFF818CF8),
+      );
+    }
     return Container(
       width: 36, height: 36,
       decoration: BoxDecoration(color: const Color(0xFF2A2A4E), borderRadius: BorderRadius.circular(6)),

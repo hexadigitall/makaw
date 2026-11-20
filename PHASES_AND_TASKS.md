@@ -70,7 +70,10 @@
 - [x] **3.2 Player System & Docked Mini-Player**
   - [x] Ensure bottom clearance on `MediaLibraryPage` so docked mini-player never covers content.
   - [x] Implement 1-tap playback from library into full-screen video/music players.
-- [x] **3.3 Metadata Extraction & "Needs Attention"**
+- [x] **3.3 Metadata & Artwork Extraction**
+  - [x] Native Kotlin `MediaMetadataRetriever` extraction (`embeddedPicture` and `getFrameAtTime`) via MethodChannel `com.hexadigitall.makaw/metadata`.
+  - [x] Cached `MediaThumbnailService` and `MediaArtworkWidget` with automatic fallback.
+  - [x] Render real album artwork, video thumbnails, and optimized photo cards across library and player pages.
   - [x] "Needs Attention" filter tab surfacing tracks missing proper artist or title tags.
 
 ---

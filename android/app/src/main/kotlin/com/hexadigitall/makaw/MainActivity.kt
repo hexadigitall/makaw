@@ -170,6 +170,53 @@ class MainActivity : FlutterActivity() {
                     retriever?.release()
                 }
                 result.success(results)
+            } else if (call.method == "extractArtwork") {
+                val path = call.argument<String>("path") ?: ""
+                var retriever: android.media.MediaMetadataRetriever? = null
+                try {
+                    retriever = android.media.MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(path)
+                    } catch (_: Exception) {
+                        val file = java.io.File(path)
+                        android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                            retriever.setDataSource(pfd.fileDescriptor)
+                        }
+                    }
+                    val pic = retriever.embeddedPicture
+                    result.success(pic)
+                } catch (e: Exception) {
+                    result.success(null)
+                } finally {
+                    try { retriever?.release() } catch (_: Exception) {}
+                }
+            } else if (call.method == "extractVideoThumbnail") {
+                val path = call.argument<String>("path") ?: ""
+                var retriever: android.media.MediaMetadataRetriever? = null
+                try {
+                    retriever = android.media.MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(path)
+                    } catch (_: Exception) {
+                        val file = java.io.File(path)
+                        android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                            retriever.setDataSource(pfd.fileDescriptor)
+                        }
+                    }
+                    val bitmap = retriever.getFrameAtTime(1000000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        ?: retriever.frameAtTime
+                    if (bitmap != null) {
+                        val stream = java.io.ByteArrayOutputStream()
+                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, stream)
+                        result.success(stream.toByteArray())
+                    } else {
+                        result.success(null)
+                    }
+                } catch (e: Exception) {
+                    result.success(null)
+                } finally {
+                    try { retriever?.release() } catch (_: Exception) {}
+                }
             } else {
                 result.notImplemented()
             }

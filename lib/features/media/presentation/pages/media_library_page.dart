@@ -5,6 +5,7 @@ import '../../../../core/widgets/adaptive_container.dart';
 import '../../../music/data/services/music_player_service.dart';
 import '../../data/services/video_player_service.dart';
 import '../../data/services/image_viewer_service.dart';
+import '../../data/services/media_thumbnail_service.dart';
 
 enum MediaCategory { all, music, video, photos, needsAttention }
 
@@ -339,14 +340,12 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        leading: Container(
+        leading: MediaArtworkWidget(
+          filePath: song.filePath,
+          isVideo: false,
           width: 44,
           height: 44,
-          decoration: BoxDecoration(
-            color: _surfaceHigh,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.music_note_rounded, color: _accent, size: 22),
+          borderRadius: BorderRadius.circular(8),
         ),
         title: Text(
           song.title.isNotEmpty ? song.title : 'Unknown Title',
@@ -408,14 +407,10 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Container(
-                    decoration: const BoxDecoration(
-                      color: _surfaceHigh,
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
-                    ),
-                    child: const Center(
-                      child: Icon(Icons.play_circle_fill_rounded, color: Colors.white38, size: 36),
-                    ),
+                  MediaArtworkWidget(
+                    filePath: video.filePath,
+                    isVideo: true,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
                   ),
                   if (progress > 0)
                     Positioned(
@@ -475,10 +470,16 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
           width: 100,
           height: 100,
           color: _surfaceHigh,
-          child: Image.file(
-            File(image.filePath),
+          child: Image(
+            image: ResizeImage(
+              FileImage(File(image.filePath)),
+              width: 300,
+              height: 300,
+            ),
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported_rounded, color: Colors.white38),
+            errorBuilder: (_, __, ___) => const Center(
+              child: Icon(Icons.image_rounded, color: Colors.white24, size: 32),
+            ),
           ),
         ),
       ),

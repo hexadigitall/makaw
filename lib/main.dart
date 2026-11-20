@@ -34,6 +34,7 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'features/browser/data/services/content_blocker_service.dart';
 import 'features/browser/presentation/providers/download_service.dart';
@@ -2633,7 +2634,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         ),
       );
     }
-    final isDesktop = Responsive.isDesktop(context) && !kIsWeb;
+    final isDesktop = !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS || Responsive.isDesktop(context));
     final scaffold = isDesktop ? _buildDesktopScaffold() : _buildMobileScaffold();
     return CallbackShortcuts(
       bindings: {
@@ -4666,77 +4667,150 @@ TappableIcon(
   }
 
   Widget _buildIncognitoLandingPage() {
-    return Container(
-      color: kIncognitoBg,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+    return SizedBox.expand(
+      child: ColoredBox(
+        color: kIncognitoBg,
+        child: SafeArea(
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Incognito mark — Chrome shows a plain glasses silhouette.
+              // Dedicated dark incognito header with navigation controls
               Container(
-                width: 72, height: 72,
-                decoration: BoxDecoration(
-                  color: kIncognitoInput,
-                  borderRadius: BorderRadius.circular(18),
+                height: 54,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: const BoxDecoration(
+                  color: kIncognitoBg,
+                  border: Border(bottom: BorderSide(color: Color(0xFF2B2C2F), width: 1)),
                 ),
-                child: Icon(Icons.visibility_off, color: Colors.white.withValues(alpha: 0.9), size: 38),
-              ),
-              const SizedBox(height: 26),
-              Text(
-                "You've gone incognito",
-                style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Now you can browse privately. Other people who use this device won\'t see your activity, so you can browse more freely. This won\'t change how data is collected by websites you visit and the services they use, including Google.',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 14, height: 1.5),
-              ),
-              const SizedBox(height: 28),
-              // Privacy bullets — same rows Chrome shows in the incognito NTP.
-              _buildIncognitoBullet(Icons.history_rounded,
-                  "Chrome won't save your browsing history, cookies and site data, or information entered in forms."),
-              const SizedBox(height: 16),
-              _buildIncognitoBullet(Icons.download_rounded,
-                  'Downloads you start and bookmarks you save will be kept on your device.'),
-              const SizedBox(height: 16),
-              _buildIncognitoBullet(Icons.public_rounded,
-                  'Your activity might still be visible to websites you visit.'),
-              const SizedBox(height: 36),
-              // Search
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _typeViewFromHome = true;
-                    _searchSuggestions = [];
-                    _suggestions = [];
-                    _browserSubView = BrowserSubView.browsing;
-                    _viewMode = ViewMode.typeView;
-                  });
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _urlFocusNode.requestFocus();
-                  });
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: kIncognitoInput,
-                    borderRadius: BorderRadius.circular(28),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.search, color: Colors.white54, size: 22),
-                      SizedBox(width: 12),
-                      Text(
-                        'Search Google or type a URL',
-                        style: TextStyle(color: Colors.white38, fontSize: 16),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                      tooltip: 'Back',
+                      onPressed: () {
+                        if (_isMakawHome) {
+                          _goToMakawHome();
+                        } else {
+                          _goBrowserHome();
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.visibility_off, color: kIncognitoAccent, size: 20),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Private Browsing',
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                    ),
+                    const Spacer(),
+                    // Tab counter
+                    InkWell(
+                      onTap: _showTabSwitcher,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: kIncognitoInput,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.tab_rounded, color: Colors.white70, size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${_browserTabs.where((t) => t.incognito).length}',
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton(
+                      icon: const Icon(Icons.add_rounded, color: Colors.white),
+                      tooltip: 'New private tab',
+                      onPressed: () => _createBrowserTab(incognito: true),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+                      tooltip: 'Menu',
+                      onPressed: _showEllipsisMenu,
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Incognito mask emblem
+                        Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: kIncognitoInput,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: kIncognitoAccent.withValues(alpha: 0.3)),
+                          ),
+                          child: const Icon(Icons.visibility_off, color: kIncognitoAccent, size: 34),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text(
+                          "You've gone incognito",
+                          style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Now you can browse privately. Other people who use this device won\'t see your activity. Downloads and bookmarks will still be saved on your device.',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 14, height: 1.5),
+                        ),
+                        const SizedBox(height: 24),
+                        _buildIncognitoBullet(
+                          Icons.history_rounded,
+                          "Makaw won't save your browsing history, cookies, site data, or form entries.",
+                        ),
+                        const SizedBox(height: 14),
+                        _buildIncognitoBullet(
+                          Icons.security_rounded,
+                          'Ad & tracker blocking is fully active to stop intrusive popups and trackers.',
+                        ),
+                        const SizedBox(height: 14),
+                        _buildIncognitoBullet(
+                          Icons.vpn_lock_rounded,
+                          'Your activity is completely isolated from your standard browsing session.',
+                        ),
+                        const SizedBox(height: 28),
+                        // Direct Interactive Search Box
+                        Container(
+                          decoration: BoxDecoration(
+                            color: kIncognitoInput,
+                            borderRadius: BorderRadius.circular(28),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: TextField(
+                            style: const TextStyle(color: Colors.white, fontSize: 15),
+                            cursorColor: kIncognitoAccent,
+                            decoration: InputDecoration(
+                              icon: const Icon(Icons.search, color: kIncognitoAccent, size: 20),
+                              hintText: 'Search or type URL',
+                              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+                              border: InputBorder.none,
+                            ),
+                            textInputAction: TextInputAction.go,
+                            onSubmitted: (val) {
+                              if (val.trim().isNotEmpty) {
+                                _navigateOrOpenNewTab(val.trim());
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -5370,7 +5444,12 @@ TappableIcon(
 
   // 1. Block location.replace / location.assign redirects to known bad domains only
   try {
-    var _blockedKw = ['casino','betting','gambling','slots','poker','porn','xxx','sex','nude','nsfw','adult','popunder','clickunder','popads','malware','phishing'];
+    var _blockedKw = [
+      'casino','betting','gambling','slots','poker','porn','xxx','sex','nude','nsfw',
+      'adult','popunder','clickunder','popads','malware','phishing','adsterra',
+      'popcash','monetag','propellerads','exoclick','adcash','onclickmega','trafficjunky',
+      'adxcore','adnxs','zeroredirect','smartadserver','doubleclick'
+    ];
     function _isBadRedirect(url) {
       if (!url || typeof url !== 'string') return false;
       var l = url.toLowerCase();
@@ -5389,22 +5468,63 @@ TappableIcon(
       if (_isBadRedirect(url)) return;
       origAssign(url);
     };
-  } catch(e) {}
 
-  // NOTE: Do NOT override window.open — breaks OAuth, Google sign-in, popups needed by sites
-  // NOTE: Do NOT strip target="_blank" — breaks GitHub, documentation sites, normal browsing
-  // NOTE: Do NOT kill document.write — breaks some page loads and video players
-  // NOTE: Do NOT aggressively remove overlays — breaks legitimate modals, consent dialogs, UI elements
+    // 2. Protect window.open from automated ad popups
+    var origOpen = window.open.bind(window);
+    window.open = function(url, target, features) {
+      if (_isBadRedirect(url)) return null;
+      var evt = window.event;
+      if (!evt || evt.isTrusted === false) {
+        if (!url || url === 'about:blank' || _isBadRedirect(url)) return null;
+      }
+      return origOpen(url, target, features);
+    };
+
+    // 3. Neutralize transparent full-screen clickjacking overlays
+    function removeClickjackOverlays() {
+      try {
+        var all = document.querySelectorAll('div, a, iframe, section');
+        var w = window.innerWidth || document.documentElement.clientWidth;
+        var h = window.innerHeight || document.documentElement.clientHeight;
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          var style = window.getComputedStyle(el);
+          if (style.position === 'fixed' || style.position === 'absolute') {
+            var z = parseInt(style.zIndex, 10);
+            if (z > 999) {
+              var rect = el.getBoundingClientRect();
+              if (rect.width >= w * 0.8 && rect.height >= h * 0.8) {
+                var op = parseFloat(style.opacity);
+                var bg = style.backgroundColor;
+                if (op < 0.15 || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') {
+                  el.style.setProperty('display', 'none', 'important');
+                  el.style.setProperty('pointer-events', 'none', 'important');
+                }
+              }
+            }
+          }
+        }
+      } catch(e) {}
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', removeClickjackOverlays);
+    } else {
+      removeClickjackOverlays();
+    }
+    setInterval(removeClickjackOverlays, 2000);
+  } catch(e) {}
 })();
 ''';
 
   Widget _buildTabWebView(BrowserTab tab) {
-    final isDesktop = Responsive.isDesktop(context) && !kIsWeb;
+    final isDesktop = !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS || Responsive.isDesktop(context));
     final settings = InAppWebViewSettings(
       userAgent: isDesktop ? _desktopUA : _stealthUA,
       javaScriptEnabled: true,
-      javaScriptCanOpenWindowsAutomatically: true,
+      javaScriptCanOpenWindowsAutomatically: false,
       supportMultipleWindows: true,
+      transparentBackground: true,
       mediaPlaybackRequiresUserGesture: false,
       allowsInlineMediaPlayback: true,
       allowsPictureInPictureMediaPlayback: true,
@@ -5464,17 +5584,18 @@ TappableIcon(
       },
       onCreateWindow: (ctrl, request) async {
         final targetUrl = request.request.url?.toString() ?? '';
-        // Deterministic popup policy. Returning `false` here makes WebView2
-        // fall back to loading the popup URL *into the current tab* — that
-        // double-handling is what made pages appear to open "at random". We
-        // always return true: real http(s) popups become a new Makaw tab,
-        // blanks and blocked ad-popunders are swallowed.
         if (targetUrl.isEmpty || targetUrl == 'about:blank') {
           debugPrint('MAKAW-POPUP swallow blank');
           return true;
         }
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-          debugPrint('MAKAW-POPUP swallow scheme $targetUrl');
+          try {
+            final uri = Uri.parse(targetUrl);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          } catch (_) {}
+          debugPrint('MAKAW-POPUP handled scheme $targetUrl');
           return true;
         }
         if (_isBlockedRedirect(targetUrl) ||
@@ -5483,6 +5604,22 @@ TappableIcon(
           debugPrint('MAKAW-POPUP blocked $targetUrl');
           return true;
         }
+
+        // Same-origin navigation: keep in the current tab!
+        try {
+          final curUri = await ctrl.getUrl();
+          final targetUri = Uri.parse(targetUrl);
+          if (curUri != null && curUri.host.isNotEmpty && targetUri.host.isNotEmpty) {
+            final curBase = curUri.host.replaceAll(RegExp(r'^www\.'), '').toLowerCase();
+            final targetBase = targetUri.host.replaceAll(RegExp(r'^www\.'), '').toLowerCase();
+            if (curBase == targetBase || curBase.endsWith(targetBase) || targetBase.endsWith(curBase)) {
+              debugPrint('MAKAW-POPUP same-site loadInPlace $targetUrl');
+              ctrl.loadUrl(urlRequest: request.request);
+              return true;
+            }
+          }
+        } catch (_) {}
+
         debugPrint('MAKAW-POPUP open-new-tab $targetUrl');
         _navigateOrOpenNewTab(targetUrl);
         return true;
@@ -5638,8 +5775,20 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
       },
       shouldOverrideUrlLoading: (ctrl, navAction) async {
         final url = navAction.request.url.toString();
-        // 1. Block non-http protocols (intent://, market://, etc.)
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        // 1. Handle non-http protocols (mailto:, tel:, sms:, whatsapp:, market:, intent://, etc.)
+        if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('about:')) {
+          try {
+            final uri = Uri.parse(url);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            } else if (url.startsWith('intent://')) {
+              final fallbackMatch = RegExp(r'browser_fallback_url=([^;]+)').firstMatch(url);
+              if (fallbackMatch != null) {
+                final fallback = Uri.decodeComponent(fallbackMatch.group(1)!);
+                ctrl.loadUrl(urlRequest: URLRequest(url: WebUri(fallback)));
+              }
+            }
+          } catch (_) {}
           return NavigationActionPolicy.CANCEL;
         }
         // Trusted search engines, AI tools and major platforms are always allowed.

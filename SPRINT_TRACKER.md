@@ -75,9 +75,9 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 
 ---
 
-### Sprint 3: Media & Documents Unification
+### Sprint 3: Media & Documents Unification & Browser Hardening
 - **Status:** **COMPLETED**
-- **Objective:** Merge `features/music` and `features/media` into single `MediaLibraryPage`; dock mini-player inside scaffold viewport; establish universal `DocumentReader` interface.
+- **Objective:** Merge `features/music` and `features/media` into single `MediaLibraryPage`; dock mini-player inside scaffold viewport; establish universal `DocumentReader` interface; native media artwork extraction; browser incognito overhaul, link protocols, tab management, and anti-popup hardening.
 
 #### Task Progress Checklist
 - [x] Create unified `MediaLibraryPage` ([media_library_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/media_library_page.dart)) with category filtering (`All`, `Music`, `Videos`, `Photos`, `Needs Attention`)
@@ -85,10 +85,17 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 - [x] Wire `MediaLibraryPage` into `lib/main.dart` navigation routes (`case 'media'`) and bottom navigation bar
 - [x] Add bottom clearance padding in `MediaLibraryPage` so docked mini-player never obscures content
 - [x] Write and pass unit tests for `DocumentReaderContract` ([document_reader_contract_test.dart](file:///D:/projects/makaw/test/domain/document_reader_contract_test.dart))
+- [x] Implement native Android artwork & thumbnail extraction in `MainActivity.kt` via MethodChannel `com.hexadigitall.makaw/metadata` (`MediaMetadataRetriever.embeddedPicture` and `getFrameAtTime`)
+- [x] Implement cached `MediaThumbnailService` and `MediaArtworkWidget` ([media_thumbnail_service.dart](file:///D:/projects/makaw/lib/features/media/data/services/media_thumbnail_service.dart)) for smooth image card, video art, and album art rendering
+- [x] Overhaul Incognito UI in `lib/main.dart`: eradicate bottom white screen bleed with `SizedBox.expand`, `ColoredBox(color: kIncognitoBg)`, and `transparentBackground: true`; add custom dark top bar with navigation, incognito tab counter, and search input
+- [x] Implement deep link & external protocol handling (`mailto:`, `tel:`, `whatsapp:`, `intent:`, `market:`) with fallback URL parsing
+- [x] Prevent tab bloat by enforcing same-site / subdomain link navigation in the active tab inside `onCreateWindow`
+- [x] Hardened anti-popup protection (`javaScriptCanOpenWindowsAutomatically: false`) and dynamic clickjacking overlay neutralizer
+- [x] Enforce native Windows desktop multi-pane shell lock (`Platform.isWindows` check) preventing fall-through to stretched mobile shell
 - [x] Run static analysis (`dart analyze`) — 0 errors on modified files and `lib/main.dart`
 
 #### Verification & Device Log
-- **Local Analysis:** Passed (0 errors on `main.dart`, `media_library_page.dart`, `document_reader_contract.dart`)
+- **Local Analysis:** Passed (0 errors on `main.dart`, `media_library_page.dart`, `media_thumbnail_service.dart`, `document_reader_contract.dart`)
 - **Local Tests:** Passed (7/7 tests passed across `file_exclusion_filter_test.dart` and `document_reader_contract_test.dart`)
 - **Desktop/Mobile Navigation:** Verified direct bottom-nav route to `MediaLibraryPage`
 - **Sign-off By:** Engineering Team
