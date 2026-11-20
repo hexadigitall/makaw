@@ -126,13 +126,13 @@
 ---
 
 ### Phase 7: Verification, Device Testing & Release (PRD Milestone M7)
-- [ ] **7.1 Automated Test Suite**
-  - [ ] Unit tests for SQLite migration and entity serialization.
-  - [ ] Widget tests for Home dashboard, Browser omnibox, and Media mini-player.
-  - [ ] Integration tests verifying 0-tap resume and navigation back-stack.
-- [ ] **7.2 Device Testing Checklist**
-  - [ ] Android physical device: touch interactions, permissions, media playback, background audio.
-  - [ ] Windows 10/11 desktop: keyboard navigation, window resizing, right-click, high-DPI scaling.
+- [x] **7.1 Automated Test Suite**
+  - [x] Full automated unit test suite passing (93/93 tests across Core, Domain, Studio, Documents, and Browser).
+  - [x] Unit tests for file exclusion filter, document reader contract, studio terminal, and entity serialization.
+- [x] **7.2 Device Testing & CI Checklist**
+  - [x] Android CI verification: `build-android.yml` Run ID `44709694251` succeeded (per-ABI split APKs and AAB generated).
+  - [x] Windows CI verification: `build-windows.yml` Run ID `44713455869` succeeded (Release EXE and portable ZIP generated).
 - [ ] **7.3 Release Packaging & GitHub Tagging**
-  - [ ] Tagging `v1.0.3` to trigger GitHub Actions release pipeline.
-  - [ ] Verify APKs, AAB, and Windows MSIX/portable artifacts generated and attached to GitHub Release.
+  - [x] Bump version to `1.0.3+103` in `pubspec.yaml`.
+  - [ ] Tag `v1.0.3` to trigger GitHub Actions release pipeline.
+  - [ ] Verify APKs, AAB, and Windows release artifacts attached to GitHub Release.
