@@ -1,10 +1,11 @@
 import 'dart:convert';
-
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import '../domain/history_item.dart';
 
 class HistoryService {
   static Database? _db;
+  static final ValueNotifier<int> historyVersion = ValueNotifier<int>(0);
 
   static const int _pruneDays = 90;
   static const int _maxStoredVisits = 50;
@@ -56,6 +57,7 @@ class HistoryService {
           'visit_times = ? WHERE url = ?',
           [title, time, jsonEncode(times), url],
         );
+        historyVersion.value++;
         return;
       }
       await _database.insert(
@@ -70,6 +72,7 @@ class HistoryService {
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
+      historyVersion.value++;
     } catch (_) {}
   }
 
@@ -150,6 +153,7 @@ class HistoryService {
     if (_db == null) return;
     try {
       await _database.delete('history', where: 'id = ?', whereArgs: [id]);
+      historyVersion.value++;
     } catch (_) {}
   }
 
@@ -158,6 +162,7 @@ class HistoryService {
     final key = normalizeUrl(url) ?? url;
     try {
       await _database.delete('history', where: 'url = ?', whereArgs: [key]);
+      historyVersion.value++;
     } catch (_) {}
   }
 
@@ -165,6 +170,7 @@ class HistoryService {
     if (_db == null) return;
     try {
       await _database.delete('history');
+      historyVersion.value++;
     } catch (_) {}
   }
 
@@ -174,6 +180,7 @@ class HistoryService {
     if (key == null) return;
     try {
       await _database.rawUpdate('UPDATE history SET title = ? WHERE url = ?', [title, key]);
+      historyVersion.value++;
     } catch (_) {}
   }
 

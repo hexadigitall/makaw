@@ -519,6 +519,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   // Browser history
   List<Map<String, dynamic>> _browserHistory = [];
+  final Set<String> _dismissedHomeItems = {};
   List<FileRecent> _homeRecentFiles = [];
   List<String> _searchSuggestions = [];
   List<SuggestionItem> _suggestions = [];
@@ -551,12 +552,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   void _switchToView(String view) {
     if (view == 'browser') {
-      setState(() => _currentView = view);
+      _openBrowserTab();
       return;
     }
     final page = _buildFeaturePage(view);
     if (page == null) return;
-    final wasBrowsing = !_showHomeScreen;
+    final wasHome = _isMakawHome;
+    final previousViewMode = _viewMode;
+    final previousBrowserSubView = _browserSubView;
     if (!mounted) return;
     // Deferred through the queue: tapping an item while a hub/tool route is
     // still animating would otherwise throw '!_debugLocked' and freeze every
@@ -572,15 +575,16 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         if (mounted) {
           _urlController.clear();
           setState(() {
-            // Return to whichever sub-view was active before the pushed page.
-            switch (_browserSubView) {
-              case BrowserSubView.newTab:
-                _viewMode = ViewMode.newTab;
-              case BrowserSubView.browsing:
-                _viewMode = ViewMode.browsing;
+            if (wasHome) {
+              _currentView = 'browser';
+              _viewMode = ViewMode.home;
+              _browserSubView = BrowserSubView.browsing;
+            } else {
+              _viewMode = previousViewMode;
+              _browserSubView = previousBrowserSubView;
             }
           });
-          if (wasBrowsing) _syncUrlController();
+          if (!wasHome && previousViewMode == ViewMode.browsing) _syncUrlController();
         }
       });
     });
@@ -730,6 +734,24 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     }
   }
 
+  void _onHistoryVersionChanged() async {
+    if (!mounted) return;
+    try {
+      final items = await HistoryService.getAll(limit: 500);
+      if (!mounted) return;
+      setState(() {
+        _browserHistory = items.map((i) => <String, dynamic>{
+          'url': i.url,
+          'title': i.title,
+          'time': DateTime.fromMillisecondsSinceEpoch(i.timestamp).toIso8601String(),
+          'visit_count': i.visitCount,
+        }).toList();
+      });
+    } catch (_) {
+      if (mounted) setState(() => _browserHistory.clear());
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Do NOT save on `inactive`: Windows fires it during startup, before the
@@ -755,6 +777,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     _urlController.addListener(_onUrlChanged);
     _urlFocusNode.addListener(_onUrlFocusChanged);
     _musicService.addListener(_onMusicChanged);
+    HistoryService.historyVersion.addListener(_onHistoryVersionChanged);
 
     // Defer heavy init to after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -1446,7 +1469,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   }
 
   void _addHistoryEntry(String url, String title, {bool incognito = false}) {
-    if (incognito) return;
+    if (incognito || _isIncognitoActive) return;
+    final tab = _browserTabs.isEmpty ? null : _activeBrowserTab;
+    if (tab != null && tab.incognito) return;
     final key = HistoryService.normalizeUrl(url);
     if (key == null) return;
     final entryTitle = title.isEmpty ? key : title;
@@ -1566,7 +1591,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _viewMode = ViewMode.browsing;
         _searchSuggestions = [];
       });
-      _addHistoryEntry(url, url);
+      if (!tab.incognito && !_isIncognitoActive) {
+        _addHistoryEntry(url, url);
+      }
       _saveSession();
       _pendingNavigationUrl = url;
       debugPrint('MAKAW-NAV emptyTabs setPending=$_pendingNavigationUrl');
@@ -1592,7 +1619,9 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _viewMode = ViewMode.browsing;
         _searchSuggestions = [];
       });
-      _addHistoryEntry(url, url);
+      if (!tab.incognito && !_isIncognitoActive) {
+        _addHistoryEntry(url, url);
+      }
       _saveSession();
       final c = _activeWebview;
       if (c != null) {
@@ -2576,6 +2605,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     WidgetsBinding.instance.removeObserver(this);
     _urlFocusNode.removeListener(_onUrlFocusChanged);
     _musicService.removeListener(_onMusicChanged);
+    HistoryService.historyVersion.removeListener(_onHistoryVersionChanged);
     _downloadManager?.dispose();
     _updateService?.cleanOldApks();
     _urlController.dispose();
@@ -2673,22 +2703,21 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
             canPop: false,
             onPopInvokedWithResult: (didPop, _) async {
               if (didPop) return;
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+                return;
+              }
+              if (_isMakawHome) {
+                _moveTaskToBack();
+                return;
+              }
               if (_currentView == 'browser') {
-                // Browser home layers: back from the New Tab surface exits.
-                if (_browserSubView == BrowserSubView.newTab) {
-                  if (_browserTabs.length > 1) {
-                    _closeBrowserTab(_activeBrowserTabId);
-                  } else {
-                    _moveTaskToBack();
-                  }
-                  return;
-                }
                 // Live browsing surface (typeView suggestion overlay).
                 if (_viewMode == ViewMode.typeView) {
                   _urlFocusNode.unfocus();
                   _suggestDebounce?.cancel();
                   if (_browserTabs.isEmpty) {
-                    _goBrowserHome();
+                    _goToMakawHome();
                     return;
                   }
                   final tab = _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.first);
@@ -2697,9 +2726,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     _urlController.text = tab.url.isEmpty ? '' : tab.url;
                   }
                   _ignoreUrlChanges = false;
-                   setState(() {
+                  setState(() {
                     _browserSubView = _typeViewFromHome ? BrowserSubView.newTab : BrowserSubView.browsing;
-                    _viewMode = _typeViewFromHome ? ViewMode.newTab : ViewMode.browsing;
+                    _viewMode = _typeViewFromHome ? ViewMode.home : (_isBrowserNewTab ? ViewMode.newTab : ViewMode.browsing);
                     _searchSuggestions = [];
                   });
                   return;
@@ -2712,24 +2741,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     return;
                   }
                 }
-                // No back history: if browsing, go to New Tab. If on New Tab with
-                // no extra tabs, minimize the app.
-                if (_viewMode == ViewMode.browsing) {
-                  _goToNtp();
-                  return;
-                }
-                if (_viewMode == ViewMode.newTab) {
-                  if (_browserTabs.length > 1) {
-                    _closeBrowserTab(_activeBrowserTabId);
-                  } else {
-                    _moveTaskToBack();
-                  }
-                  return;
-                }
-                _moveTaskToBack();
+                // No back history: back returns directly to Makaw Home.
+                _goToMakawHome();
                 return;
               }
-              if (context.mounted) Navigator.of(context).pop();
+              _goToMakawHome();
             },
             child: SafeArea(
               child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
@@ -3743,8 +3759,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         IconButton(
           icon: Icon(Icons.home_outlined, size: 20),
           color: iconColor,
-          tooltip: 'New Tab',
-          onPressed: _goBrowserHome,
+          tooltip: 'Makaw Home',
+          onPressed: _goToMakawHome,
         ),
       ],
     );
@@ -4310,7 +4326,7 @@ TappableIcon(
             canGoForward: tab.canGoForward,
             onBack: () => _activeWebview?.goBack(),
             onForward: () => _activeWebview?.goForward(),
-            onHome: _goBrowserHome,
+            onHome: _goToMakawHome,
             onTabs: _showTabSwitcher,
             onMenu: _showEllipsisMenu,
             onStop: () => _activeWebview?.stopLoading(),
@@ -4404,39 +4420,38 @@ TappableIcon(
 
   void _goToMakawHome() {
     if (!mounted) return;
-    _loadHomeRecentFiles();
-    // Defer to the next frame: popUntil during an active route transition
-    // throws '!_debugLocked' in the Navigator and freezes the app.
-    _scheduleNavigation(() {
-      if (!mounted) return;
+    unawaited(_loadHomeRecentFiles());
+    if (Navigator.of(context).canPop()) {
       Navigator.of(context).popUntil((r) => r.isFirst);
-      _switchToView('browser');
-      setState(() {
-        // The Makaw Root Portal (launcher hub) renders via the Makaw-home branch
-        // of the browsing surface; the sub-view must not intercept it.
-        _viewMode = ViewMode.home;
-        _browserSubView = BrowserSubView.browsing;
-        _urlController.clear();
-      });
+    }
+    setState(() {
+      _currentView = 'browser';
+      _viewMode = ViewMode.home;
+      _browserSubView = BrowserSubView.browsing;
+      _urlController.clear();
+      _searchSuggestions = [];
+      _suggestions = [];
     });
   }
 
   /// Opens the Browser directly — last session tab or New Tab page, never a Hub.
   void _openBrowserTab() {
-    _scheduleNavigation(() {
-      if (!mounted) return;
+    if (!mounted) return;
+    if (Navigator.of(context).canPop()) {
       Navigator.of(context).popUntil((r) => r.isFirst);
-      setState(() => _currentView = 'browser');
+    }
+    setState(() {
+      _currentView = 'browser';
       if (_browserTabs.isEmpty) {
         _createBrowserTab();
-        return;
-      }
-      final tab = _activeBrowserTab;
-      if (tab.url.isEmpty) {
-        _goToNtp();
       } else {
-        _enterBrowserSubView(BrowserSubView.browsing);
-        _syncUrlController();
+        final tab = _activeBrowserTab;
+        if (tab.url.isEmpty || tab.url == 'about:blank') {
+          _goToNtp();
+        } else {
+          _enterBrowserSubView(BrowserSubView.browsing);
+          _syncUrlController();
+        }
       }
     });
   }
@@ -4508,6 +4523,9 @@ TappableIcon(
       onNewTab: _openBrowserTab,
       continueItems: _buildHomeContinueItems(),
       recentItems: _buildHomeRecentItems(),
+      onClearContinue: _clearHomeContinueGroup,
+      onClearRecent: _clearHomeRecentGroup,
+      onDismissItem: _dismissHomeActivityItem,
     );
   }
 
@@ -4516,51 +4534,71 @@ TappableIcon(
   List<HomeActivityItem> _buildHomeContinueItems() {
     final items = <HomeActivityItem>[];
     final song = _musicService.currentSong;
-    if (song != null) {
-      items.add(HomeActivityItem(
+    if (song != null && !_dismissedHomeItems.contains('music_current')) {
+      final item = HomeActivityItem(
+        id: 'music_current',
         title: song.displayTitle,
         subtitle:
             '${song.displayArtist} · ${_musicService.isPlaying ? 'Playing' : 'Paused'}',
         icon: Icons.music_note_rounded,
         accent: const Color(0xFFF87171),
         onTap: () => _switchToView('media'),
-      ));
+        onDismiss: () => _dismissHomeActivityItemById('music_current'),
+      );
+      items.add(item);
     }
     final inProgressVideo = _videoService.lastInProgress;
-    if (inProgressVideo != null) {
-      items.add(HomeActivityItem(
+    if (inProgressVideo != null && !_dismissedHomeItems.contains('video_$inProgressVideo')) {
+      final item = HomeActivityItem(
+        id: 'video_$inProgressVideo',
         title: p.basename(inProgressVideo),
         subtitle:
             'Continue watching · ${_homeClock(_videoService.resumePosition(inProgressVideo))}',
         icon: Icons.movie_outlined,
         accent: const Color(0xFF818CF8),
         onTap: () => _openFile(inProgressVideo),
-      ));
+        onDismiss: () => _dismissHomeActivityItemById('video_$inProgressVideo'),
+      );
+      items.add(item);
     }
     if (_browserHistory.isNotEmpty) {
-      final entry = _browserHistory.first;
-      final url = entry['url']?.toString() ?? '';
-      final title = entry['title']?.toString() ?? '';
-      if (url.isNotEmpty) {
-        items.add(HomeActivityItem(
-          title: title.isEmpty ? url : title,
-          subtitle: 'Continue browsing',
-          icon: Icons.language_rounded,
-          accent: const Color(0xFF38BDF8),
-          onTap: () => _navigateInCurrentTab(url),
-        ));
+      for (final entry in _browserHistory) {
+        final url = entry['url']?.toString() ?? '';
+        final title = entry['title']?.toString() ?? '';
+        final id = 'browser_$url';
+        if (url.isNotEmpty && !_dismissedHomeItems.contains(id)) {
+          final item = HomeActivityItem(
+            id: id,
+            title: title.isEmpty ? url : title,
+            subtitle: 'Continue browsing',
+            icon: Icons.language_rounded,
+            accent: const Color(0xFF38BDF8),
+            onTap: () => _navigateInCurrentTab(url),
+            onDismiss: () => _dismissHomeActivityItemById(id),
+          );
+          items.add(item);
+          break;
+        }
       }
     }
     if (_homeRecentFiles.isNotEmpty) {
-      final file = _homeRecentFiles.first;
-      final name = file.name ?? p.basename(file.path);
-      items.add(HomeActivityItem(
-        title: name,
-        subtitle: file.isDirectory ? 'Folder' : 'File',
-        icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
-        accent: const Color(0xFF34D399),
-        onTap: () => _openFileExplorerAt(file.path),
-      ));
+      for (final file in _homeRecentFiles) {
+        final id = 'file_${file.path}';
+        if (!_dismissedHomeItems.contains(id)) {
+          final name = file.name ?? p.basename(file.path);
+          final item = HomeActivityItem(
+            id: id,
+            title: name,
+            subtitle: file.isDirectory ? 'Folder' : 'File',
+            icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
+            accent: const Color(0xFF34D399),
+            onTap: () => _openFileExplorerAt(file.path),
+            onDismiss: () => _dismissHomeActivityItemById(id),
+          );
+          items.add(item);
+          break;
+        }
+      }
     }
     return items;
   }
@@ -4569,30 +4607,106 @@ TappableIcon(
   /// the page already surfaced under Continue).
   List<HomeActivityItem> _buildHomeRecentItems() {
     final items = <HomeActivityItem>[];
-    for (final file in _homeRecentFiles.take(3)) {
+    for (final file in _homeRecentFiles) {
+      final id = 'recent_file_${file.path}';
+      if (_dismissedHomeItems.contains(id) || _dismissedHomeItems.contains('file_${file.path}')) continue;
       final name = file.name ?? p.basename(file.path);
-      items.add(HomeActivityItem(
+      final item = HomeActivityItem(
+        id: id,
         title: name,
         subtitle: file.isDirectory ? 'Folder' : 'File',
         icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
         accent: const Color(0xFF34D399),
         onTap: () => _openFileExplorerAt(file.path),
-      ));
+        onDismiss: () => _dismissHomeActivityItemById(id),
+      );
+      items.add(item);
+      if (items.length >= 3) break;
     }
-    final start = _browserHistory.isEmpty ? 0 : 1;
-    for (final entry in _browserHistory.skip(start).take(4)) {
+    // Skip the URL already surfaced under continue
+    final continueUrl = items.any((it) => it.id.startsWith('browser_'))
+        ? (_browserHistory.isNotEmpty ? _browserHistory.first['url']?.toString() : null)
+        : null;
+    var historyCount = 0;
+    for (final entry in _browserHistory) {
       final url = entry['url']?.toString() ?? '';
-      if (url.isEmpty) continue;
+      if (url.isEmpty || url == continueUrl) continue;
+      final id = 'recent_browser_$url';
+      if (_dismissedHomeItems.contains(id) || _dismissedHomeItems.contains('browser_$url')) continue;
       final title = entry['title']?.toString() ?? '';
-      items.add(HomeActivityItem(
+      final item = HomeActivityItem(
+        id: id,
         title: title.isEmpty ? url : title,
         subtitle: 'Browser · ${_homeAgo(entry['time']?.toString())}',
         icon: Icons.public_rounded,
         accent: const Color(0xFF38BDF8),
         onTap: () => _navigateInCurrentTab(url),
-      ));
+        onDismiss: () => _dismissHomeActivityItemById(id),
+      );
+      items.add(item);
+      historyCount++;
+      if (historyCount >= 4) break;
     }
     return items;
+  }
+
+  void _dismissHomeActivityItemById(String id) {
+    setState(() {
+      _dismissedHomeItems.add(id);
+      if (id.startsWith('browser_') || id.startsWith('recent_browser_')) {
+        final url = id.replaceFirst(RegExp(r'^(recent_)?browser_'), '');
+        _browserHistory.removeWhere((e) => e['url'] == url);
+        HistoryService.deleteByUrl(url);
+      } else if (id.startsWith('file_') || id.startsWith('recent_file_')) {
+        final path = id.replaceFirst(RegExp(r'^(recent_)?file_'), '');
+        _homeRecentFiles.removeWhere((f) => f.path == path);
+        FileRecentsService.remove(path);
+      } else if (id == 'music_current') {
+        _musicService.clearQueue();
+      } else if (id.startsWith('video_')) {
+        final path = id.replaceFirst('video_', '');
+        _videoService.clearResume(path);
+      }
+    });
+  }
+
+  void _dismissHomeActivityItem(HomeActivityItem item) {
+    _dismissHomeActivityItemById(item.id.isNotEmpty ? item.id : item.title);
+  }
+
+  void _clearHomeContinueGroup() {
+    setState(() {
+      for (final it in _buildHomeContinueItems()) {
+        _dismissedHomeItems.add(it.id);
+        if (it.id == 'music_current') {
+          _musicService.clearQueue();
+        } else if (it.id.startsWith('video_')) {
+          _videoService.clearResume(it.id.replaceFirst('video_', ''));
+        } else if (it.id.startsWith('browser_')) {
+          final url = it.id.replaceFirst('browser_', '');
+          _browserHistory.removeWhere((e) => e['url'] == url);
+          HistoryService.deleteByUrl(url);
+        } else if (it.id.startsWith('file_')) {
+          final path = it.id.replaceFirst('file_', '');
+          _homeRecentFiles.removeWhere((f) => f.path == path);
+          FileRecentsService.remove(path);
+        }
+      }
+    });
+  }
+
+  void _clearHomeRecentGroup() {
+    setState(() {
+      for (final it in _buildHomeRecentItems()) {
+        _dismissedHomeItems.add(it.id);
+      }
+      for (final f in _homeRecentFiles) {
+        FileRecentsService.remove(f.path);
+      }
+      _homeRecentFiles.clear();
+      _browserHistory.clear();
+      HistoryService.clearAll();
+    });
   }
 
   String _homeClock(int ms) {
@@ -4686,13 +4800,7 @@ TappableIcon(
                     IconButton(
                       icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
                       tooltip: 'Back',
-                      onPressed: () {
-                        if (_isMakawHome) {
-                          _goToMakawHome();
-                        } else {
-                          _goBrowserHome();
-                        }
-                      },
+                      onPressed: _goToMakawHome,
                     ),
                     const SizedBox(width: 4),
                     const Icon(Icons.visibility_off, color: kIncognitoAccent, size: 20),
@@ -5529,14 +5637,14 @@ TappableIcon(
       allowsInlineMediaPlayback: true,
       allowsPictureInPictureMediaPlayback: true,
       supportZoom: true,
-      cacheEnabled: true,
-      clearCache: false,
-      clearSessionCache: false,
-      thirdPartyCookiesEnabled: true,
-      cacheMode: CacheMode.LOAD_DEFAULT,
-      domStorageEnabled: true,
-      databaseEnabled: true,
-      allowFileAccess: true,
+      cacheEnabled: !tab.incognito,
+      clearCache: tab.incognito,
+      clearSessionCache: tab.incognito,
+      thirdPartyCookiesEnabled: !tab.incognito,
+      cacheMode: tab.incognito ? CacheMode.LOAD_NO_CACHE : CacheMode.LOAD_DEFAULT,
+      domStorageEnabled: !tab.incognito,
+      databaseEnabled: !tab.incognito,
+      allowFileAccess: !tab.incognito,
       preferredContentMode: isDesktop
           ? UserPreferredContentMode.DESKTOP
           : UserPreferredContentMode.MOBILE,

@@ -4,17 +4,21 @@ import 'package:flutter/material.dart';
 /// dashboard. Built by the host from real app state so Home never shows a
 /// fabricated or dead card.
 class HomeActivityItem {
+  final String id;
   final String title;
   final String subtitle;
   final IconData icon;
   final Color accent;
   final VoidCallback onTap;
+  final VoidCallback? onDismiss;
 
   const HomeActivityItem({
+    this.id = '',
     required this.title,
     required this.subtitle,
     required this.icon,
     required this.accent,
     required this.onTap,
+    this.onDismiss,
   });
 }

@@ -330,13 +330,19 @@ class _TabTrayPageState extends State<TabTrayPage> {
                     return Dismissible(
                       key: ValueKey('tab_${tab.id}'),
                       direction: DismissDirection.horizontal,
+                      dismissThresholds: const {
+                        DismissDirection.startToEnd: 0.15,
+                        DismissDirection.endToStart: 0.15,
+                      },
+                      movementDuration: const Duration(milliseconds: 100),
+                      resizeDuration: const Duration(milliseconds: 80),
                       background: Container(
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: Colors.redAccent.withValues(alpha: 0.8),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(Icons.delete_outline, color: Colors.white, size: 28),
+                        child: const Icon(Icons.delete_outline, color: Colors.white, size: 28),
                       ),
                       onDismissed: (_) => _closeTab(tab.id),
                       child: Material(

@@ -19,6 +19,9 @@ class MakawHomePortalPage extends StatelessWidget {
   final VoidCallback onNewTab;
   final List<HomeActivityItem> continueItems;
   final List<HomeActivityItem> recentItems;
+  final VoidCallback? onClearContinue;
+  final VoidCallback? onClearRecent;
+  final void Function(HomeActivityItem item)? onDismissItem;
   final Widget? recentActivity;
 
   const MakawHomePortalPage({
@@ -32,6 +35,9 @@ class MakawHomePortalPage extends StatelessWidget {
     required this.onNewTab,
     this.continueItems = const [],
     this.recentItems = const [],
+    this.onClearContinue,
+    this.onClearRecent,
+    this.onDismissItem,
     this.recentActivity,
   }) : super(key: key);
 
@@ -46,6 +52,7 @@ class MakawHomePortalPage extends StatelessWidget {
       body: SafeArea(
         child: AdaptiveContainer(
           child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
             padding: EdgeInsets.symmetric(
               horizontal: Responsive.isMobile(context) ? 16 : 32,
               vertical: Responsive.isMobile(context) ? 12 : 24,
@@ -207,14 +214,24 @@ class MakawHomePortalPage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionHeader(title: 'Continue', icon: Icons.play_circle_outline),
+        _SectionHeader(
+          title: 'Continue',
+          icon: Icons.play_circle_outline,
+          onClear: onClearContinue,
+        ),
         const SizedBox(height: 10),
         if (horizontal)
           Row(
             children: [
               for (var i = 0; i < items.length; i++) ...[
                 if (i > 0) const SizedBox(width: 12),
-                Expanded(child: _ActivityTile(item: items[i], elevated: true)),
+                Expanded(
+                  child: _ActivityTile(
+                    item: items[i],
+                    elevated: true,
+                    onDismiss: items[i].onDismiss ?? (onDismissItem != null ? () => onDismissItem!(items[i]) : null),
+                  ),
+                ),
               ],
             ],
           )
@@ -223,7 +240,11 @@ class MakawHomePortalPage extends StatelessWidget {
             children: [
               for (var i = 0; i < items.length; i++) ...[
                 if (i > 0) const SizedBox(height: 8),
-                _ActivityTile(item: items[i], elevated: true),
+                _ActivityTile(
+                  item: items[i],
+                  elevated: true,
+                  onDismiss: items[i].onDismiss ?? (onDismissItem != null ? () => onDismissItem!(items[i]) : null),
+                ),
               ],
             ],
           ),
@@ -386,9 +407,17 @@ class MakawHomePortalPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionHeader(title: 'Recent', icon: Icons.history_rounded),
+          _SectionHeader(
+            title: 'Recent',
+            icon: Icons.history_rounded,
+            onClear: onClearRecent,
+          ),
           const SizedBox(height: 8),
-          for (final item in recentItems.take(6)) _ActivityTile(item: item),
+          for (final item in recentItems.take(6))
+            _ActivityTile(
+              item: item,
+              onDismiss: item.onDismiss ?? (onDismissItem != null ? () => onDismissItem!(item) : null),
+            ),
         ],
       ),
     );
@@ -398,7 +427,8 @@ class MakawHomePortalPage extends StatelessWidget {
 class _SectionHeader extends StatelessWidget {
   final String title;
   final IconData icon;
-  const _SectionHeader({required this.title, required this.icon});
+  final VoidCallback? onClear;
+  const _SectionHeader({required this.title, required this.icon, this.onClear});
 
   @override
   Widget build(BuildContext context) {
@@ -415,6 +445,30 @@ class _SectionHeader extends StatelessWidget {
             letterSpacing: 0.2,
           ),
         ),
+        const Spacer(),
+        if (onClear != null)
+          InkWell(
+            onTap: onClear,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.close, size: 12, color: Color(0xFF94A3B8)),
+                  SizedBox(width: 3),
+                  Text(
+                    'Clear',
+                    style: TextStyle(
+                      color: Color(0xFF94A3B8),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -423,68 +477,122 @@ class _SectionHeader extends StatelessWidget {
 class _ActivityTile extends StatelessWidget {
   final HomeActivityItem item;
   final bool elevated;
-  const _ActivityTile({required this.item, this.elevated = false});
+  final VoidCallback? onDismiss;
+  const _ActivityTile({required this.item, this.elevated = false, this.onDismiss});
 
   @override
   Widget build(BuildContext context) {
     final title = item.title.trim().isEmpty ? 'Untitled' : item.title;
-    return Material(
+    final dismissCallback = onDismiss ?? item.onDismiss;
+
+    final tileContent = Container(
+      padding: EdgeInsets.symmetric(
+          horizontal: elevated ? 14 : 10, vertical: elevated ? 12 : 9),
+      decoration: elevated
+          ? BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withOpacity(0.06)),
+            )
+          : null,
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: item.accent.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(item.icon, size: 18, color: item.accent),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  item.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Color(0xFF94A3B8), fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          if (dismissCallback != null) ...[
+            const SizedBox(width: 6),
+            InkWell(
+              onTap: dismissCallback,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, size: 13, color: Colors.white70),
+              ),
+            ),
+          ] else ...[
+            const Icon(Icons.chevron_right, size: 18, color: Color(0xFF64748B)),
+          ],
+        ],
+      ),
+    );
+
+    final card = Material(
       color: elevated ? const Color(0xFF1E293B) : Colors.transparent,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: item.onTap,
         borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: EdgeInsets.symmetric(
-              horizontal: elevated ? 14 : 10, vertical: elevated ? 12 : 9),
-          decoration: elevated
-              ? BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withOpacity(0.06)),
-                )
-              : null,
-          child: Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: item.accent.withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(item.icon, size: 18, color: item.accent),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      item.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Color(0xFF94A3B8), fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, size: 18, color: Color(0xFF64748B)),
-            ],
-          ),
-        ),
+        child: tileContent,
       ),
+    );
+
+    if (dismissCallback == null) return card;
+
+    return Dismissible(
+      key: ValueKey('home_act_${item.id.isNotEmpty ? item.id : item.title}'),
+      direction: DismissDirection.horizontal,
+      dismissThresholds: const {
+        DismissDirection.startToEnd: 0.15,
+        DismissDirection.endToStart: 0.15,
+      },
+      movementDuration: const Duration(milliseconds: 100),
+      resizeDuration: const Duration(milliseconds: 80),
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 16),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withOpacity(0.85),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Icon(Icons.delete_outline, color: Colors.white, size: 20),
+      ),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 16),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withOpacity(0.85),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Icon(Icons.delete_outline, color: Colors.white, size: 20),
+      ),
+      onDismissed: (_) => dismissCallback(),
+      child: card,
     );
   }
 }
