@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../data/services/music_player_service.dart';
+import '../../../media/data/services/media_thumbnail_service.dart';
 
 class MusicPlaylistPage extends StatefulWidget {
   final MusicPlayerService service;
@@ -416,13 +417,113 @@ class _MusicPlaylistPageState extends State<MusicPlaylistPage> {
                       ),
                     )
                   : ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 80),
+                      padding: const EdgeInsets.only(bottom: 16),
                       itemCount: songs.length,
                       itemBuilder: (_, i) => _songItem(songs[i], i),
                     ),
             ),
+            if (s.currentSong != null) _buildMiniPlayer(),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildMiniPlayer() {
+    final song = s.currentSong;
+    if (song == null) return const SizedBox.shrink();
+
+    final progress = s.duration.inMilliseconds > 0
+        ? (s.position.inMilliseconds / s.duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Container(
+      color: const Color(0xFF1A1A2E),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LinearProgressIndicator(
+            value: progress,
+            backgroundColor: const Color(0xFF2A2A4E),
+            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
+            minHeight: 2,
+          ),
+          InkWell(
+            onTap: () {
+              s.setShowNowPlaying(true);
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  MediaArtworkWidget(
+                    filePath: song.filePath,
+                    isVideo: false,
+                    width: 44,
+                    height: 44,
+                    borderRadius: BorderRadius.circular(8),
+                    fallbackColor: const Color(0xFF2A2A4E),
+                    iconColor: const Color(0xFF818CF8),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          song.displayTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          song.displayArtist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF666680),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 24),
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    padding: EdgeInsets.zero,
+                    onPressed: () => s.previousSong(),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      s.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_filled_rounded,
+                      color: const Color(0xFF818CF8),
+                      size: 38,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 42, minHeight: 42),
+                    padding: EdgeInsets.zero,
+                    onPressed: () => s.togglePlayPause(),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.skip_next_rounded, color: Colors.white70, size: 24),
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    padding: EdgeInsets.zero,
+                    onPressed: () => s.nextSong(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

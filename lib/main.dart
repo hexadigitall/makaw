@@ -585,9 +585,17 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
   Widget build(BuildContext context) {
     final state = GlobalPlayerState.instance;
 
+    final inMediaTool = state.inFullPlayer ||
+        _MakawHomeState.instance?._currentView == 'media' ||
+        _MakawHomeState.instance?._currentView == 'music' ||
+        _MakawHomeState.instance?._currentView == 'player' ||
+        _MakawHomeState.instance?._activeToolRoute == 'media' ||
+        _MakawHomeState.instance?._activeToolRoute == 'music' ||
+        _MakawHomeState.instance?._activeToolRoute == 'player';
+
     // 1. On Makaw Home: settles as inline widget, NEVER floats over footers/screens!
-    // 2. In full player tools: full-screen player already active!
-    if (state.isHome || state.inFullPlayer || _dismissed) {
+    // 2. In media player tools: dedicated docked bottom miniplayer is active!
+    if (state.isHome || inMediaTool || _dismissed) {
       return widget.child;
     }
 
@@ -938,6 +946,7 @@ class MakawHome extends ConsumerStatefulWidget {
 
 class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserver {
   static _MakawHomeState? instance;
+  String? _activeToolRoute;
   String _currentView = 'browser';
   final List<VoidCallback> _navQueue = [];
   bool _drainingNav = false;
@@ -1033,9 +1042,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     if (!mounted) return;
     // Base view underneath any tool route is always Makaw Home so exiting
     // always returns level-by-level directly to Makaw Home.
+    _activeToolRoute = view;
     _currentView = 'browser';
     _viewMode = ViewMode.home;
     _browserSubView = BrowserSubView.browsing;
+    _updateGlobalPlayerState();
     _scheduleNavigation(() {
       if (!mounted) return;
       Navigator.of(context).push(PageRouteBuilder(
@@ -1047,10 +1058,12 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         if (mounted) {
           _urlController.clear();
           setState(() {
+            _activeToolRoute = null;
             _currentView = 'browser';
             _viewMode = ViewMode.home;
             _browserSubView = BrowserSubView.browsing;
           });
+          _updateGlobalPlayerState();
         }
       });
     });
@@ -3119,7 +3132,12 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     WidgetsBinding.instance.addPostFrameCallback((_) {
       GlobalPlayerState.instance.update(
         isHome: _isMakawHome,
-        inFullPlayer: _currentView == 'music' || _currentView == 'player',
+        inFullPlayer: _currentView == 'music' ||
+            _currentView == 'player' ||
+            _currentView == 'media' ||
+            _activeToolRoute == 'music' ||
+            _activeToolRoute == 'player' ||
+            _activeToolRoute == 'media',
       );
     });
   }
@@ -4043,6 +4061,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         musicService: _musicService,
         videoService: _videoService,
         imageService: _imageService,
+        onOpenMusicPlayer: () => _switchToView('music'),
         onPlaySong: (song, queue) {
           final idx = queue.indexOf(song);
           if (idx >= 0) {

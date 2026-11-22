@@ -22,6 +22,7 @@ class MediaLibraryPage extends StatefulWidget {
   final void Function(VideoFileInfo video) onPlayVideo;
   final void Function(ImageFileInfo image) onOpenImage;
   final VoidCallback onHome;
+  final VoidCallback? onOpenMusicPlayer;
 
   const MediaLibraryPage({
     super.key,
@@ -32,6 +33,7 @@ class MediaLibraryPage extends StatefulWidget {
     required this.onPlayVideo,
     required this.onOpenImage,
     required this.onHome,
+    this.onOpenMusicPlayer,
   });
 
   @override
@@ -49,9 +51,22 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
   static const _accent = Color(0xFFF87171); // Media Red / Coral
 
   @override
+  void initState() {
+    super.initState();
+    widget.musicService.addListener(_onServiceChanged);
+    widget.videoService.addListener(_onServiceChanged);
+  }
+
+  @override
   void dispose() {
+    widget.musicService.removeListener(_onServiceChanged);
+    widget.videoService.removeListener(_onServiceChanged);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onServiceChanged() {
+    if (mounted) setState(() {});
   }
 
   List<SongInfo> get _filteredSongs {
@@ -124,13 +139,208 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
             children: [
               _buildTopControls(),
               Expanded(child: _buildContent(isDesktop)),
-              // Reserve bottom clearance so the mini-player never covers content
-              const SizedBox(height: 72),
+              if (widget.musicService.currentSong != null ||
+                  widget.videoService.activeVideoPath != null ||
+                  widget.videoService.lastInProgress != null)
+                _buildMiniPlayer()
+              else
+                const SizedBox(height: 16),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildMiniPlayer() {
+    final song = widget.musicService.currentSong;
+    if (song != null) {
+      final progress = widget.musicService.duration.inMilliseconds > 0
+          ? (widget.musicService.position.inMilliseconds / widget.musicService.duration.inMilliseconds).clamp(0.0, 1.0)
+          : 0.0;
+      return Container(
+        color: const Color(0xFF1E293B),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LinearProgressIndicator(
+              value: progress,
+              backgroundColor: const Color(0xFF334155),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00A7C2)),
+              minHeight: 2,
+            ),
+            InkWell(
+              onTap: () {
+                if (widget.onOpenMusicPlayer != null) {
+                  widget.onOpenMusicPlayer!();
+                } else {
+                  widget.onPlaySong(song, widget.musicService.queue.isNotEmpty ? widget.musicService.queue : [song]);
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    MediaArtworkWidget(
+                      filePath: song.filePath,
+                      isVideo: false,
+                      width: 44,
+                      height: 44,
+                      borderRadius: BorderRadius.circular(8),
+                      fallbackColor: const Color(0xFF334155),
+                      iconColor: const Color(0xFF00A7C2),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            song.displayTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            song.displayArtist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 24),
+                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => widget.musicService.previousSong(),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        widget.musicService.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_filled_rounded,
+                        color: const Color(0xFF00A7C2),
+                        size: 38,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 42, minHeight: 42),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => widget.musicService.togglePlayPause(),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.skip_next_rounded, color: Colors.white70, size: 24),
+                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => widget.musicService.nextSong(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final activeVideo = widget.videoService.activeVideoPath ?? widget.videoService.lastInProgress;
+    if (activeVideo != null && activeVideo.isNotEmpty) {
+      final title = activeVideo.split('\\').last.split('/').last;
+      final progress = widget.videoService.resumeProgress(activeVideo);
+      final isPlaying = widget.videoService.isVideoPlaying;
+
+      return Container(
+        color: const Color(0xFF1E293B),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LinearProgressIndicator(
+              value: progress,
+              backgroundColor: const Color(0xFF334155),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
+              minHeight: 2,
+            ),
+            InkWell(
+              onTap: () {
+                final video = widget.videoService.allVideos.firstWhere(
+                  (v) => v.filePath == activeVideo,
+                  orElse: () => VideoFileInfo(
+                    id: 0,
+                    filePath: activeVideo,
+                    fileName: title,
+                    folder: '',
+                    fileSize: 0,
+                  ),
+                );
+                widget.onPlayVideo(video);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    MediaArtworkWidget(
+                      filePath: activeVideo,
+                      isVideo: true,
+                      width: 44,
+                      height: 44,
+                      borderRadius: BorderRadius.circular(8),
+                      fallbackColor: const Color(0xFF334155),
+                      iconColor: const Color(0xFF818CF8),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            isPlaying ? 'Playing video' : 'Paused',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_filled_rounded,
+                        color: const Color(0xFF818CF8),
+                        size: 38,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 42, minHeight: 42),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => widget.videoService.toggleActiveVideoPlayPause(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 
   Widget _buildTopControls() {
