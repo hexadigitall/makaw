@@ -33,6 +33,84 @@ class VideoPlayerService extends ChangeNotifier {
 
   final Map<String, Map<String, int>> _resumeData = {};
 
+  String? _activeVideoPath;
+  String? get activeVideoPath => _activeVideoPath;
+  String? _activeVideoTitle;
+  String? get activeVideoTitle => _activeVideoTitle;
+  bool _isVideoPlaying = false;
+  bool get isVideoPlaying => _isVideoPlaying;
+  int _activePositionMs = 0;
+  int get activePositionMs => _activePositionMs;
+  int _activeDurationMs = 0;
+  int get activeDurationMs => _activeDurationMs;
+  VoidCallback? onTogglePlayback;
+  VoidCallback? onStopPlayback;
+
+  void setActiveVideo({
+    required String path,
+    required String title,
+    bool isPlaying = true,
+    int positionMs = 0,
+    int durationMs = 0,
+    VoidCallback? onToggle,
+    VoidCallback? onStop,
+  }) {
+    _activeVideoPath = path;
+    _activeVideoTitle = title;
+    _isVideoPlaying = isPlaying;
+    _activePositionMs = positionMs;
+    _activeDurationMs = durationMs;
+    if (onToggle != null) onTogglePlayback = onToggle;
+    if (onStop != null) onStopPlayback = onStop;
+    notifyListeners();
+  }
+
+  void updateActiveProgress({
+    int? positionMs,
+    int? durationMs,
+    bool? isPlaying,
+  }) {
+    var changed = false;
+    if (positionMs != null && _activePositionMs != positionMs) {
+      _activePositionMs = positionMs;
+      changed = true;
+    }
+    if (durationMs != null && _activeDurationMs != durationMs) {
+      _activeDurationMs = durationMs;
+      changed = true;
+    }
+    if (isPlaying != null && _isVideoPlaying != isPlaying) {
+      _isVideoPlaying = isPlaying;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
+  void toggleActiveVideoPlayPause() {
+    if (onTogglePlayback != null) {
+      onTogglePlayback!();
+    } else {
+      _isVideoPlaying = !_isVideoPlaying;
+      notifyListeners();
+    }
+  }
+
+  void stopActiveVideo() {
+    if (onStopPlayback != null) {
+      try {
+        onStopPlayback!();
+      } catch (_) {}
+    }
+    _activeVideoPath = null;
+    _activeVideoTitle = null;
+    _isVideoPlaying = false;
+    _activePositionMs = 0;
+    _activeDurationMs = 0;
+    onTogglePlayback = null;
+    onStopPlayback = null;
+    notifyListeners();
+  }
+
   int resumePosition(String filePath) => _resumeData[filePath]?['pos'] ?? 0;
   int videoDuration(String filePath) => _resumeData[filePath]?['dur'] ?? 0;
   bool hasResume(String filePath) => _resumeData.containsKey(filePath) && (_resumeData[filePath]?['pos'] ?? 0) > 0;

@@ -23,6 +23,7 @@ class MakawHomePortalPage extends StatelessWidget {
   final VoidCallback? onClearRecent;
   final void Function(HomeActivityItem item)? onDismissItem;
   final Widget? recentActivity;
+  final Widget? playerWidget;
 
   const MakawHomePortalPage({
     Key? key,
@@ -39,6 +40,7 @@ class MakawHomePortalPage extends StatelessWidget {
     this.onClearRecent,
     this.onDismissItem,
     this.recentActivity,
+    this.playerWidget,
   }) : super(key: key);
 
   static const _bg = Color(0xFF0F172A);
@@ -162,6 +164,10 @@ class MakawHomePortalPage extends StatelessWidget {
           _buildContinueSection(context, horizontal: true),
           const SizedBox(height: 20),
         ],
+        if (playerWidget != null) ...[
+          playerWidget!,
+          const SizedBox(height: 20),
+        ],
         _buildQuickActions(context),
         const SizedBox(height: 20),
         Row(
@@ -194,6 +200,10 @@ class MakawHomePortalPage extends StatelessWidget {
         const SizedBox(height: 18),
         if (continueItems.isNotEmpty) ...[
           _buildContinueSection(context),
+          const SizedBox(height: 18),
+        ],
+        if (playerWidget != null) ...[
+          playerWidget!,
           const SizedBox(height: 18),
         ],
         _buildQuickActions(context),

@@ -24,6 +24,7 @@ import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sig
 import 'package:google_sign_in/google_sign_in.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'core/platform/platform_paths.dart';
 import 'core/platform/system_launcher.dart';
@@ -470,11 +471,13 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool _drainingNav = false;
   ViewMode _viewMode = ViewMode.home;
   BrowserSubView _browserSubView = BrowserSubView.browsing;
-  bool get _isBrowserNewTab => _browserSubView == BrowserSubView.newTab;
+  bool get _isBrowserNewTab => !_isMakawHome && _browserSubView == BrowserSubView.newTab;
   bool get _showHomeScreen => _viewMode == ViewMode.home || _viewMode == ViewMode.newTab;
   bool get _isMakawHome => _viewMode == ViewMode.home;
   bool _ready = false;
   bool _miniPlayerDismissed = false;
+  bool _floatingPlayerMaximized = false;
+  Offset _floatingPlayerOffset = const Offset(16, 220);
   int? _lastMusicSongId;
   bool _sessionLoaded = false;
   Database? _db;
@@ -557,13 +560,12 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     }
     final page = _buildFeaturePage(view);
     if (page == null) return;
-    final wasHome = _isMakawHome;
-    final previousViewMode = _viewMode;
-    final previousBrowserSubView = _browserSubView;
     if (!mounted) return;
-    // Deferred through the queue: tapping an item while a hub/tool route is
-    // still animating would otherwise throw '!_debugLocked' and freeze every
-    // subsequent tap on the app.
+    // Base view underneath any tool route is always Makaw Home so exiting
+    // always returns level-by-level directly to Makaw Home.
+    _currentView = 'browser';
+    _viewMode = ViewMode.home;
+    _browserSubView = BrowserSubView.browsing;
     _scheduleNavigation(() {
       if (!mounted) return;
       Navigator.of(context).push(PageRouteBuilder(
@@ -575,16 +577,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         if (mounted) {
           _urlController.clear();
           setState(() {
-            if (wasHome) {
-              _currentView = 'browser';
-              _viewMode = ViewMode.home;
-              _browserSubView = BrowserSubView.browsing;
-            } else {
-              _viewMode = previousViewMode;
-              _browserSubView = previousBrowserSubView;
-            }
+            _currentView = 'browser';
+            _viewMode = ViewMode.home;
+            _browserSubView = BrowserSubView.browsing;
           });
-          if (!wasHome && previousViewMode == ViewMode.browsing) _syncUrlController();
         }
       });
     });
@@ -1279,18 +1275,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _pendingScrollRestore = lastScroll;
       _loadInActiveTab(lastUrl);
       debugPrint('MAKAW-SESSION restore browsing url=$lastUrl scroll=$lastScroll');
-    } else if (lastMode == ViewMode.newTab.name) {
-      _viewMode = ViewMode.newTab;
-      _browserSubView = BrowserSubView.newTab;
-    } else if (lastMode == ViewMode.home.name) {
+    } else {
+      // Makaw always defaults to Makaw Home on cold launch. You should only be
+      // able to reach the browser explicitly from Makaw Home.
       _viewMode = ViewMode.home;
-      _browserSubView = BrowserSubView.newTab;
-    } else if (lastMode != null) {
-      // A stale/invalid saved screen: land on the New Tab page, never on an
-      // empty browsing surface with no URL and no way back. (A truly fresh
-      // install has no lastMode and keeps the default portal home.)
-      _viewMode = ViewMode.newTab;
-      _browserSubView = BrowserSubView.newTab;
+      _browserSubView = BrowserSubView.browsing;
     }
     _sessionLoaded = true;
     if (mounted) setState(() {});
@@ -2734,7 +2723,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   return;
                 }
                 final c = _activeWebview;
-                if (c != null) {
+                if (c != null && !_isBrowserNewTab && _activeTab.url.isNotEmpty && _activeTab.url != 'about:blank') {
                   final canGoBack = await c.canGoBack();
                   if (canGoBack) {
                     c.goBack();
@@ -2888,6 +2877,9 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   void _pushEcosystemHub(Ecosystem hub) {
     if (!mounted) return;
+    _currentView = 'browser';
+    _viewMode = ViewMode.home;
+    _browserSubView = BrowserSubView.browsing;
     final route = PageRouteBuilder(
       settings: RouteSettings(name: '/ecosystem_hub/${hub.id}'),
       pageBuilder: (_, __, ___) {
@@ -2926,7 +2918,15 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     if (_hubRouteObserver.hasHub) {
       Navigator.of(context).pushReplacement(route);
     } else {
-      Navigator.of(context).push(route);
+      Navigator.of(context).push(route).then((_) {
+        if (mounted) {
+          setState(() {
+            _currentView = 'browser';
+            _viewMode = ViewMode.home;
+            _browserSubView = BrowserSubView.browsing;
+          });
+        }
+      });
     }
   }
 
@@ -3213,132 +3213,634 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
     }
   }
 
-  /// Global mini player overlay: shown on every screen except the full Music
-  /// player itself, so playback controls follow the user around the app.
-  Widget _buildGlobalMiniPlayer() {
-    if (_musicService.currentSong == null) return const SizedBox.shrink();
-    if (_currentView == 'music') return const SizedBox.shrink();
-    if (_miniPlayerDismissed) return const SizedBox.shrink();
-    return _buildMiniMusicPlayer();
+  Offset _clampFloatingOffset(Offset offset, double width, double height) {
+    final mq = MediaQuery.of(context);
+    final size = mq.size;
+    final topMin = mq.padding.top + 8.0;
+    final bottomMax = size.height - mq.padding.bottom - height - 8.0;
+    const leftMin = 8.0;
+    final rightMax = size.width - width - 8.0;
+
+    final dx = offset.dx.clamp(leftMin, math.max(leftMin, rightMax));
+    final dy = offset.dy.clamp(topMin, math.max(topMin, bottomMax));
+    return Offset(dx.toDouble(), dy.toDouble());
   }
 
-  Widget _buildMiniMusicPlayer() {
+  void _stopAndClosePlayer() {
+    _musicService.clearQueue();
+    _videoService.stopActiveVideo();
+    if (mounted) {
+      setState(() {
+        _miniPlayerDismissed = true;
+        _floatingPlayerMaximized = false;
+      });
+    }
+  }
+
+  /// Global floating player overlay: when outside the Media Player tool and
+  /// NOT on Home (e.g. Browser, Files, Studio, Terminal, Settings), it renders as
+  /// a draggable floating square FAB play/pause button (or expanded player) that
+  /// can be moved anywhere, maximized, minimized, closed, or swiped away.
+  /// On Makaw Home, it settles directly into the page as an inline widget tile!
+  Widget _buildGlobalMiniPlayer() => _buildGlobalFloatingPlayer();
+
+  Widget _buildGlobalFloatingPlayer() {
+    // 1. On Makaw Home: settles as inline widget, NEVER floats over footers/screens!
+    if (_isMakawHome) return const SizedBox.shrink();
+    // 2. In full player tools: full-screen player already active!
+    if (_currentView == 'music' || _currentView == 'player') return const SizedBox.shrink();
+    if (_miniPlayerDismissed) return const SizedBox.shrink();
+
     final song = _musicService.currentSong;
-    if (song == null) return SizedBox.shrink();
-    if (_miniPlayerDismissed) return SizedBox.shrink();
-    final progress = _musicService.duration.inMilliseconds > 0
-        ? (_musicService.position.inMilliseconds / _musicService.duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-    final player = GestureDetector(
-      onTap: () => _switchToView('music'),
-      onLongPress: () => _showMiniPlayerQueue(),
-      onHorizontalDragEnd: (details) {
-        if (details.primaryVelocity == null) return;
-        if (details.primaryVelocity! < -100) {
-          _musicService.nextSong();
-        } else if (details.primaryVelocity! > 100) {
-          _musicService.previousSong();
-        }
-      },
-      onVerticalDragEnd: (details) {
-        if (details.primaryVelocity != null && details.primaryVelocity! < -200) {
-          _switchToView('music');
-        }
-      },
-      child: Container(
-        height: 68,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          border: Border(top: BorderSide(color: Theme.of(context).cardColor, width: 1)),
-        ),
-        child: Column(
-          children: [
-            // Ultra-thin 2px progress indicator
-            SizedBox(
-              height: 2,
-              child: LinearProgressIndicator(
-                value: progress,
-                backgroundColor: Theme.of(context).cardColor,
-                valueColor: AlwaysStoppedAnimation(kAccentTeal),
-                minHeight: 2,
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 44, height: 44,
-                      decoration: BoxDecoration(
-                        color: kAccentTeal.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(Icons.music_note, color: kAccentTeal, size: 22),
-                    ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(song.displayTitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          Text(song.displayArtist, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.skip_previous, color: Theme.of(context).colorScheme.onSurface, size: 22),
-                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-                      padding: EdgeInsets.zero,
-                      onPressed: () => _musicService.previousSong(),
-                    ),
-                    IconButton(
-                      icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: kAccentTeal, size: 32),
-                      constraints: BoxConstraints(minWidth: 36, minHeight: 36),
-                      padding: EdgeInsets.zero,
-                      onPressed: () => _musicService.togglePlayPause(),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.skip_next, color: Theme.of(context).colorScheme.onSurface, size: 22),
-                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-                      padding: EdgeInsets.zero,
-                      onPressed: () => _musicService.nextSong(),
-                    ),
-                    IconButton(
-                      tooltip: 'Queue',
-                      icon: Icon(Icons.queue_music, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7), size: 20),
-                      constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-                      padding: EdgeInsets.zero,
-                      onPressed: _showMiniPlayerQueue,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+    final hasMusic = song != null;
+    final activeVideo = _videoService.activeVideoPath;
+    final lastVideo = _videoService.lastInProgress;
+    final hasVideo = !hasMusic && (activeVideo != null || lastVideo != null);
+    if (!hasMusic && !hasVideo) return const SizedBox.shrink();
+
+    final size = MediaQuery.of(context).size;
+    final double playerW = _floatingPlayerMaximized
+        ? (hasVideo ? (math.min(size.width - 24, 280.0)).toDouble() : (math.min(size.width - 24, 360.0)).toDouble())
+        : 56.0;
+    final double playerH = _floatingPlayerMaximized
+        ? (hasVideo ? 150.0 : 68.0)
+        : 56.0;
+
+    final clampedOffset = _clampFloatingOffset(_floatingPlayerOffset, playerW, playerH);
+
+    return Positioned(
+      left: clampedOffset.dx,
+      top: clampedOffset.dy,
+      child: GestureDetector(
+        onPanUpdate: (details) {
+          setState(() {
+            _floatingPlayerOffset = _clampFloatingOffset(
+              _floatingPlayerOffset + details.delta,
+              playerW,
+              playerH,
+            );
+          });
+        },
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity != null && details.primaryVelocity!.abs() > 180) {
+            _stopAndClosePlayer();
+          }
+        },
+        child: Material(
+          color: Colors.transparent,
+          child: _floatingPlayerMaximized
+              ? _buildExpandedFloatingPlayer(hasVideo: hasVideo, width: playerW, height: playerH)
+              : _buildSquareFabPlayer(hasVideo: hasVideo),
         ),
       ),
     );
-    // On web: allow swipe to dismiss (without stopping playback)
-    if (kIsWeb) {
-      return Dismissible(
-        key: ValueKey('mini_player_${_musicService.currentSong?.id}'),
-        direction: DismissDirection.horizontal,
-        onDismissed: (_) {
-          setState(() { _miniPlayerDismissed = true; });
-        },
-        background: Container(
-          height: 68,
-          color: Colors.red.shade400,
-          alignment: Alignment.centerRight,
-          padding: EdgeInsets.only(right: 16),
-          child: Icon(Icons.close, color: Colors.white),
+  }
+
+  Widget _buildSquareFabPlayer({required bool hasVideo}) {
+    final isPlaying = hasVideo
+        ? _videoService.isVideoPlaying
+        : _musicService.isPlaying;
+
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: hasVideo ? const Color(0xFF818CF8) : kAccentTeal,
+          width: 1.5,
         ),
-        child: player,
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Play / Pause central button
+          InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () {
+              if (hasVideo) {
+                _videoService.toggleActiveVideoPlayPause();
+              } else {
+                _musicService.togglePlayPause();
+              }
+            },
+            child: Center(
+              child: Icon(
+                isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                color: hasVideo ? const Color(0xFF818CF8) : kAccentTeal,
+                size: 30,
+              ),
+            ),
+          ),
+          // Maximize icon button (top-right)
+          Positioned(
+            top: 2,
+            right: 2,
+            child: InkWell(
+              onTap: () => setState(() => _floatingPlayerMaximized = true),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.open_in_full_rounded,
+                  size: 11,
+                  color: Colors.white.withOpacity(0.7),
+                ),
+              ),
+            ),
+          ),
+          // Close button (top-left)
+          Positioned(
+            top: 2,
+            left: 2,
+            child: InkWell(
+              onTap: _stopAndClosePlayer,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 11,
+                  color: Colors.white.withOpacity(0.5),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpandedFloatingPlayer({
+    required bool hasVideo,
+    required double width,
+    required double height,
+  }) {
+    if (hasVideo) {
+      final videoPath = _videoService.activeVideoPath ?? _videoService.lastInProgress ?? '';
+      final title = p.basename(videoPath);
+      final isPlaying = _videoService.isVideoPlaying;
+      final progress = _videoService.resumeProgress(videoPath);
+
+      return Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F172A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF818CF8).withOpacity(0.6), width: 1.5),
+          boxShadow: const [
+            BoxShadow(color: Color(0x77000000), blurRadius: 14, offset: Offset(0, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.drag_indicator, size: 16, color: Colors.white38),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                InkWell(
+                  onTap: () => setState(() => _floatingPlayerMaximized = false),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.close_fullscreen_rounded, size: 16, color: Colors.white70),
+                  ),
+                ),
+                InkWell(
+                  onTap: _stopAndClosePlayer,
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.close_rounded, size: 16, color: Colors.white54),
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: Icon(isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_filled_rounded,
+                      color: const Color(0xFF818CF8), size: 36),
+                  onPressed: () {
+                    if (_videoService.activeVideoPath != null) {
+                      _videoService.toggleActiveVideoPlayPause();
+                    } else if (videoPath.isNotEmpty) {
+                      _openFile(videoPath);
+                    }
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.open_in_new_rounded, color: Colors.white70, size: 22),
+                  tooltip: 'Open in player',
+                  onPressed: () => _openFile(videoPath),
+                ),
+              ],
+            ),
+            const Spacer(),
+            if (progress > 0)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  backgroundColor: const Color(0xFF334155),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
+                  minHeight: 2,
+                ),
+              ),
+          ],
+        ),
       );
     }
-    return player;
+
+    final song = _musicService.currentSong;
+    if (song == null) return const SizedBox.shrink();
+    final progress = _musicService.duration.inMilliseconds > 0
+        ? (_musicService.position.inMilliseconds / _musicService.duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kAccentTeal.withOpacity(0.7), width: 1.5),
+        boxShadow: const [
+          BoxShadow(color: Color(0x66000000), blurRadius: 14, offset: Offset(0, 6)),
+        ],
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 6, top: 6),
+            child: Row(
+              children: [
+                const Icon(Icons.drag_indicator, size: 16, color: Colors.white38),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: InkWell(
+                    onTap: () => _switchToView('music'),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(song.displayTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                        Text(song.displayArtist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 20),
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  padding: EdgeInsets.zero,
+                  onPressed: () => _musicService.previousSong(),
+                ),
+                IconButton(
+                  icon: Icon(_musicService.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_filled_rounded,
+                      color: kAccentTeal, size: 30),
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  padding: EdgeInsets.zero,
+                  onPressed: () => _musicService.togglePlayPause(),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.skip_next_rounded, color: Colors.white70, size: 20),
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  padding: EdgeInsets.zero,
+                  onPressed: () => _musicService.nextSong(),
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: () => setState(() => _floatingPlayerMaximized = false),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.close_fullscreen_rounded, size: 15, color: Colors.white70),
+                  ),
+                ),
+                InkWell(
+                  onTap: _stopAndClosePlayer,
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.close_rounded, size: 15, color: Colors.white54),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+            child: LinearProgressIndicator(
+              value: progress,
+              backgroundColor: const Color(0xFF334155),
+              valueColor: const AlwaysStoppedAnimation<Color>(kAccentTeal),
+              minHeight: 2.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Home Player Widget: settles cleanly into the Makaw Home page below the
+  /// current tiles, never floating and never blocking the footer.
+  Widget? _buildHomePlayerWidget() {
+    if (_musicService.currentSong != null && !_miniPlayerDismissed) {
+      return _buildHomeMusicPlayerCard();
+    }
+    final activeVideo = _videoService.activeVideoPath;
+    final lastVideo = _videoService.lastInProgress;
+    final videoPath = activeVideo ?? lastVideo;
+    if (videoPath != null &&
+        videoPath.isNotEmpty &&
+        !_dismissedHomeItems.contains('video_tile_$videoPath')) {
+      return _buildHomeVideoPlayerCard(videoPath);
+    }
+    return null;
+  }
+
+  Widget _buildHomeMusicPlayerCard() {
+    final song = _musicService.currentSong;
+    if (song == null) return const SizedBox.shrink();
+    final progress = _musicService.duration.inMilliseconds > 0
+        ? (_musicService.position.inMilliseconds / _musicService.duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF334155)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 8,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              InkWell(
+                onTap: () => _switchToView('music'),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: kAccentTeal.withOpacity(0.18),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.music_note_rounded, color: kAccentTeal, size: 24),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: InkWell(
+                  onTap: () => _switchToView('music'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        song.displayTitle,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${song.displayArtist} · ${_musicService.isPlaying ? 'Playing' : 'Paused'}',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.65),
+                          fontSize: 12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 22),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
+                tooltip: 'Previous',
+                onPressed: () => _musicService.previousSong(),
+              ),
+              IconButton(
+                icon: Icon(
+                  _musicService.isPlaying
+                      ? Icons.pause_circle_filled_rounded
+                      : Icons.play_circle_filled_rounded,
+                  color: kAccentTeal,
+                  size: 36,
+                ),
+                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+                padding: EdgeInsets.zero,
+                tooltip: _musicService.isPlaying ? 'Pause' : 'Play',
+                onPressed: () => _musicService.togglePlayPause(),
+              ),
+              IconButton(
+                icon: const Icon(Icons.skip_next_rounded, color: Colors.white70, size: 22),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
+                tooltip: 'Next',
+                onPressed: () => _musicService.nextSong(),
+              ),
+              const SizedBox(width: 2),
+              IconButton(
+                icon: const Icon(Icons.queue_music_rounded, color: Colors.white70, size: 20),
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                padding: EdgeInsets.zero,
+                tooltip: 'Queue',
+                onPressed: _showMiniPlayerQueue,
+              ),
+              const SizedBox(width: 2),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                padding: EdgeInsets.zero,
+                tooltip: 'Stop & close',
+                onPressed: () {
+                  setState(() {
+                    _musicService.clearQueue();
+                    _miniPlayerDismissed = true;
+                  });
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: progress,
+              backgroundColor: const Color(0xFF334155),
+              valueColor: const AlwaysStoppedAnimation<Color>(kAccentTeal),
+              minHeight: 2.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeVideoPlayerCard(String videoPath) {
+    final title = p.basename(videoPath);
+    final pos = _videoService.resumePosition(videoPath);
+    final dur = _videoService.videoDuration(videoPath);
+    final progress = _videoService.resumeProgress(videoPath);
+    final isPlaying = _videoService.isVideoPlaying && _videoService.activeVideoPath == videoPath;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF334155)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 8,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              InkWell(
+                onTap: () => _openFile(videoPath),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF818CF8).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.movie_outlined, color: Color(0xFF818CF8), size: 24),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: InkWell(
+                  onTap: () => _openFile(videoPath),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        dur > 0
+                            ? 'Continue watching · ${_homeClock(pos)} / ${_homeClock(dur)}'
+                            : 'Continue watching · ${_homeClock(pos)}',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.65),
+                          fontSize: 12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  isPlaying
+                      ? Icons.pause_circle_filled_rounded
+                      : Icons.play_circle_filled_rounded,
+                  color: const Color(0xFF818CF8),
+                  size: 36,
+                ),
+                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+                padding: EdgeInsets.zero,
+                tooltip: isPlaying ? 'Pause' : 'Resume watching',
+                onPressed: () {
+                  if (_videoService.activeVideoPath == videoPath && _videoService.onTogglePlayback != null) {
+                    _videoService.toggleActiveVideoPlayPause();
+                  } else {
+                    _openFile(videoPath);
+                  }
+                },
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                padding: EdgeInsets.zero,
+                tooltip: 'Dismiss',
+                onPressed: () {
+                  setState(() {
+                    _videoService.clearResume(videoPath);
+                    _videoService.stopActiveVideo();
+                    _dismissedHomeItems.add('video_tile_$videoPath');
+                  });
+                },
+              ),
+            ],
+          ),
+          if (progress > 0) ...[
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: progress,
+                backgroundColor: const Color(0xFF334155),
+                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
+                minHeight: 2.5,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   void _showMiniPlayerQueue() {
@@ -4393,14 +4895,8 @@ TappableIcon(
     });
   }
 
-  /// Browser home is the New Tab page. There is no separate "Browser Hub".
-  void _goBrowserHome() {
-    _enterBrowserSubView(BrowserSubView.newTab);
-    if (mounted) _saveSession();
-  }
-
   void _goHome() {
-    _goBrowserHome();
+    _goToMakawHome();
   }
 
   void _goToNtp({bool focusOmnibox = false}) {
@@ -4523,6 +5019,7 @@ TappableIcon(
       onNewTab: _openBrowserTab,
       continueItems: _buildHomeContinueItems(),
       recentItems: _buildHomeRecentItems(),
+      playerWidget: _buildHomePlayerWidget(),
       onClearContinue: _clearHomeContinueGroup,
       onClearRecent: _clearHomeRecentGroup,
       onDismissItem: _dismissHomeActivityItem,
@@ -4534,7 +5031,13 @@ TappableIcon(
   List<HomeActivityItem> _buildHomeContinueItems() {
     final items = <HomeActivityItem>[];
     final song = _musicService.currentSong;
-    if (song != null && !_dismissedHomeItems.contains('music_current')) {
+    final showMusicWidget = song != null && !_miniPlayerDismissed;
+    final activeOrLastVideo = _videoService.activeVideoPath ?? _videoService.lastInProgress;
+    final showVideoWidget = !showMusicWidget &&
+        activeOrLastVideo != null &&
+        !_dismissedHomeItems.contains('video_tile_$activeOrLastVideo');
+
+    if (song != null && !showMusicWidget && !_dismissedHomeItems.contains('music_current')) {
       final item = HomeActivityItem(
         id: 'music_current',
         title: song.displayTitle,
@@ -4548,7 +5051,7 @@ TappableIcon(
       items.add(item);
     }
     final inProgressVideo = _videoService.lastInProgress;
-    if (inProgressVideo != null && !_dismissedHomeItems.contains('video_$inProgressVideo')) {
+    if (inProgressVideo != null && !showVideoWidget && !_dismissedHomeItems.contains('video_$inProgressVideo')) {
       final item = HomeActivityItem(
         id: 'video_$inProgressVideo',
         title: p.basename(inProgressVideo),
