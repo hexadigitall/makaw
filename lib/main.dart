@@ -589,9 +589,7 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
         _MakawHomeState.instance?._currentView == 'media' ||
         _MakawHomeState.instance?._currentView == 'music' ||
         _MakawHomeState.instance?._currentView == 'player' ||
-        _MakawHomeState.instance?._activeToolRoute == 'media' ||
-        _MakawHomeState.instance?._activeToolRoute == 'music' ||
-        _MakawHomeState.instance?._activeToolRoute == 'player';
+        (_MakawHomeState.instance?._hasActiveMediaTool ?? false);
 
     // 1. On Makaw Home: settles as inline widget, NEVER floats over footers/screens!
     // 2. In media player tools: dedicated docked bottom miniplayer is active!
@@ -946,7 +944,13 @@ class MakawHome extends ConsumerStatefulWidget {
 
 class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserver {
   static _MakawHomeState? instance;
-  String? _activeToolRoute;
+  final List<String> _activeToolRoutes = [];
+  bool get _hasActiveMediaTool =>
+      _activeToolRoutes.isNotEmpty &&
+      (_activeToolRoutes.last == 'media' ||
+       _activeToolRoutes.last == 'music' ||
+       _activeToolRoutes.last == 'player' ||
+       _activeToolRoutes.last == 'video_player');
   String _currentView = 'browser';
   final List<VoidCallback> _navQueue = [];
   bool _drainingNav = false;
@@ -1042,7 +1046,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     if (!mounted) return;
     // Base view underneath any tool route is always Makaw Home so exiting
     // always returns level-by-level directly to Makaw Home.
-    _activeToolRoute = view;
+    _activeToolRoutes.add(view);
     _currentView = 'browser';
     _viewMode = ViewMode.home;
     _browserSubView = BrowserSubView.browsing;
@@ -1058,7 +1062,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         if (mounted) {
           _urlController.clear();
           setState(() {
-            _activeToolRoute = null;
+            _activeToolRoutes.remove(view);
             _currentView = 'browser';
             _viewMode = ViewMode.home;
             _browserSubView = BrowserSubView.browsing;
@@ -3135,9 +3139,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         inFullPlayer: _currentView == 'music' ||
             _currentView == 'player' ||
             _currentView == 'media' ||
-            _activeToolRoute == 'music' ||
-            _activeToolRoute == 'player' ||
-            _activeToolRoute == 'media',
+            _hasActiveMediaTool,
       );
     });
   }
@@ -5864,10 +5866,19 @@ TappableIcon(
     );
 
     if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp'].contains(ext)) {
+      _activeToolRoutes.add('video_player');
+      _updateGlobalPlayerState();
       Navigator.of(context).push(fastRoute(DirectVideoPlayer(
         filePath: filePath,
         title: filePath.split('\\').last.split('/').last,
-      )));
+      ))).then((_) {
+        if (mounted) {
+          setState(() {
+            _activeToolRoutes.remove('video_player');
+          });
+          _updateGlobalPlayerState();
+        }
+      });
       return;
     }
     if (ext == 'pdf') {
