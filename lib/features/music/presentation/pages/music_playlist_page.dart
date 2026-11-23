@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../data/services/music_player_service.dart';
 import '../../../media/data/services/media_thumbnail_service.dart';
+import '../../../../core/services/global_player_state.dart';
 
 class MusicPlaylistPage extends StatefulWidget {
   final MusicPlayerService service;
@@ -415,8 +416,13 @@ class _MusicPlaylistPageState extends State<MusicPlaylistPage> {
   Widget build(BuildContext context) {
     final songs = _songs;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        GlobalPlayerState.instance.popToolRoute('playlist');
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0F0F1A),
       body: SafeArea(
         child: Column(
           children: [
@@ -479,6 +485,7 @@ class _MusicPlaylistPageState extends State<MusicPlaylistPage> {
             if (s.currentSong != null) _buildMiniPlayer(),
           ],
         ),
+      ),
       ),
     );
   }

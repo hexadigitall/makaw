@@ -260,6 +260,7 @@ class MainActivity : FlutterActivity() {
                 "startForeground" -> {
                     val title = call.argument<String>("title") ?: "Unknown"
                     val artist = call.argument<String>("artist") ?: ""
+                    val filePath = call.argument<String>("filePath") ?: ""
                     val isPlaying = call.argument<Boolean>("isPlaying") ?: false
                     val position = (call.argument<Number>("position")?.toLong() ?: 0L)
                     val duration = (call.argument<Number>("duration")?.toLong() ?: 0L)
@@ -267,6 +268,7 @@ class MainActivity : FlutterActivity() {
                         action = MediaSessionService.ACTION_SHOW
                         putExtra(MediaSessionService.EXTRA_TITLE, title)
                         putExtra(MediaSessionService.EXTRA_ARTIST, artist)
+                        putExtra(MediaSessionService.EXTRA_FILE_PATH, filePath)
                         putExtra(MediaSessionService.EXTRA_IS_PLAYING, isPlaying)
                         putExtra(MediaSessionService.EXTRA_POSITION, position)
                         putExtra(MediaSessionService.EXTRA_DURATION, duration)
@@ -283,6 +285,7 @@ class MainActivity : FlutterActivity() {
                     if (serviceStarted) {
                         val title = call.argument<String>("title") ?: "Unknown"
                         val artist = call.argument<String>("artist") ?: ""
+                        val filePath = call.argument<String>("filePath") ?: ""
                         val isPlaying = call.argument<Boolean>("isPlaying") ?: false
                         val position = (call.argument<Number>("position")?.toLong() ?: 0L)
                         val duration = (call.argument<Number>("duration")?.toLong() ?: 0L)
@@ -290,6 +293,7 @@ class MainActivity : FlutterActivity() {
                             action = MediaSessionService.ACTION_SHOW
                             putExtra(MediaSessionService.EXTRA_TITLE, title)
                             putExtra(MediaSessionService.EXTRA_ARTIST, artist)
+                            putExtra(MediaSessionService.EXTRA_FILE_PATH, filePath)
                             putExtra(MediaSessionService.EXTRA_IS_PLAYING, isPlaying)
                             putExtra(MediaSessionService.EXTRA_POSITION, position)
                             putExtra(MediaSessionService.EXTRA_DURATION, duration)

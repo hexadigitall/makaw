@@ -294,7 +294,13 @@ class MusicPlayerService extends ChangeNotifier {
   void playSong(int index, {List<SongInfo>? fromList}) {
     final list = fromList ?? _allSongs;
     if (index < 0 || index >= list.length) return;
-    if (fromList != null || _queue.isEmpty) _queue = List.from(list);
+    if (fromList != null || _queue.isEmpty) {
+      _queue = List.from(list);
+      if (fromList != null) {
+        _isShuffled = false;
+        _savedQueue = null;
+      }
+    }
     _currentIndex = index;
     _playSource(_queue[_currentIndex]);
   }

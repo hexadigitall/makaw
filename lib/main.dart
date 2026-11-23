@@ -361,6 +361,7 @@ Future<void> _initMediaNotification() async {
         notif.show(
           title: song.displayTitle,
           artist: song.displayArtist,
+          filePath: song.filePath,
           isPlaying: globalMusicService.isPlaying,
           position: globalMusicService.position,
           duration: globalMusicService.duration,
@@ -1806,6 +1807,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       _viewMode = ViewMode.home;
       _browserSubView = BrowserSubView.browsing;
     }
+    final savedDismissed = prefs.getStringList('dismissed_home_items');
+    if (savedDismissed != null) {
+      _dismissedHomeItems.addAll(savedDismissed);
+    }
     _sessionLoaded = true;
     if (mounted) setState(() {});
   }
@@ -1828,6 +1833,15 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     await prefs.setString('last_view_mode', _viewMode.name);
     await prefs.setString('last_browser_url', activeTab.incognito ? '' : activeTab.url);
     await prefs.setDouble('last_scroll_y', _lastScrollY);
+    await prefs.setStringList('dismissed_home_items', _dismissedHomeItems.toList());
+  }
+
+  Future<void> _persistDismissedHomeItems() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('dismissed_home_items', _dismissedHomeItems.toList());
+      await _exportAppData();
+    } catch (_) {}
   }
 
   // ─── Browser Tabs ───────────────────────────────────────────────────────────
@@ -2081,7 +2095,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     }
   }
 
-  void _navigateOrOpenNewTab(String raw) {
+  void _navigateOrOpenNewTab(String raw, {bool? incognito}) {
+    final useIncognito = incognito ?? _isIncognitoActive;
     String url;
     if (raw.contains(' ') || (!raw.contains('.') && !raw.contains('://'))) {
       url = 'https://www.google.com/search?q=${Uri.encodeComponent(raw)}';
@@ -2091,7 +2106,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
     if (_browserTabs.isEmpty) {
       debugPrint('MAKAW-NAV emptyTabs -> create url=$url c_is_null=${_activeWebview == null}');
-      _createBrowserTab(url: url);
+      _createBrowserTab(incognito: useIncognito, url: url);
       final tab = _activeTab;
       tab.pushHistory(url);
       _suggestDebounce?.cancel();
@@ -2105,7 +2120,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _viewMode = ViewMode.browsing;
         _searchSuggestions = [];
       });
-      if (!tab.incognito && !_isIncognitoActive) {
+      if (!tab.incognito && !useIncognito) {
         _addHistoryEntry(url, url);
       }
       _saveSession();
@@ -2133,7 +2148,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _viewMode = ViewMode.browsing;
         _searchSuggestions = [];
       });
-      if (!tab.incognito && !_isIncognitoActive) {
+      if (!tab.incognito && !useIncognito) {
         _addHistoryEntry(url, url);
       }
       _saveSession();
@@ -2146,8 +2161,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         debugPrint('MAKAW-NAV isNtp setPending=$_pendingNavigationUrl');
       }
     } else {
-      debugPrint('MAKAW-NAV newTab(from existing) create url=$url');
-      _createBrowserTab(url: url);
+      debugPrint('MAKAW-NAV newTab(from existing) create url=$url incognito=$useIncognito');
+      _createBrowserTab(incognito: useIncognito, url: url);
       final newTab = _activeTab;
       newTab.pushHistory(url);
       _suggestDebounce?.cancel();
@@ -2161,6 +2176,11 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _viewMode = ViewMode.browsing;
         _searchSuggestions = [];
       });
+      if (!newTab.incognito && !useIncognito) {
+        _addHistoryEntry(url, url);
+      }
+      _saveSession();
+      _pendingNavigationUrl = url;
     }
   }
 
@@ -2923,9 +2943,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         }).toList();
         _shortcutsLoaded = true;
       }
-      if (data['history'] is List && _browserHistory.isEmpty) {
-        _browserHistory.addAll((data['history'] as List).cast<Map<String, dynamic>>());
-      }
+      // History is loaded from SQLite DB; do not revive cleared history from JSON
       if (data['themeMode'] is String) {
         widget.onThemeChanged?.call(data['themeMode'] as String);
       }
@@ -4015,6 +4033,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                     _videoService.stopActiveVideo();
                     _dismissedHomeItems.add('video_tile_$videoPath');
                   });
+                  _persistDismissedHomeItems();
                 },
               ),
             ],
@@ -4118,22 +4137,14 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildMusicPlayerPage() {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) {
-          Navigator.of(context).pop();
-        }
+    return MusicPlayerWidget(
+      onOpenVideos: () {
+        Navigator.of(context).pop();
+        _switchToView('player');
       },
-      child: MusicPlayerWidget(
-        onOpenVideos: () {
-          Navigator.of(context).pop();
-          _switchToView('player');
-        },
-        onOpenSettings: () {
-          _showToast('Music settings coming soon');
-        },
-      ),
+      onOpenSettings: () {
+        _showToast('Music settings coming soon');
+      },
     );
   }
 
@@ -5046,7 +5057,7 @@ TappableIcon(
   Widget _buildWebviewArea() {
     final activeIndex = _browserTabs.indexWhere((t) => t.id == _activeBrowserTabId);
     return Container(
-      color: kSurfaceBase,
+      color: _isIncognitoActive ? const Color(0xFF0F172A) : Colors.white,
       padding: EdgeInsets.only(top: _isFullscreen ? 0 : MediaQuery.of(context).padding.top),
       child: Stack(
         children: [
@@ -5289,7 +5300,7 @@ TappableIcon(
             subtitle: file.isDirectory ? 'Folder' : 'File',
             icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
             accent: const Color(0xFF34D399),
-            onTap: () => _openFileExplorerAt(file.path),
+            onTap: () => file.isDirectory ? _openFileExplorerAt(file.path) : _openFile(file.path),
             onDismiss: () => _dismissHomeActivityItemById(id),
           );
           items.add(item);
@@ -5314,7 +5325,7 @@ TappableIcon(
         subtitle: file.isDirectory ? 'Folder' : 'File',
         icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
         accent: const Color(0xFF34D399),
-        onTap: () => _openFileExplorerAt(file.path),
+        onTap: () => file.isDirectory ? _openFileExplorerAt(file.path) : _openFile(file.path),
         onDismiss: () => _dismissHomeActivityItemById(id),
       );
       items.add(item);
@@ -5365,6 +5376,7 @@ TappableIcon(
         _videoService.clearResume(path);
       }
     });
+    _persistDismissedHomeItems();
   }
 
   void _dismissHomeActivityItem(HomeActivityItem item) {
@@ -5390,6 +5402,7 @@ TappableIcon(
         }
       }
     });
+    _persistDismissedHomeItems();
   }
 
   void _clearHomeRecentGroup() {
@@ -5404,6 +5417,7 @@ TappableIcon(
       _browserHistory.clear();
       HistoryService.clearAll();
     });
+    _persistDismissedHomeItems();
   }
 
   String _homeClock(int ms) {
@@ -6187,7 +6201,7 @@ TappableIcon(
     'galaksion.com','monuanceli.com','surmounttemperbooklet.com','lievestcrasser.com',
     'responservbzh.icu','aclib.js','acscdn.com','d33f51dyacx7bd.cloudfront.net',
     'dpjf9a2rbjbvp.cloudfront.net','1xbet','bet9ja','betway','bet365',
-    'casino.com','pornhub','xvideos','xhamster','redtube','youporn',
+    'casino.com',
     'popunder','clickunder','adnxs.com','criteo.com','pubmatic.com',
     'outbrain.com','taboola.com','revcontent.com','mgid.com','spotx.tv',
     'smartadserver.com','rubiconproject.com','indexww.com','openx.net',
@@ -6197,7 +6211,6 @@ TappableIcon(
 
   static final _blockedRedirectKeywords = [
     'casino','betting','gambling','slots','poker','blackjack',
-    'porn','xxx','sex','nude','nsfw','adult',
     'popunder','clickunder','popads','popcash',
     'malware','phishing','keylogger','ransomware',
     'apkpure','apk-dl','download-app','install-app',
@@ -6261,8 +6274,8 @@ TappableIcon(
   // 1. Block location.replace / location.assign redirects to known bad domains only
   try {
     var _blockedKw = [
-      'casino','betting','gambling','slots','poker','porn','xxx','sex','nude','nsfw',
-      'adult','popunder','clickunder','popads','malware','phishing','adsterra',
+      'casino','betting','gambling','slots','poker',
+      'popunder','clickunder','popads','malware','phishing','adsterra',
       'popcash','monetag','propellerads','exoclick','adcash','onclickmega','trafficjunky',
       'adxcore','adnxs','zeroredirect','smartadserver','doubleclick'
     ];
@@ -6299,7 +6312,7 @@ TappableIcon(
     // 3. Neutralize transparent full-screen clickjacking overlays
     function removeClickjackOverlays() {
       try {
-        var all = document.querySelectorAll('div, a, iframe, section');
+        var all = document.querySelectorAll('div, iframe');
         var w = window.innerWidth || document.documentElement.clientWidth;
         var h = window.innerHeight || document.documentElement.clientHeight;
         for (var i = 0; i < all.length; i++) {
@@ -6314,7 +6327,6 @@ TappableIcon(
                 var bg = style.backgroundColor;
                 if (op < 0.15 || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') {
                   el.style.setProperty('display', 'none', 'important');
-                  el.style.setProperty('pointer-events', 'none', 'important');
                 }
               }
             }
@@ -6340,7 +6352,7 @@ TappableIcon(
       javaScriptEnabled: true,
       javaScriptCanOpenWindowsAutomatically: false,
       supportMultipleWindows: true,
-      transparentBackground: true,
+      transparentBackground: false,
       mediaPlaybackRequiresUserGesture: false,
       allowsInlineMediaPlayback: true,
       allowsPictureInPictureMediaPlayback: true,
@@ -6436,8 +6448,8 @@ TappableIcon(
           }
         } catch (_) {}
 
-        debugPrint('MAKAW-POPUP open-new-tab $targetUrl');
-        _navigateOrOpenNewTab(targetUrl);
+        debugPrint('MAKAW-POPUP open-new-tab $targetUrl incognito=${tab.incognito}');
+        _navigateOrOpenNewTab(targetUrl, incognito: tab.incognito);
         return true;
       },
       onWebViewCreated: (ctrl) {
@@ -6611,6 +6623,18 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_isTrustedSite(url)) {
           return NavigationActionPolicy.ALLOW;
         }
+        // Same-origin navigation: always allow!
+        try {
+          final curUri = await ctrl.getUrl();
+          final targetUri = Uri.parse(url);
+          if (curUri != null && curUri.host.isNotEmpty && targetUri.host.isNotEmpty) {
+            final curBase = curUri.host.replaceAll(RegExp(r'^www\.'), '').toLowerCase();
+            final targetBase = targetUri.host.replaceAll(RegExp(r'^www\.'), '').toLowerCase();
+            if (curBase == targetBase || curBase.endsWith(targetBase) || targetBase.endsWith(curBase)) {
+              return NavigationActionPolicy.ALLOW;
+            }
+          }
+        } catch (_) {}
         // 2. Block known ad/tracker/malware domains
         if (_contentBlocker.shouldBlockUrl(url)) {
           return NavigationActionPolicy.CANCEL;

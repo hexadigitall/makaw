@@ -51,6 +51,7 @@ class MediaNotificationService {
   Future<void> show({
     required String title,
     required String artist,
+    String? filePath,
     required bool isPlaying,
     required Duration position,
     required Duration duration,
@@ -59,6 +60,7 @@ class MediaNotificationService {
       await _channel.invokeMethod('startForeground', {
         'title': title,
         'artist': artist,
+        'filePath': filePath ?? '',
         'isPlaying': isPlaying,
         'position': position.inMilliseconds,
         'duration': duration.inMilliseconds,
@@ -69,6 +71,7 @@ class MediaNotificationService {
   Future<void> update({
     required String title,
     required String artist,
+    String? filePath,
     required bool isPlaying,
     required Duration position,
     required Duration duration,
@@ -77,6 +80,7 @@ class MediaNotificationService {
       await _channel.invokeMethod('updateNotification', {
         'title': title,
         'artist': artist,
+        'filePath': filePath ?? '',
         'isPlaying': isPlaying,
         'position': position.inMilliseconds,
         'duration': duration.inMilliseconds,

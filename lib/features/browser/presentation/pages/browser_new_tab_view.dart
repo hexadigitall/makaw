@@ -183,7 +183,7 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
     final count = widget.tabCount;
     return Container(
       color: bg ?? const Color(0xFF0B1120),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
       child: Row(
         children: [
           IconButton(
@@ -194,23 +194,25 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
           InkWell(
             onTap: widget.onShowTabs,
             customBorder: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.filter_none_rounded, color: Colors.white70, size: 20),
-                  const SizedBox(width: 6),
-                  Text(
-                    count == 0 ? '+' : '$count',
-                    style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
-                  ),
-                ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white38, width: 1.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                count == 0 ? '+' : '$count',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
               ),
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _buildChromeSearchBar(context),
+          ),
+          const SizedBox(width: 4),
           IconButton(
             tooltip: 'Menu',
             icon: const Icon(Icons.more_horiz, color: Colors.white),
@@ -231,28 +233,22 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
         child: SafeArea(
           child: Column(
             children: [
-              if (!desktop) _buildTopBar(context),
+              _buildTopBar(context),
               Expanded(
                 child: SingleChildScrollView(
                   padding: EdgeInsets.symmetric(
                     horizontal: desktop ? 48 : 20,
-                    vertical: desktop ? 36 : 12,
+                    vertical: desktop ? 16 : 8,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      GestureDetector(
-                        onTap: widget.onGoHome,
-                        child: const _ChromeBrandRow(),
-                      ),
-                      const SizedBox(height: 30),
-                      _buildChromeSearchBar(context),
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 6),
                       _buildShortcutsGrid(context),
                       if (widget.newsFeedService != null) ...[
-                        const SizedBox(height: 44),
+                        const SizedBox(height: 24),
                         _buildDiscoverHeader(context),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 14),
                         DiscoverNewsFeedWidget(
                           service: widget.newsFeedService!,
                           onArticleSelected: _openArticle,
@@ -303,31 +299,30 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
   }
 
   Widget _buildChromeSearchBar(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 584),
-      child: InkWell(
-        onTap: _focusOmnibox,
-        borderRadius: BorderRadius.circular(28),
-        child: Container(
-          height: 46,
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          decoration: BoxDecoration(
-            color: _card,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: Colors.white.withOpacity(0.16)),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.search, color: Colors.white38, size: 20),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Search Google or type a URL',
-                  style: TextStyle(color: Colors.white54, fontSize: 14),
-                ),
+    return InkWell(
+      onTap: _focusOmnibox,
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withOpacity(0.16)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.search, color: Colors.white38, size: 18),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Search Google or type a URL',
+                style: TextStyle(color: Colors.white54, fontSize: 13),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -590,8 +585,8 @@ class _ShortcutTile extends StatelessWidget {
   }
 }
 
-/// Chrome-style favicon fallback: a rounded tile in a per-host color carrying
-/// the site's initial letter. Mirrors the letter-avatar NTP shortcuts.
+/// Favicon with smooth fallback: fetches the real high-res site favicon/thumbnail
+/// from Google's favicon service, falling back to a colored initial-letter circle.
 class _SiteIcon extends StatelessWidget {
   final String url;
   final String label;
@@ -600,42 +595,60 @@ class _SiteIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final host = (Uri.tryParse(url)?.host ?? label).toUpperCase();
-    final letter = host.isNotEmpty ? host[0] : (label.isNotEmpty ? label[0].toUpperCase() : '?');
+    final uri = Uri.tryParse(url.startsWith('http') ? url : 'https://$url');
+    final host = uri?.host.isNotEmpty == true ? uri!.host : label;
+    final displayHost = host.toUpperCase();
+    final letter = displayHost.isNotEmpty ? displayHost[0] : (label.isNotEmpty ? label[0].toUpperCase() : '?');
     final palette = [
       const Color(0xFF00635D), const Color(0xFF1E5B87), const Color(0xFF5C2B86),
       const Color(0xFF7A4E00), const Color(0xFF6B5B00), const Color(0xFF00703C),
       const Color(0xFF90140F), const Color(0xFF6B1F54), const Color(0xFF0062A3),
     ];
-    final color = palette[host.hashCode.abs() % palette.length];
+    final color = palette[displayHost.hashCode.abs() % palette.length];
+
+    Widget fallbackLetter() {
+      return Container(
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        child: Text(
+          letter,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+    }
+
+    if (host.isEmpty) return fallbackLetter();
+
+    final targetUrl = url.startsWith('http') ? url : 'https://$url';
+    final faviconUrl = 'https://www.google.com/s2/favicons?sz=128&domain_url=${Uri.encodeComponent(targetUrl)}';
+
     return Container(
       width: 36,
       height: 36,
       alignment: Alignment.center,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      child: Text(
-        letter,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
+      decoration: const BoxDecoration(
+        color: Color(0x1AFFFFFF),
+        shape: BoxShape.circle,
+      ),
+      child: ClipOval(
+        child: Image.network(
+          faviconUrl,
+          width: 26,
+          height: 26,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => fallbackLetter(),
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) return child;
+            return fallbackLetter();
+          },
         ),
       ),
-    );
-  }
-}
-
-/// Chrome NTP wordmark row: small logo in the top-left, no headline text.
-class _ChromeBrandRow extends StatelessWidget {
-  const _ChromeBrandRow();
-
-  @override
-  Widget build(BuildContext context) {
-    return Image.asset(
-      'assets/makaw_logo_28.png',
-      width: 34,
-      height: 34,
-      fit: BoxFit.contain,
     );
   }
 }

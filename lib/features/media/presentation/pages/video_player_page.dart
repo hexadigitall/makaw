@@ -2143,20 +2143,31 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
       },
       child: _buildFullPlayer(),
     );
-    return Scaffold(
-      backgroundColor: _kDark,
-      appBar: _buildAppBar(),
-      body: SafeArea(child: _buildBody()),
-      floatingActionButton: _page == 'home' && _homeTab == 'videos' && _service.allVideos.isNotEmpty
-          ? Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 60),
-              child: FloatingActionButton(
-                backgroundColor: _kAccent,
-                onPressed: () => setState(() { _page = 'player'; }),
-                child: const Icon(Icons.play_arrow, color: Colors.black),
-              ),
-            )
-          : null,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_page != 'home') {
+          setState(() => _page = 'home');
+          return;
+        }
+        Navigator.maybePop(context);
+      },
+      child: Scaffold(
+        backgroundColor: _kDark,
+        appBar: _buildAppBar(),
+        body: SafeArea(child: _buildBody()),
+        floatingActionButton: _page == 'home' && _homeTab == 'videos' && _service.allVideos.isNotEmpty
+            ? Padding(
+                padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 60),
+                child: FloatingActionButton(
+                  backgroundColor: _kAccent,
+                  onPressed: () => setState(() { _page = 'player'; }),
+                  child: const Icon(Icons.play_arrow, color: Colors.black),
+                ),
+              )
+            : null,
+      ),
     );
   }
 

@@ -98,19 +98,20 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     _prevSongId = song.id;
     _paletteLoading = true;
     try {
-      final file = File(song.filePath);
-      if (!await file.exists()) return;
-      final provider = FileImage(file);
-      final palette = await PaletteGenerator.fromImageProvider(
-        provider,
-        maximumColorCount: 16,
-      ).timeout(const Duration(seconds: 3));
-      if (palette.dominantColor != null) {
-        final c = palette.dominantColor!.color;
-        final hsl = HSLColor.fromColor(c);
-        final dark = hsl.withLightness((hsl.lightness * 0.35).clamp(0.0, 1.0)).toColor();
-        final accent = hsl.withSaturation((hsl.saturation * 1.2).clamp(0.0, 1.0)).toColor();
-        if (mounted) setState(() { _dominantColor = dark; _accentColor = accent; });
+      final bytes = await MediaThumbnailService.instance.getThumbnail(song.filePath, isVideo: false);
+      if (bytes != null && bytes.isNotEmpty) {
+        final provider = MemoryImage(bytes);
+        final palette = await PaletteGenerator.fromImageProvider(
+          provider,
+          maximumColorCount: 16,
+        ).timeout(const Duration(seconds: 3));
+        if (palette.dominantColor != null) {
+          final c = palette.dominantColor!.color;
+          final hsl = HSLColor.fromColor(c);
+          final dark = hsl.withLightness((hsl.lightness * 0.35).clamp(0.0, 1.0)).toColor();
+          final accent = hsl.withSaturation((hsl.saturation * 1.2).clamp(0.0, 1.0)).toColor();
+          if (mounted) setState(() { _dominantColor = dark; _accentColor = accent; });
+        }
       }
     } catch (_) {}
     _paletteLoading = false;
@@ -329,20 +330,38 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
-      body: _service.showNowPlaying && _service.currentSong != null
-          ? _buildNowPlaying()
-          : _isSearchPage
-              ? _buildSearchPage()
-              : Column(
-                  children: [
-                    _buildHeader(),
-                    Expanded(child: _buildTabs()),
-                    if (_service.hasQueue || _service.currentSong != null) _buildMiniPlayer(),
-                    _buildFooter(),
-                  ],
-                ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_service.showNowPlaying) {
+          _service.setShowNowPlaying(false);
+          return;
+        }
+        if (_isSearchPage) {
+          setState(() {
+            _isSearchPage = false;
+            _searchCtrl.clear();
+          });
+          return;
+        }
+        Navigator.maybePop(context);
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0F0F1A),
+        body: _service.showNowPlaying && _service.currentSong != null
+            ? _buildNowPlaying()
+            : _isSearchPage
+                ? _buildSearchPage()
+                : Column(
+                    children: [
+                      _buildHeader(),
+                      Expanded(child: _buildTabs()),
+                      if (_service.hasQueue || _service.currentSong != null) _buildMiniPlayer(),
+                      _buildFooter(),
+                    ],
+                  ),
+      ),
     );
   }
 
@@ -1328,7 +1347,16 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
                 ),
                 child: _showLyrics
                     ? ClipRRect(borderRadius: BorderRadius.circular(20), child: _buildLyricsView())
-                    : const Center(child: Icon(Icons.music_note, color: Color(0xFF818CF8), size: 80)),
+                    : MediaArtworkWidget(
+                        filePath: song.filePath,
+                        isVideo: false,
+                        width: artSize,
+                        height: artSize,
+                        borderRadius: BorderRadius.circular(20),
+                        fit: BoxFit.cover,
+                        fallbackColor: _dominantColor.withValues(alpha: 0.6),
+                        iconColor: const Color(0xFF818CF8),
+                      ),
               ),
             ),
           ),
@@ -1485,7 +1513,16 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
                     ),
                     child: _showLyrics
                         ? ClipRRect(borderRadius: BorderRadius.circular(16), child: _buildLyricsView())
-                        : const Center(child: Icon(Icons.music_note, color: Color(0xFF818CF8), size: 64)),
+                        : MediaArtworkWidget(
+                            filePath: song.filePath,
+                            isVideo: false,
+                            width: artSize,
+                            height: artSize,
+                            borderRadius: BorderRadius.circular(16),
+                            fit: BoxFit.cover,
+                            fallbackColor: _dominantColor.withValues(alpha: 0.6),
+                            iconColor: const Color(0xFF818CF8),
+                          ),
                   ),
                 ),
                 const SizedBox(width: 20),
