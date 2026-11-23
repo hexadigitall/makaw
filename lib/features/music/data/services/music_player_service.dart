@@ -473,6 +473,12 @@ class MusicPlayerService extends ChangeNotifier {
   }
 
   void removeSongsFromPlaylist(String name, List<int> songIds) {
+    if (name.toLowerCase() == 'favourites' || name.toLowerCase() == 'favorites') {
+      for (final id in songIds) {
+        if (_favoriteIds.contains(id)) toggleFavorite(id);
+      }
+      return;
+    }
     final pl = _playlists.where((p) => p.name == name).firstOrNull;
     if (pl == null) return;
     pl.songIds.removeWhere((id) => songIds.contains(id));
@@ -480,6 +486,12 @@ class MusicPlayerService extends ChangeNotifier {
   }
 
   void addSongsToPlaylist(String name, List<int> songIds) {
+    if (name.toLowerCase() == 'favourites' || name.toLowerCase() == 'favorites') {
+      for (final id in songIds) {
+        if (!_favoriteIds.contains(id)) toggleFavorite(id);
+      }
+      return;
+    }
     final pl = _playlists.where((p) => p.name == name).firstOrNull;
     if (pl == null) return;
     for (final id in songIds) {
@@ -489,12 +501,18 @@ class MusicPlayerService extends ChangeNotifier {
   }
 
   List<SongInfo> getPlaylistSongs(String name) {
+    if (name.toLowerCase() == 'favourites' || name.toLowerCase() == 'favorites') {
+      return favorites;
+    }
     final pl = _playlists.where((p) => p.name == name).firstOrNull;
     if (pl == null) return [];
     return pl.songIds.map((id) => _allSongs.where((s) => s.id == id).firstOrNull).whereType<SongInfo>().toList();
   }
 
   List<int> getPlaylistSongIds(String name) {
+    if (name.toLowerCase() == 'favourites' || name.toLowerCase() == 'favorites') {
+      return _favoriteIds.toList();
+    }
     final pl = _playlists.where((p) => p.name == name).firstOrNull;
     return pl?.songIds.toList() ?? [];
   }

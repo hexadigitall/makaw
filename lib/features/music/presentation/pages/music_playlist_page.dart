@@ -38,6 +38,17 @@ class _MusicPlaylistPageState extends State<MusicPlaylistPage> {
 
   void _onChange() { if (mounted) setState(() {}); }
 
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   String fmtMs(int ms) {
     final d = Duration(milliseconds: ms);
     if (d.inSeconds >= 3600) {
@@ -397,6 +408,44 @@ class _MusicPlaylistPageState extends State<MusicPlaylistPage> {
             '${song.displayArtist}  \u2022  ${fmtMs(song.duration)}',
             style: TextStyle(color: isCurrent ? const Color(0xFF818CF8).withValues(alpha: 0.8) : const Color(0xFF666680), fontSize: 12),
           ),
+          trailing: _selectMode
+              ? null
+              : PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, color: Color(0xFF666680), size: 20),
+                  onSelected: (v) {
+                    if (v == 'remove') {
+                      s.removeSongsFromPlaylist(pn, [song.id]);
+                      _toast('Removed from $pn');
+                      setState(() {});
+                    } else if (v == 'play_next') {
+                      s.playNext(song);
+                      _toast('Playing next');
+                    } else if (v == 'add_queue') {
+                      s.addToQueue(song);
+                      _toast('Added to queue');
+                    } else if (v == 'add_playlist') {
+                      _addToPlaylistSheet(song.id);
+                    } else if (v == 'share') {
+                      Share.shareXFiles([XFile(song.filePath)]);
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'remove',
+                      child: Row(
+                        children: [
+                          Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 18),
+                          SizedBox(width: 8),
+                          Text('Remove from playlist', style: TextStyle(color: Colors.redAccent)),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(value: 'play_next', child: Text('Play Next')),
+                    const PopupMenuItem(value: 'add_queue', child: Text('Add to Queue')),
+                    const PopupMenuItem(value: 'add_playlist', child: Text('Add to Another Playlist')),
+                    const PopupMenuItem(value: 'share', child: Text('Share')),
+                  ],
+                ),
           onTap: () {
             if (_selectMode) {
               setState(() {

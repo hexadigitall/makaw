@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -76,6 +77,8 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
   List<SearchSuggestion> _suggestions = const [];
   Timer? _debounce;
   bool _typingLoading = false;
+  int _shortcutsPageIndex = 0;
+  late final PageController _shortcutsPageController = PageController();
 
   @override
   void initState() {
@@ -92,6 +95,7 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
 
   @override
   void dispose() {
+    _shortcutsPageController.dispose();
     _debounce?.cancel();
     _focusNode.removeListener(_onFocusChanged);
     _controller.dispose();
@@ -329,18 +333,74 @@ class _BrowserNewTabViewState extends State<BrowserNewTabView> {
   }
 
   Widget _buildShortcutsGrid(BuildContext context) {
-    final items = List<(String, String)>.of(widget.shortcuts).take(9).toList();
-    if (widget.onEditShortcuts == null && items.isEmpty) {
+    final allTiles = <Widget>[
+      for (final s in widget.shortcuts)
+        _ShortcutTile(label: s.$1, url: s.$2, onTap: () => _submit(s.$2)),
+      if (widget.onEditShortcuts != null)
+        _ShortcutTile.edit(onTap: widget.onEditShortcuts!),
+    ];
+    if (allTiles.isEmpty) {
       return const SizedBox.shrink();
     }
-    return Wrap(
-      spacing: 18,
-      runSpacing: 14,
+
+    // Chunk into blocks of 9 items per view
+    final pages = <List<Widget>>[];
+    for (var i = 0; i < allTiles.length; i += 9) {
+      pages.add(allTiles.sublist(i, math.min(i + 9, allTiles.length)));
+    }
+
+    if (pages.length <= 1) {
+      return Wrap(
+        spacing: 18,
+        runSpacing: 14,
+        children: pages[0],
+      );
+    }
+
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final gridHeight = isLandscape ? 190.0 : 280.0;
+    final safePageIndex = _shortcutsPageIndex.clamp(0, pages.length - 1);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        for (final s in items)
-          _ShortcutTile(label: s.$1, url: s.$2, onTap: () => _submit(s.$2)),
-        if (widget.onEditShortcuts != null)
-          _ShortcutTile.edit(onTap: widget.onEditShortcuts!),
+        SizedBox(
+          height: gridHeight,
+          child: PageView.builder(
+            controller: _shortcutsPageController,
+            itemCount: pages.length,
+            onPageChanged: (idx) => setState(() => _shortcutsPageIndex = idx),
+            itemBuilder: (ctx, pageIdx) {
+              return Align(
+                alignment: Alignment.topCenter,
+                child: Wrap(
+                  spacing: 18,
+                  runSpacing: 14,
+                  children: pages[pageIdx],
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(
+            pages.length,
+            (idx) => AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: safePageIndex == idx ? 16 : 6,
+              height: 6,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(3),
+                color: safePageIndex == idx
+                    ? const Color(0xFF00A7C2)
+                    : Colors.white24,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }

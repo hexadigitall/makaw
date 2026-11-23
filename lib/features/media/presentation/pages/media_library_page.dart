@@ -132,6 +132,14 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.library_music_rounded, color: Color(0xFF818CF8)),
+            tooltip: 'Open Music Tool',
+            onPressed: widget.onOpenMusicPlayer,
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: SafeArea(
         child: AdaptiveContainer(
@@ -485,7 +493,11 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
           const SizedBox(height: 24),
         ],
         if (songs.isNotEmpty) ...[
-          _buildSectionHeader('Music (${songs.length})', () => setState(() => _selectedCategory = MediaCategory.music)),
+          _buildSectionHeader(
+            'Music (${songs.length})',
+            widget.onOpenMusicPlayer ?? () => setState(() => _selectedCategory = MediaCategory.music),
+            actionLabel: 'Music Tool',
+          ),
           const SizedBox(height: 8),
           ...songs.take(6).map((s) => _buildSongTile(s, songs)),
           const SizedBox(height: 24),
@@ -507,7 +519,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     );
   }
 
-  Widget _buildSectionHeader(String title, VoidCallback onSeeAll) {
+  Widget _buildSectionHeader(String title, VoidCallback onSeeAll, {String actionLabel = 'See all'}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -520,9 +532,14 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
             fontFamily: 'Outfit',
           ),
         ),
-        TextButton(
+        TextButton.icon(
           onPressed: onSeeAll,
-          child: const Text('See all', style: TextStyle(color: _accent, fontSize: 13)),
+          icon: Icon(
+            actionLabel == 'See all' ? Icons.chevron_right_rounded : Icons.library_music_rounded,
+            size: 16,
+            color: _accent,
+          ),
+          label: Text(actionLabel, style: const TextStyle(color: _accent, fontSize: 13, fontWeight: FontWeight.w600)),
         ),
       ],
     );
@@ -530,13 +547,66 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
 
   Widget _buildMusicList() {
     final songs = _filteredSongs;
-    if (songs.isEmpty) {
-      return _buildEmptyState('No songs found', 'Add music to your device library to listen.');
-    }
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: songs.length,
-      itemBuilder: (ctx, i) => _buildSongTile(songs[i], songs),
+      children: [
+        if (widget.onOpenMusicPlayer != null)
+          InkWell(
+            onTap: widget.onOpenMusicPlayer,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF1E1B4B), Color(0xFF312E81)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF818CF8).withValues(alpha: 0.4)),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 6, offset: const Offset(0, 2)),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF818CF8).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.library_music_rounded, color: Color(0xFF818CF8), size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Open Makaw Music Tool',
+                          style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Playlists \u2022 Albums \u2022 Folders \u2022 Artists \u2022 Queue',
+                          style: TextStyle(color: Color(0xFFA5B4FC), fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFF818CF8), size: 16),
+                ],
+              ),
+            ),
+          ),
+        if (songs.isEmpty)
+          _buildEmptyState('No songs found', 'Add music to your device library to listen.')
+        else
+          ...songs.map((s) => _buildSongTile(s, songs)),
+      ],
     );
   }
 

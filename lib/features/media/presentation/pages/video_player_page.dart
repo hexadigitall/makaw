@@ -3124,7 +3124,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
                       leading: const Icon(Icons.playlist_play, color: Color(0xFF818CF8)),
                       title: Text(pl['name'], style: const TextStyle(color: Colors.white)),
                       subtitle: Text('${videos.length} videos', style: TextStyle(color: _kMuted, fontSize: 12)),
-                      onTap: videos.isNotEmpty ? () => _openPlaylistVideos(videos) : null,
+                      onTap: videos.isNotEmpty ? () => _openPlaylistVideos(pl['name'], videos) : null,
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
                         onPressed: () { _service.deletePlaylist(pl['name']); _toast('Playlist deleted'); },
@@ -3137,7 +3137,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
           bottom: 16, right: 16,
           child: FloatingActionButton.small(
             backgroundColor: _kAccent,
-            onPressed: _createPlaylistDialog,
+            onPressed: () => _createPlaylistDialog(),
             child: const Icon(Icons.add, color: Colors.black),
           ),
         ),
@@ -3145,7 +3145,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
     );
   }
 
-  void _createPlaylistDialog() {
+  void _createPlaylistDialog({int? videoId}) {
     final ctrl = TextEditingController();
     showDialog(
       context: context,
@@ -3156,13 +3156,25 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
           decoration: const InputDecoration(hintText: 'Playlist name', hintStyle: TextStyle(color: Color(0xFF666680)))),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.white70))),
-          TextButton(onPressed: () { if (ctrl.text.isNotEmpty) { _service.createPlaylist(ctrl.text); _toast('Playlist created'); } Navigator.pop(ctx); }, child: const Text('Create', style: TextStyle(color: Color(0xFF818CF8)))),
+          TextButton(onPressed: () {
+            final name = ctrl.text.trim();
+            if (name.isNotEmpty) {
+              _service.createPlaylist(name);
+              if (videoId != null && videoId > 0) {
+                _service.addToPlaylist(name, videoId);
+                _toast('Created "$name" and added video');
+              } else {
+                _toast('Playlist created');
+              }
+            }
+            Navigator.pop(ctx);
+          }, child: const Text('Create', style: TextStyle(color: Color(0xFF818CF8)))),
         ],
       ),
     );
   }
 
-  void _openPlaylistVideos(List<VideoFileInfo> videos) {
+  void _openPlaylistVideos(String plName, List<VideoFileInfo> videos) {
     showModalBottomSheet(
       context: context, backgroundColor: _kDark, isScrollControlled: true,
       builder: (_) => DraggableScrollableSheet(
@@ -3174,7 +3186,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
               child: Row(children: [
                 IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(context)),
                 const SizedBox(width: 8),
-                const Expanded(child: Text('Playlist', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
+                Expanded(child: Text(plName, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
                 TextButton.icon(onPressed: () { final first = videos.isNotEmpty ? _service.allVideos.indexOf(videos[0]) : 0; Navigator.pop(context); setState(() { _playIndex = first; _page = 'player'; }); }, icon: const Icon(Icons.play_arrow, size: 18, color: Color(0xFF818CF8)), label: const Text('Play All', style: TextStyle(color: Color(0xFF818CF8)))),
               ]),
             ),
@@ -3183,6 +3195,15 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
               itemBuilder: (_, i) => ListTile(
                 leading: ClipRRect(borderRadius: BorderRadius.circular(6), child: Container(width: 44, height: 44, color: Colors.black26, child: const Icon(Icons.videocam, color: Color(0xFF818CF8), size: 20))),
                 title: Text(videos[i].fileName, style: const TextStyle(color: Colors.white, fontSize: 13), overflow: TextOverflow.ellipsis),
+                trailing: IconButton(
+                  icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 20),
+                  tooltip: 'Remove from playlist',
+                  onPressed: () {
+                    _service.removeFromPlaylist(plName, videos[i].id);
+                    _toast('Removed from $plName');
+                    Navigator.pop(context);
+                  },
+                ),
                 onTap: () { final idx = _service.allVideos.indexOf(videos[i]); Navigator.pop(context); setState(() { _playIndex = idx; _page = 'player'; }); },
               ),
             )),
@@ -3261,7 +3282,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
           SliverToBoxAdapter(child: ListTile(
             leading: const Icon(Icons.add, color: Color(0xFF818CF8)),
             title: const Text('New Playlist', style: TextStyle(color: Colors.white)),
-            onTap: () { Navigator.pop(context); _createPlaylistDialog(); },
+            onTap: () { Navigator.pop(context); _createPlaylistDialog(videoId: v.id); },
           )),
           const SliverToBoxAdapter(child: SizedBox(height: 16)),
         ]),

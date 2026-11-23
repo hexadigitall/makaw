@@ -1895,14 +1895,12 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           quality: 80,
         ),
       );
-      if (data != null) {
+      if (data != null && mounted) {
         _tabSnapshots[tab.id] = data;
-        final dir = await getApplicationDocumentsDirectory();
-        final file = File('${dir.path}/tab_snapshots/${tab.id}.jpg');
-        await file.create(recursive: true);
-        await file.writeAsBytes(data);
-        final idx = _browserTabs.indexWhere((t) => t.id == tab.id);
-        if (idx >= 0) _browserTabs[idx].snapshotPath = file.path;
+        getApplicationDocumentsDirectory().then((dir) {
+          final file = File('${dir.path}/tab_snapshots/${tab.id}.jpg');
+          file.create(recursive: true).then((f) => f.writeAsBytes(data));
+        }).catchError((_) {});
       }
     } catch (_) {}
   }
@@ -2185,7 +2183,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   }
 
   Future<void> _showTabSwitcher() async {
-    await _captureCurrentTabSnapshot();
+    // Fire snapshot asynchronously so opening the tab tray is instantaneous
+    _captureCurrentTabSnapshot();
     if (!mounted) return;
     final activeTab = _browserTabs.isEmpty
         ? null

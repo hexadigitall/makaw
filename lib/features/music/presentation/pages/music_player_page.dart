@@ -968,9 +968,32 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
               ),
               title: const Text('Favourites', style: TextStyle(color: Colors.white, fontSize: 14)),
               subtitle: Text('${_service.favorites.length} songs', style: const TextStyle(color: Color(0xFF666680), fontSize: 12)),
+              trailing: PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: Color(0xFF666680), size: 18),
+                onSelected: (v) {
+                  if (v == 'open') {
+                    GlobalPlayerState.instance.pushToolRoute('playlist');
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => MusicPlaylistPage(
+                      service: _service, playlistName: 'Favourites',
+                    ))).then((_) {
+                      GlobalPlayerState.instance.popToolRoute('playlist');
+                    });
+                  } else if (v == 'play' && _service.favorites.isNotEmpty) {
+                    _service.playSong(0, fromList: _service.favorites);
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'open', child: Text('Open')),
+                  const PopupMenuItem(value: 'play', child: Text('Play')),
+                ],
+              ),
               onTap: () {
-                final f = _service.favorites;
-                if (f.isNotEmpty) _service.playSong(0, fromList: f);
+                GlobalPlayerState.instance.pushToolRoute('playlist');
+                Navigator.push(context, MaterialPageRoute(builder: (_) => MusicPlaylistPage(
+                  service: _service, playlistName: 'Favourites',
+                ))).then((_) {
+                  GlobalPlayerState.instance.popToolRoute('playlist');
+                });
               },
             ),
             ...lists.map((pl) {
@@ -1022,7 +1045,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     );
   }
 
-  void _newPlaylistDialog() {
+  void _newPlaylistDialog({int? songId}) {
     final ctrl = TextEditingController();
     showDialog(
       context: context,
@@ -1043,7 +1066,17 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
             onPressed: () {
-              if (ctrl.text.isNotEmpty) { _service.addToPlaylist(ctrl.text, -1); Navigator.pop(ctx); }
+              final name = ctrl.text.trim();
+              if (name.isNotEmpty) {
+                if (songId != null && songId > 0) {
+                  _service.addToPlaylist(name, songId);
+                  _toast('Created "$name" and added song');
+                } else {
+                  _service.addToPlaylist(name, -1);
+                  _toast('Created playlist "$name"');
+                }
+                Navigator.pop(ctx);
+              }
             },
             child: const Text('Create', style: TextStyle(color: Color(0xFF818CF8))),
           ),
@@ -1756,7 +1789,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
               child: ListTile(
                 leading: const Icon(Icons.add, color: Color(0xFF818CF8)),
                 title: const Text('New Playlist', style: TextStyle(color: Colors.white)),
-                onTap: () { Navigator.pop(context); _newPlaylistDialog(); },
+                onTap: () { Navigator.pop(context); _newPlaylistDialog(songId: songId); },
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 16)),
