@@ -540,39 +540,105 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     );
   }
 
+  bool _isNewMedia(String filePath) {
+    try {
+      final f = File(filePath);
+      if (!f.existsSync()) return false;
+      final modified = f.statSync().modified;
+      if (DateTime.now().difference(modified).inHours < 72) return true;
+      final p = filePath.toLowerCase();
+      if (p.contains('download') || p.contains('downloads')) {
+        return DateTime.now().difference(modified).inDays < 7;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   Widget _buildSongTile(SongInfo song, List<SongInfo> queue) {
+    final isCurrent = widget.musicService.currentSong?.id == song.id;
+    final isPlaying = isCurrent && widget.musicService.isPlaying;
+    final isNew = _isNewMedia(song.filePath);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: _surface,
+        color: isCurrent ? _accent.withValues(alpha: 0.12) : _surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+        border: Border.all(
+          color: isCurrent ? _accent.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.04),
+          width: isCurrent ? 1.5 : 1,
+        ),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        leading: MediaArtworkWidget(
-          filePath: song.filePath,
-          isVideo: false,
-          width: 44,
-          height: 44,
-          borderRadius: BorderRadius.circular(8),
+        leading: Stack(
+          alignment: Alignment.center,
+          children: [
+            MediaArtworkWidget(
+              filePath: song.filePath,
+              isVideo: false,
+              width: 44,
+              height: 44,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            if (isCurrent)
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.black45,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  isPlaying ? Icons.equalizer_rounded : Icons.play_arrow_rounded,
+                  color: _accent,
+                  size: 24,
+                ),
+              ),
+          ],
         ),
-        title: Text(
-          song.title.isNotEmpty ? song.title : 'Unknown Title',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                song.title.isNotEmpty ? song.title : 'Unknown Title',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isCurrent ? _accent : Colors.white,
+                  fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            if (isNew) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                ),
+                child: const Text('NEW', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+              ),
+            ],
+          ],
         ),
         subtitle: Text(
           song.artist.isNotEmpty ? song.artist : 'Unknown Artist',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: Colors.white54, fontSize: 12),
+          style: TextStyle(color: isCurrent ? _accent.withValues(alpha: 0.8) : Colors.white54, fontSize: 12),
         ),
         trailing: IconButton(
-          icon: const Icon(Icons.play_arrow_rounded, color: _accent, size: 26),
+          icon: Icon(
+            isPlaying ? Icons.pause_circle_filled_rounded : (isCurrent ? Icons.play_circle_fill_rounded : Icons.play_arrow_rounded),
+            color: _accent,
+            size: 26,
+          ),
           onPressed: () => widget.onPlaySong(song, queue),
-          tooltip: 'Play',
+          tooltip: isPlaying ? 'Pause' : 'Play',
         ),
         onTap: () => widget.onPlaySong(song, queue),
       ),
@@ -600,15 +666,22 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
 
   Widget _buildVideoCard(VideoFileInfo video, double? width) {
     final progress = widget.videoService.resumeProgress(video.filePath);
+    final isCurrent = widget.videoService.activeVideoPath == video.filePath;
+    final isPlaying = isCurrent && widget.videoService.isVideoPlaying;
+    final isNew = widget.videoService.isNewFile(video.filePath) || _isNewMedia(video.filePath);
+
     return InkWell(
       onTap: () => widget.onPlayVideo(video),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         width: width,
         decoration: BoxDecoration(
-          color: _surface,
+          color: isCurrent ? _accent.withValues(alpha: 0.12) : _surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          border: Border.all(
+            color: isCurrent ? _accent.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.06),
+            width: isCurrent ? 2 : 1,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -622,6 +695,43 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
                     isVideo: true,
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
                   ),
+                  if (isCurrent)
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.black38,
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+                      ),
+                      alignment: Alignment.center,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _accent,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(isPlaying ? Icons.equalizer_rounded : Icons.pause_rounded, color: Colors.black, size: 14),
+                            const SizedBox(width: 4),
+                            Text(isPlaying ? 'PLAYING' : 'PAUSED', style: const TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (isNew)
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981),
+                          borderRadius: BorderRadius.circular(4),
+                          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 2)],
+                        ),
+                        child: const Text('NEW', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                      ),
+                    ),
                   if (progress > 0)
                     Positioned(
                       bottom: 0,
@@ -629,9 +739,9 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
                       right: 0,
                       child: LinearProgressIndicator(
                         value: progress,
-                        minHeight: 3,
+                        minHeight: 3.5,
                         color: _accent,
-                        backgroundColor: Colors.black26,
+                        backgroundColor: Colors.black38,
                       ),
                     ),
                 ],
@@ -643,7 +753,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
                 video.fileName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(color: isCurrent ? _accent : Colors.white, fontSize: 12, fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500),
               ),
             ),
           ],

@@ -738,22 +738,91 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     );
   }
 
+  bool _isNewSong(SongInfo song) {
+    try {
+      final f = File(song.filePath);
+      if (!f.existsSync()) return false;
+      final modified = f.statSync().modified;
+      if (DateTime.now().difference(modified).inHours < 72) return true;
+      final p = song.filePath.toLowerCase();
+      if (p.contains('download') || p.contains('downloads')) {
+        return DateTime.now().difference(modified).inDays < 7;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   Widget _songItem(SongInfo song, int index, List<SongInfo>? list) {
     final isCurrent = _service.currentSong?.id == song.id;
+    final isPlaying = isCurrent && _service.isPlaying;
     final isFav = _service.isFavorite(song.id);
     final isSel = _selectedIds.contains(song.id);
+    final isNew = _isNewSong(song);
 
     return GestureDetector(
       onLongPress: () => setState(() { _selectMode = true; _selectedIds.add(song.id); }),
       child: Container(
-        color: isSel ? const Color(0xFF2A2A4E) : (isCurrent ? const Color(0xFF1E1E3A) : Colors.transparent),
+        decoration: BoxDecoration(
+          color: isSel
+              ? const Color(0xFF2A2A4E)
+              : (isCurrent ? const Color(0xFF818CF8).withValues(alpha: 0.14) : Colors.transparent),
+          border: isCurrent
+              ? Border.all(color: const Color(0xFF818CF8).withValues(alpha: 0.6), width: 1.2)
+              : null,
+          borderRadius: isCurrent ? BorderRadius.circular(8) : null,
+        ),
         child: ListTile(
-          leading: _thumb(song.filePath),
-          title: Text(song.displayTitle,
-              style: TextStyle(color: isCurrent ? const Color(0xFF818CF8) : Colors.white, fontSize: 14),
-              overflow: TextOverflow.ellipsis),
-          subtitle: Text('${song.displayArtist}  \u2022  ${fmtMs(song.duration)}',
-              style: const TextStyle(color: Color(0xFF666680), fontSize: 12)),
+          leading: Stack(
+            alignment: Alignment.center,
+            children: [
+              _thumb(song.filePath),
+              if (isCurrent)
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    isPlaying ? Icons.equalizer : Icons.play_arrow,
+                    color: const Color(0xFF818CF8),
+                    size: 22,
+                  ),
+                ),
+            ],
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  song.displayTitle,
+                  style: TextStyle(
+                    color: isCurrent ? const Color(0xFF818CF8) : Colors.white,
+                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                    fontSize: 14,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (isNew) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                  ),
+                  child: const Text('NEW', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                ),
+              ],
+            ],
+          ),
+          subtitle: Text(
+            '${song.displayArtist}  \u2022  ${fmtMs(song.duration)}',
+            style: TextStyle(color: isCurrent ? const Color(0xFF818CF8).withValues(alpha: 0.8) : const Color(0xFF666680), fontSize: 12),
+          ),
           trailing: isFav ? const Icon(Icons.favorite, color: Color(0xFF818CF8), size: 18) : _songMenu(song, list),
           onTap: () {
             if (_selectMode) {

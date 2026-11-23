@@ -185,6 +185,10 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
       _controller!.addListener(_onVideoEvent);
       _restoreResume();
       _controller!.play();
+      final cur = _currentFile();
+      if (cur != null && cur.isNotEmpty) {
+        _resumeService.setActiveVideo(path: cur, title: widget.title, isPlaying: true);
+      }
       setState(() => _initialized = true);
       _startAutoHide();
       _loadSubtitlesForFile();
@@ -218,6 +222,30 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     if (pos <= 0) return;
     _controller?.seekTo(Duration(milliseconds: pos));
     _lastResumeSave = DateTime.now();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final dur = Duration(milliseconds: pos);
+      final fmt = dur.inHours > 0
+          ? '${dur.inHours}:${(dur.inMinutes % 60).toString().padLeft(2, '0')}:${(dur.inSeconds % 60).toString().padLeft(2, '0')}'
+          : '${dur.inMinutes}:${(dur.inSeconds % 60).toString().padLeft(2, '0')}';
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Resumed from $fmt'),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Start Over',
+            textColor: const Color(0xFF818CF8),
+            onPressed: () {
+              _controller?.seekTo(Duration.zero);
+              _resumeService.clearResume(path);
+            },
+          ),
+          backgroundColor: const Color(0xFF1E293B),
+        ),
+      );
+    });
   }
 
   void _persistWatchProgress() {
@@ -270,6 +298,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     _doubleTapTimer?.cancel();
     _hideTimer?.cancel();
     _persistWatchProgress();
+    _resumeService.stopActiveVideo();
     _controller?.removeListener(_onVideoEvent);
     _controller?.dispose();
     SystemChrome.restoreSystemUIOverlays();
@@ -2293,10 +2322,24 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   }
 
   Widget _gridCard(VideoFileInfo v, int index) {
+    final isCurrent = _service.activeVideoPath == v.filePath;
+    final isPlaying = isCurrent && _service.isVideoPlaying;
+    final isNew = _service.isNewFile(v.filePath) ||
+        (v.dateTime != null && DateTime.now().difference(v.dateTime!).inHours < 72) ||
+        v.folder.toLowerCase().contains('download');
+    final progress = _service.resumeProgress(v.filePath);
+
     return GestureDetector(
       onTap: () => setState(() { _playIndex = index; _page = 'player'; }),
       child: Container(
-        decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFF2D3748), width: 0.5)),
+        decoration: BoxDecoration(
+          color: isCurrent ? _kAccent.withValues(alpha: 0.12) : _kCard,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isCurrent ? _kAccent : const Color(0xFF2D3748),
+            width: isCurrent ? 2 : 0.5,
+          ),
+        ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2306,6 +2349,40 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
                 fit: StackFit.expand,
                 children: [
                   _ThumbnailView(filePath: v.filePath, thumbCache: _thumbCache),
+                  if (isCurrent)
+                    Container(
+                      color: Colors.black38,
+                      alignment: Alignment.center,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _kAccent,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(isPlaying ? Icons.equalizer_rounded : Icons.pause_rounded, color: Colors.black, size: 13),
+                            const SizedBox(width: 3),
+                            Text(isPlaying ? 'PLAYING' : 'PAUSED', style: const TextStyle(color: Colors.black, fontSize: 9, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (isNew)
+                    Positioned(
+                      top: 4,
+                      left: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981),
+                          borderRadius: BorderRadius.circular(4),
+                          boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 2)],
+                        ),
+                        child: const Text('NEW', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                      ),
+                    ),
                   Positioned(top: 4, right: 4, child: PopupMenuButton<String>(
                     icon: const Icon(Icons.more_vert, color: Colors.white, size: 18),
                     onSelected: (opt) => _videoMenuAction(opt, v),
@@ -2324,17 +2401,29 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
                     ],
                   )),
                   if (v.fileSize > 0)
-                    Positioned(right: 4, bottom: 4, child: Container(
+                    Positioned(right: 4, bottom: progress > 0 ? 8 : 4, child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                       decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(4)),
                       child: Text(_fmtSize(v.fileSize), style: const TextStyle(color: Colors.white70, fontSize: 9)),
                     )),
+                  if (progress > 0)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 3.5,
+                        color: _kAccent,
+                        backgroundColor: Colors.black38,
+                      ),
+                    ),
                 ],
               ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-              child: Text(v.fileName, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
+              child: Text(v.fileName, style: TextStyle(color: isCurrent ? _kAccent : Colors.white, fontSize: 12, fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
             ),
           ],
         ),
@@ -2348,17 +2437,86 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
       itemCount: _service.allVideos.length,
       itemBuilder: (_, i) {
         final v = _service.allVideos[i];
+        final isCurrent = _service.activeVideoPath == v.filePath;
+        final isPlaying = isCurrent && _service.isVideoPlaying;
+        final isNew = _service.isNewFile(v.filePath) ||
+            (v.dateTime != null && DateTime.now().difference(v.dateTime!).inHours < 72) ||
+            v.folder.toLowerCase().contains('download');
+        final progress = _service.resumeProgress(v.filePath);
+
         return Container(
           margin: const EdgeInsets.only(bottom: 6),
-          decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFF2D3748), width: 0.5)),
+          decoration: BoxDecoration(
+            color: isCurrent ? _kAccent.withValues(alpha: 0.12) : _kCard,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isCurrent ? _kAccent : const Color(0xFF2D3748),
+              width: isCurrent ? 1.5 : 0.5,
+            ),
+          ),
           child: ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            leading: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(width: 52, height: 52, child: _ThumbnailView(filePath: v.filePath, thumbCache: _thumbCache)),
+            leading: Stack(
+              alignment: Alignment.center,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(width: 52, height: 52, child: _ThumbnailView(filePath: v.filePath, thumbCache: _thumbCache)),
+                ),
+                if (isCurrent)
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(6)),
+                    child: Icon(isPlaying ? Icons.equalizer_rounded : Icons.play_arrow_rounded, color: _kAccent, size: 24),
+                  ),
+              ],
             ),
-            title: Text(v.fileName, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text('${v.folder}  •  ${_fmtSize(v.fileSize)}', style: TextStyle(color: _kMuted, fontSize: 11)),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    v.fileName,
+                    style: TextStyle(color: isCurrent ? _kAccent : Colors.white, fontSize: 14, fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (isNew) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                    ),
+                    child: const Text('NEW', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                  ),
+                ],
+              ],
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${v.folder}  •  ${_fmtSize(v.fileSize)}${progress > 0 ? '  •  ${(progress * 100).toInt()}% watched' : ''}',
+                  style: TextStyle(color: isCurrent ? _kAccent.withValues(alpha: 0.8) : _kMuted, fontSize: 11),
+                ),
+                if (progress > 0) ...[
+                  const SizedBox(height: 3),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 2.5,
+                      color: _kAccent,
+                      backgroundColor: Colors.white12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
             trailing: PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: Colors.white54, size: 20),
               onSelected: (opt) => _videoMenuAction(opt, v),
@@ -2389,9 +2547,23 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
       itemCount: _service.allVideos.length,
       itemBuilder: (_, i) {
         final v = _service.allVideos[i];
+        final isCurrent = _service.activeVideoPath == v.filePath;
+        final isPlaying = isCurrent && _service.isVideoPlaying;
+        final isNew = _service.isNewFile(v.filePath) ||
+            (v.dateTime != null && DateTime.now().difference(v.dateTime!).inHours < 72) ||
+            v.folder.toLowerCase().contains('download');
+        final progress = _service.resumeProgress(v.filePath);
+
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF2D3748), width: 0.5)),
+          decoration: BoxDecoration(
+            color: isCurrent ? _kAccent.withValues(alpha: 0.12) : _kCard,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isCurrent ? _kAccent : const Color(0xFF2D3748),
+              width: isCurrent ? 1.5 : 0.5,
+            ),
+          ),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
             onTap: () => setState(() { _playIndex = i; _page = 'player'; }),
@@ -2400,26 +2572,77 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: SizedBox(width: 80, height: 60, child: _ThumbnailView(filePath: v.filePath, thumbCache: _thumbCache)),
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: SizedBox(width: 80, height: 60, child: _ThumbnailView(filePath: v.filePath, thumbCache: _thumbCache)),
+                      ),
+                      if (isCurrent)
+                        Container(
+                          width: 80,
+                          height: 60,
+                          decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(8)),
+                          child: Icon(isPlaying ? Icons.equalizer_rounded : Icons.play_arrow_rounded, color: _kAccent, size: 28),
+                        ),
+                    ],
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(v.fileName, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                v.fileName,
+                                style: TextStyle(color: isCurrent ? _kAccent : Colors.white, fontSize: 14, fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (isNew) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                                ),
+                                child: const Text('NEW', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                              ),
+                            ],
+                          ],
+                        ),
                         const SizedBox(height: 3),
-                        Text(v.folder, style: TextStyle(color: _kMuted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Text(v.folder, style: TextStyle(color: isCurrent ? _kAccent.withValues(alpha: 0.8) : _kMuted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
                         const SizedBox(height: 1),
                         Row(children: [
                           Text(_fmtSize(v.fileSize), style: TextStyle(color: _kMuted, fontSize: 10)),
+                          if (progress > 0) ...[
+                            const Text('  •  ', style: TextStyle(color: Color(0xFF444455), fontSize: 10)),
+                            Text('${(progress * 100).toInt()}% watched', style: TextStyle(color: _kAccent, fontSize: 10, fontWeight: FontWeight.w600)),
+                          ],
                           if (v.dateTime != null) ...[
                             const Text('  •  ', style: TextStyle(color: Color(0xFF444455), fontSize: 10)),
                             Text(v.dateTime!.toString().split('.')[0], style: TextStyle(color: _kMuted, fontSize: 10)),
                           ],
                         ]),
+                        if (progress > 0) ...[
+                          const SizedBox(height: 4),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(2),
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              minHeight: 2.5,
+                              color: _kAccent,
+                              backgroundColor: Colors.white12,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

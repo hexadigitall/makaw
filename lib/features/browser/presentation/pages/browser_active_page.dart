@@ -245,18 +245,19 @@ class _BrowserActivePageState extends State<BrowserActivePage>
                     ),
                   ),
                 ),
-              if (widget.mediaCount > 0)
-                Positioned(
-                  left: 16,
-                  bottom: 10,
-                  child: FadeTransition(
-                    opacity: _pillController,
-                    child: MediaSnifferPill(
-                      mediaCount: widget.mediaCount,
-                      onTap: widget.onMediaTap,
-                    ),
-                  ),
-                ),
+              // Media sniffer FAB commented out for now; will be addressed on a new sprint.
+              // if (widget.mediaCount > 0)
+              //   Positioned(
+              //     left: 16,
+              //     bottom: 10,
+              //     child: FadeTransition(
+              //       opacity: _pillController,
+              //       child: MediaSnifferPill(
+              //         mediaCount: widget.mediaCount,
+              //         onTap: widget.onMediaTap,
+              //       ),
+              //     ),
+              //   ),
             ],
           ),
         ),

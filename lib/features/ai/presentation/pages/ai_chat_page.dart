@@ -70,10 +70,14 @@ class _AiChatPageState extends State<AiChatPage> {
     super.dispose();
   }
 
-  bool _ensureSession() {
+  String _activeModel = 'gemini-2.5-flash';
+
+  bool _ensureSession({String? model}) {
     if (_key.isEmpty) return false;
-    _model ??= GenerativeModel(model: 'gemini-2.0-flash', apiKey: _key);
-    _chat ??= _model!.startChat();
+    final m = model ?? _activeModel;
+    _activeModel = m;
+    _model = GenerativeModel(model: m, apiKey: _key);
+    _chat = _model!.startChat();
     return true;
   }
 
@@ -152,14 +156,38 @@ class _AiChatPageState extends State<AiChatPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      final timedOut = e is TimeoutException;
+      Object activeErr = e;
+      final errStr = e.toString().toLowerCase();
+      if ((errStr.contains('not found') || errStr.contains('no longer available') || errStr.contains('404')) &&
+          _activeModel != 'gemini-1.5-flash') {
+        _model = null;
+        _chat = null;
+        _ensureSession(model: 'gemini-1.5-flash');
+        try {
+          final fallbackStream = _chat!
+              .sendMessageStream(Content.text(_promptWithContext(text)))
+              .timeout(const Duration(seconds: 45));
+          buffer.clear();
+          await for (final chunk in fallbackStream) {
+            final piece = chunk.text;
+            if (piece == null || piece.isEmpty) continue;
+            buffer.write(piece);
+            if (!mounted) return;
+            setState(() => _messages[replyIndex] = {'role': 'model', 'text': buffer.toString()});
+            _scrollToEnd();
+          }
+          if (buffer.isNotEmpty) return;
+        } catch (retryErr) {
+          activeErr = retryErr;
+        }
+      }
+      final timedOut = activeErr is TimeoutException;
       setState(() {
         _messages[replyIndex] = {
           'role': 'model',
           'text': timedOut
               ? 'AI timed out. Tap Retry to ask again.'
-              : 'Error: $e\n\nCheck that the API key is valid and has access '
-                  'to gemini-2.0-flash.',
+              : 'Error: $activeErr\n\nCheck that the API key is valid.',
         };
         _lastFailed = true;
       });

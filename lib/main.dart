@@ -563,6 +563,29 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
     }
   }
 
+  void _openMainMusicPlayer() {
+    globalMusicService.setShowNowPlaying(true);
+    if (mounted) {
+      setState(() {
+        _floatingPlayerMaximized = false;
+      });
+    }
+    _MakawHomeState.instance?._switchToView('music');
+  }
+
+  void _openMainVideoPlayer(String videoPath) {
+    if (mounted) {
+      setState(() {
+        _floatingPlayerMaximized = false;
+      });
+    }
+    if (videoPath.isNotEmpty) {
+      _MakawHomeState.instance?._openFile(videoPath);
+    } else {
+      _MakawHomeState.instance?._switchToView('media');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = GlobalPlayerState.instance;
@@ -588,15 +611,16 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
     }
 
     final song = globalMusicService.currentSong;
-    final hasMusic = song != null;
+    // The Floating player should only show up if a song is currently on (or video is actively playing).
+    final isMusicOn = song != null && (globalMusicService.isPlaying || globalMusicService.position > Duration.zero);
     final videoService = VideoPlayerService.shared;
-    final activeVideo = videoService?.activeVideoPath;
-    final lastVideo = videoService?.lastInProgress;
-    final hasVideo = !hasMusic && (activeVideo != null || lastVideo != null);
+    final isVideoOn = !isMusicOn && (videoService?.isVideoPlaying == true || (videoService?.activeVideoPath != null && (videoService?.activePositionMs ?? 0) > 0));
 
-    if (!hasMusic && !hasVideo) {
+    if (!isMusicOn && !isVideoOn) {
       return widget.child;
     }
+
+    final hasVideo = isVideoOn;
 
     final size = MediaQuery.of(context).size;
     final double playerW = _floatingPlayerMaximized
@@ -668,7 +692,7 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Play / Pause central button
+          // Play / Pause central button + Double tap to open Main player
           InkWell(
             borderRadius: BorderRadius.circular(16),
             onTap: () {
@@ -678,6 +702,14 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
                 globalMusicService.togglePlayPause();
               }
               setState(() {});
+            },
+            onDoubleTap: () {
+              if (hasVideo) {
+                final videoPath = videoService?.activeVideoPath ?? '';
+                _openMainVideoPlayer(videoPath);
+              } else {
+                _openMainMusicPlayer();
+              }
             },
             child: Center(
               child: Icon(
@@ -750,11 +782,14 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
                 const Icon(Icons.drag_indicator, size: 16, color: Colors.white38),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                  child: InkWell(
+                    onTap: () => _openMainVideoPlayer(videoPath),
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ),
                 InkWell(
@@ -792,11 +827,7 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
                 IconButton(
                   icon: const Icon(Icons.open_in_new_rounded, color: Colors.white70, size: 22),
                   tooltip: 'Open in player',
-                  onPressed: () {
-                    if (videoPath.isNotEmpty) {
-                      _MakawHomeState.instance?._openFile(videoPath);
-                    }
-                  },
+                  onPressed: () => _openMainVideoPlayer(videoPath),
                 ),
               ],
             ),
@@ -843,7 +874,7 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: InkWell(
-                    onTap: () => _MakawHomeState.instance?._switchToView('music'),
+                    onTap: _openMainMusicPlayer,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -887,6 +918,13 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
                     globalMusicService.nextSong();
                     setState(() {});
                   },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.open_in_new_rounded, color: Colors.white70, size: 18),
+                  tooltip: 'Open in Music Player',
+                  constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                  padding: EdgeInsets.zero,
+                  onPressed: _openMainMusicPlayer,
                 ),
                 const SizedBox(width: 4),
                 InkWell(

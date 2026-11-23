@@ -302,8 +302,17 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
     );
   }
 
+  bool _isNewDoc(DocumentFileInfo doc) {
+    if (doc.dateTime != null && DateTime.now().difference(doc.dateTime!).inHours < 72) {
+      return true;
+    }
+    final folder = doc.folder.toLowerCase();
+    return folder.contains('download') || folder.contains('received');
+  }
+
   Widget _buildDocItem(DocumentFileInfo doc) {
     final isFav = _service.isFavorite(doc.id);
+    final isNew = _isNewDoc(doc);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
@@ -317,7 +326,25 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
             decoration: BoxDecoration(color: _color(doc.filePath).withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
             child: Icon(_icon(doc.filePath), color: _color(doc.filePath), size: 24),
           ),
-          title: Text(doc.fileName, style: const TextStyle(color: Colors.white, fontSize: 14), overflow: TextOverflow.ellipsis),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(doc.fileName, style: const TextStyle(color: Colors.white, fontSize: 14), overflow: TextOverflow.ellipsis),
+              ),
+              if (isNew) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                  ),
+                  child: const Text('NEW', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                ),
+              ],
+            ],
+          ),
           subtitle: Text('${_ext(doc.filePath).toUpperCase()} · ${DocumentService.folderDisplayName(doc.folder)}',
               style: const TextStyle(color: Color(0xFF666680), fontSize: 11)),
           trailing: PopupMenuButton<String>(
