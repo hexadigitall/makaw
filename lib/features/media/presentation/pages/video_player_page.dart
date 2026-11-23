@@ -2151,7 +2151,11 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
           setState(() => _page = 'home');
           return;
         }
-        Navigator.maybePop(context);
+        if (widget.onHome != null) {
+          widget.onHome!();
+        } else {
+          Navigator.of(context).pop();
+        }
       },
       child: Scaffold(
         backgroundColor: _kDark,
@@ -2194,7 +2198,16 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
         onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
       ) : Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
       leading: isHome
-          ? IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () { if (widget.onHome != null) widget.onHome!(); else Navigator.maybePop(context); })
+          ? IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () {
+                if (widget.onHome != null) {
+                  widget.onHome!();
+                } else {
+                  Navigator.of(context).pop();
+                }
+              },
+            )
           : IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => setState(() => _page = 'home')),
     );
   }

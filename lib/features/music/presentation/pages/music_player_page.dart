@@ -345,7 +345,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
           });
           return;
         }
-        Navigator.maybePop(context);
+        Navigator.of(context).pop();
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0F0F1A),
@@ -373,7 +373,23 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
         children: [
           Row(
             children: [
-              IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.maybePop(context)),
+              IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: () {
+                  if (_service.showNowPlaying) {
+                    _service.setShowNowPlaying(false);
+                    return;
+                  }
+                  if (_isSearchPage) {
+                    setState(() {
+                      _isSearchPage = false;
+                      _searchCtrl.clear();
+                    });
+                    return;
+                  }
+                  Navigator.of(context).pop();
+                },
+              ),
               Expanded(
                 child: Text('Makaw Music',
                   style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
