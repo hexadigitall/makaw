@@ -11,6 +11,7 @@ import '../../../media/data/services/media_thumbnail_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import 'music_playlist_page.dart';
 import '../../../../core/storage/lyric_service.dart';
+import '../../../../core/services/global_player_state.dart';
 
 class _LrcLine {
   final Duration time;
@@ -882,9 +883,12 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
                   icon: const Icon(Icons.more_vert, color: Color(0xFF666680), size: 18),
                   onSelected: (v) {
                     if (v == 'open') {
+                      GlobalPlayerState.instance.pushToolRoute('playlist');
                       Navigator.push(context, MaterialPageRoute(builder: (_) => MusicPlaylistPage(
                         service: _service, playlistName: pl.name,
-                      )));
+                      ))).then((_) {
+                        GlobalPlayerState.instance.popToolRoute('playlist');
+                      });
                     } else if (v == 'play' && s.isNotEmpty) _service.playSong(0, fromList: s);
                     else if (v == 'rename') _renamePlaylistDialog(pl.name);
                     else if (v == 'export') _exportPlaylistM3u8(pl.name, s);
@@ -899,9 +903,12 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
                   ],
                 ),
                 onTap: () {
+                  GlobalPlayerState.instance.pushToolRoute('playlist');
                   Navigator.push(context, MaterialPageRoute(builder: (_) => MusicPlaylistPage(
                     service: _service, playlistName: pl.name,
-                  )));
+                  ))).then((_) {
+                    GlobalPlayerState.instance.popToolRoute('playlist');
+                  });
                 },
               );
             }),

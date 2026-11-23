@@ -77,6 +77,7 @@ import 'app/providers/service_providers.dart';
 import 'features/browser/presentation/pages/media_sniffer_page.dart';
 import 'core/widgets/responsive.dart';
 import 'core/widgets/widgets.dart';
+import 'core/services/global_player_state.dart';
 import 'features/portal/domain/home_activity.dart';
 import 'features/portal/presentation/pages/makaw_home_portal_page.dart';
 import 'features/portal/presentation/pages/universal_search_palette.dart';
@@ -185,25 +186,6 @@ class _AppRouteObserver extends NavigatorObserver {
 
 final _appRouteObserver = _AppRouteObserver();
 final GlobalKey<NavigatorState> globalNavigatorKey = GlobalKey<NavigatorState>();
-
-class GlobalPlayerState extends ChangeNotifier {
-  static final GlobalPlayerState instance = GlobalPlayerState._();
-  GlobalPlayerState._();
-
-  bool _isHome = true;
-  bool get isHome => _isHome;
-
-  bool _inFullPlayer = false;
-  bool get inFullPlayer => _inFullPlayer;
-
-  void update({required bool isHome, required bool inFullPlayer}) {
-    if (_isHome != isHome || _inFullPlayer != inFullPlayer) {
-      _isHome = isHome;
-      _inFullPlayer = inFullPlayer;
-      notifyListeners();
-    }
-  }
-}
 
 // ── Makaw Design Tokens ─────────────────────────────────────────────────────
 
@@ -585,15 +567,23 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
   Widget build(BuildContext context) {
     final state = GlobalPlayerState.instance;
 
-    final inMediaTool = state.inFullPlayer ||
+    // The Floating music player should only show on screens where the
+    // Mainplayer or miniplayer shouldn't show.
+    // Screens with Mainplayer or Miniplayer:
+    // - Makaw Home: Miniplayer (inline widget player)
+    // - Media Library: Miniplayer (docked bottom bar)
+    // - Makaw Music: Miniplayer (docked bottom bar) or Mainplayer (Now Playing)
+    // - Playlist detail: Miniplayer (docked bottom bar)
+    // - Video Player: Mainplayer (full video player)
+    final hasPlayerOnScreen = state.isScreenWithPlayer ||
+        state.isHome ||
+        state.inFullPlayer ||
         _MakawHomeState.instance?._currentView == 'media' ||
         _MakawHomeState.instance?._currentView == 'music' ||
         _MakawHomeState.instance?._currentView == 'player' ||
         (_MakawHomeState.instance?._hasActiveMediaTool ?? false);
 
-    // 1. On Makaw Home: settles as inline widget, NEVER floats over footers/screens!
-    // 2. In media player tools: dedicated docked bottom miniplayer is active!
-    if (state.isHome || inMediaTool || _dismissed) {
+    if (hasPlayerOnScreen || _dismissed) {
       return widget.child;
     }
 
@@ -950,7 +940,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       (_activeToolRoutes.last == 'media' ||
        _activeToolRoutes.last == 'music' ||
        _activeToolRoutes.last == 'player' ||
-       _activeToolRoutes.last == 'video_player');
+       _activeToolRoutes.last == 'video_player' ||
+       _activeToolRoutes.last == 'playlist');
   String _currentView = 'browser';
   final List<VoidCallback> _navQueue = [];
   bool _drainingNav = false;
@@ -1047,6 +1038,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     // Base view underneath any tool route is always Makaw Home so exiting
     // always returns level-by-level directly to Makaw Home.
     _activeToolRoutes.add(view);
+    GlobalPlayerState.instance.pushToolRoute(view);
     _currentView = 'browser';
     _viewMode = ViewMode.home;
     _browserSubView = BrowserSubView.browsing;
@@ -1063,6 +1055,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           _urlController.clear();
           setState(() {
             _activeToolRoutes.remove(view);
+            GlobalPlayerState.instance.popToolRoute(view);
             _currentView = 'browser';
             _viewMode = ViewMode.home;
             _browserSubView = BrowserSubView.browsing;
@@ -5867,6 +5860,7 @@ TappableIcon(
 
     if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp'].contains(ext)) {
       _activeToolRoutes.add('video_player');
+      GlobalPlayerState.instance.pushToolRoute('video_player');
       _updateGlobalPlayerState();
       Navigator.of(context).push(fastRoute(DirectVideoPlayer(
         filePath: filePath,
@@ -5875,6 +5869,7 @@ TappableIcon(
         if (mounted) {
           setState(() {
             _activeToolRoutes.remove('video_player');
+            GlobalPlayerState.instance.popToolRoute('video_player');
           });
           _updateGlobalPlayerState();
         }
