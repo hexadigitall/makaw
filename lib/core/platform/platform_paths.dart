@@ -204,10 +204,10 @@ class PlatformPaths {
 
   /// Human-readable default download location hint for the current platform.
   static String defaultDownloadsHint() {
-    if (Platform.isAndroid) return '/storage/emulated/0/Download/Makaw';
+    if (Platform.isAndroid) return '/storage/emulated/0/Download';
     if (!isDesktop) return '';
     final h = home();
     if (h.isEmpty) return '';
-    return '${h}${Platform.pathSeparator}Downloads';
+    return '$h${Platform.pathSeparator}Downloads';
   }
 }

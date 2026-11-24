@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/platform/platform_paths.dart';
+import '../../../../core/services/root_service.dart';
 import '../../../../core/storage/settings_service.dart';
 
 /// App-wide Settings hub.
@@ -36,12 +37,39 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _downloadLocation = '';
   bool _permissionGranted = false;
+  bool _rootAvailable = false;
+  bool _rootGranted = false;
 
   @override
   void initState() {
     super.initState();
     _loadDownloadLocation();
     _loadPermission();
+    _loadRootStatus();
+  }
+
+  Future<void> _loadRootStatus() async {
+    final available = await RootService.instance.isRootAvailable();
+    final granted = available ? await RootService.instance.isRootGranted() : false;
+    if (mounted) {
+      setState(() {
+        _rootAvailable = available;
+        _rootGranted = granted;
+      });
+    }
+  }
+
+  Future<void> _requestRoot() async {
+    final granted = await RootService.instance.requestRootAccess();
+    if (mounted) {
+      setState(() => _rootGranted = granted);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(granted ? 'Root access granted!' : 'Root access denied or su unavailable'),
+          backgroundColor: granted ? const Color(0xFF14B8A6) : Colors.redAccent,
+        ),
+      );
+    }
   }
 
   Future<void> _loadDownloadLocation() async {
@@ -100,7 +128,9 @@ class _SettingsPageState extends State<SettingsPage> {
             _tile(
               icon: Icons.folder,
               title: 'Download location',
-              subtitle: _downloadLocation.isNotEmpty ? _downloadLocation : 'MakawDownloads (default)',
+              subtitle: _downloadLocation.isNotEmpty
+                  ? _downloadLocation
+                  : (Platform.isAndroid ? '/storage/emulated/0/Download' : 'Downloads (default)'),
               onTap: _showDownloadLocationDialog,
             ),
           ]),
@@ -118,6 +148,23 @@ class _SettingsPageState extends State<SettingsPage> {
                 onChanged: (_) => _togglePermission(),
               ),
               onTap: _togglePermission,
+            ),
+            const Divider(height: 1, color: Color(0xFF334155)),
+            _tile(
+              icon: Icons.admin_panel_settings,
+              title: 'Root access (Superuser)',
+              subtitle: _rootGranted
+                  ? 'Granted (Full device root privileges)'
+                  : (_rootAvailable ? 'Available — tap to grant root' : 'Not rooted or su unavailable'),
+              trailing: _rootGranted
+                  ? const Icon(Icons.check_circle, color: Color(0xFF14B8A6), size: 20)
+                  : (_rootAvailable
+                      ? TextButton(
+                          onPressed: _requestRoot,
+                          child: const Text('Grant', style: TextStyle(color: Color(0xFF14B8A6))),
+                        )
+                      : null),
+              onTap: _requestRoot,
             ),
           ]),
           const SizedBox(height: 20),
@@ -227,7 +274,7 @@ class _SettingsPageState extends State<SettingsPage> {
               decoration: InputDecoration(
                 labelText: 'Folder path',
                 labelStyle: const TextStyle(color: Color(0xFF94A3B8)),
-                hintText: PlatformPaths.defaultDownloadsHint().isEmpty ? '/storage/emulated/0/Download/Makaw' : PlatformPaths.defaultDownloadsHint(),
+                hintText: PlatformPaths.defaultDownloadsHint().isEmpty ? '/storage/emulated/0/Download' : PlatformPaths.defaultDownloadsHint(),
                 hintStyle: const TextStyle(color: Color(0xFF475569)),
                 border: const OutlineInputBorder(),
                 enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF334155))),

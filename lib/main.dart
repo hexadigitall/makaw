@@ -1450,15 +1450,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     await Future.delayed(const Duration(milliseconds: 1000));
     if (!mounted) return;
 
-    // Request manage external storage first (separate dialog)
+    // Request manage external storage first (All files access / root storage access)
     if (Platform.isAndroid) {
-      final sdk = int.tryParse(Platform.operatingSystemVersion.split(' ').first) ?? 0;
-      if (sdk >= 30) {
+      try {
         final status = await Permission.manageExternalStorage.status;
-        if (status.isDenied) {
+        if (!status.isGranted) {
           await Permission.manageExternalStorage.request();
         }
-      }
+      } catch (_) {}
     }
 
     // Batch request remaining permissions (shows a single system dialog on Android 13+)
@@ -2906,68 +2905,114 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   String _downloadLocation = '';
   String _defaultDownloadDir() => _downloadLocation.isNotEmpty ? _downloadLocation : _cachedDownloadDir;
 
-  /// Returns a path on public external storage that survives uninstall/reinstall.
-  /// Falls back to app-specific external storage, then documents dir.
-  Future<String> _getPublicStoragePath(String subfolder) async {
-    // Desktop: use the real Downloads folder so Media/Documents stores are
-    // reachable and survive restarts.
+  /// Returns the default public download directory on the device.
+  /// Android: /storage/emulated/0/Download (default system download folder)
+  /// Desktop: ~/Downloads
+  Future<String> _getPublicDownloadPath() async {
+    if (Platform.isAndroid) {
+      for (final base in ['/storage/emulated/0/Download', '/sdcard/Download', '/storage/emulated/0/Downloads']) {
+        final dir = Directory(base);
+        try {
+          if (await dir.exists()) return dir.path;
+          await dir.create(recursive: true);
+          if (await dir.exists()) return dir.path;
+        } catch (_) {}
+      }
+      return '/storage/emulated/0/Download';
+    }
     if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       final base = PlatformPaths.defaultDownloadsHint();
       if (base.isNotEmpty) {
         final d = Directory(base);
         try {
+          if (await d.exists()) return d.path;
           await d.create(recursive: true);
-          if (await d.exists()) {
-            return p.join(d.path, 'Makaw', subfolder);
-          }
+          if (await d.exists()) return d.path;
         } catch (_) {}
       }
     }
-    // Try public Downloads folder (survives uninstall with MANAGE_EXTERNAL_STORAGE)
-    if (Platform.isAndroid) {
-      for (final base in ['/storage/emulated/0/Download', '/sdcard/Download', '/storage/emulated/0/Downloads']) {
-        final dir = Directory('$base/Makaw');
-        try {
-          await dir.create(recursive: true);
-          if (await dir.exists()) {
-            return p.join(dir.path, subfolder);
-          }
-        } catch (_) {}
-      }
-    }
-    // Fallback: app-external storage (will NOT survive uninstall)
+    final dir = await getApplicationDocumentsDirectory();
+    return dir.path;
+  }
+
+  /// App data storage directory (for makaw_data.json backups).
+  Future<String> _getAppDataStoragePath() async {
     try {
       final ext = await getExternalStorageDirectory();
       if (ext != null) {
-        final dir = Directory(p.join(ext.path, 'Makaw'));
+        final dir = Directory(p.join(ext.path, 'Data'));
         await dir.create(recursive: true);
-        return p.join(dir.path, subfolder);
+        return dir.path;
       }
     } catch (_) {}
-    // Final fallback: documents directory
     final dir = await getApplicationDocumentsDirectory();
-    final d = Directory(p.join(dir.path, 'Makaw'));
-    await d.create(recursive: true);
-    return p.join(d.path, subfolder);
+    return dir.path;
   }
 
   Future<void> _initDownloadDir() async {
     final prefs = await SharedPreferences.getInstance();
     _downloadLocation = prefs.getString('download_location') ?? '';
+    // If the saved location was the old scrapped "MakawDownloads" or "Download/Makaw" folder, scrap it!
+    if (_downloadLocation.contains('MakawDownloads') ||
+        _downloadLocation.endsWith('Download/Makaw') ||
+        _downloadLocation.endsWith(r'Download\Makaw')) {
+      _downloadLocation = '';
+      await prefs.remove('download_location');
+    }
+
     if (_downloadLocation.isNotEmpty && await Directory(_downloadLocation).exists()) {
       _cachedDownloadDir = _downloadLocation;
     } else {
-      _cachedDownloadDir = await _getPublicStoragePath('MakawDownloads');
+      _cachedDownloadDir = await _getPublicDownloadPath();
       final d = Directory(_cachedDownloadDir);
-      if (!await d.exists()) await d.create(recursive: true);
+      if (!await d.exists()) {
+        try {
+          await d.create(recursive: true);
+        } catch (_) {}
+      }
     }
+
+    // Auto-migrate any files from old scrapped folders into the default Download folder!
+    _migrateScrappedDownloads(_cachedDownloadDir);
+
     await _importAppData();
   }
 
-  /// Export all user data to JSON file in the public Makaw folder.
+  void _migrateScrappedDownloads(String targetDir) {
+    if (!Platform.isAndroid) return;
+    try {
+      final oldDirs = [
+        '/storage/emulated/0/Download/Makaw/MakawDownloads',
+        '/storage/emulated/0/Download/Makaw',
+        '/sdcard/Download/Makaw/MakawDownloads',
+        '/sdcard/Download/Makaw',
+      ];
+      final target = Directory(targetDir);
+      if (!target.existsSync()) return;
+
+      for (final oldPath in oldDirs) {
+        final oldDir = Directory(oldPath);
+        if (oldDir.existsSync()) {
+          for (final entity in oldDir.listSync()) {
+            if (entity is File) {
+              final newPath = p.join(targetDir, p.basename(entity.path));
+              if (!File(newPath).existsSync()) {
+                entity.renameSync(newPath);
+              }
+            }
+          }
+          try {
+            oldDir.deleteSync(recursive: true);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Export all user data to JSON file.
   Future<void> _exportAppData() async {
     try {
-      final dataDir = await _getPublicStoragePath('');
+      final dataDir = await _getAppDataStoragePath();
       final file = File(p.join(dataDir, 'makaw_data.json'));
       final data = {
         'shortcuts': _shortcuts.map((s) => [s.$1, s.$2]).toList(),
@@ -2980,10 +3025,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     } catch (_) {}
   }
 
-  /// Import all user data from JSON file in the public Makaw folder.
+  /// Import all user data from JSON file.
   Future<void> _importAppData() async {
     try {
-      final dataDir = await _getPublicStoragePath('');
+      final dataDir = await _getAppDataStoragePath();
       final file = File(p.join(dataDir, 'makaw_data.json'));
       if (!await file.exists()) return;
       final raw = await file.readAsString();
@@ -5863,7 +5908,7 @@ TappableIcon(
                     dense: true,
                     leading: Icon(Icons.folder, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
                     title: Text('Download Location', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
-                    subtitle: Text(_downloadLocation.isNotEmpty ? _downloadLocation.split('\\').last.split('/').last : (kIsWeb ? 'MakawDownloads' : PlatformPaths.defaultDownloadsHint()), style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11)),
+                    subtitle: Text(_downloadLocation.isNotEmpty ? _downloadLocation.split('\\').last.split('/').last : (Platform.isAndroid ? 'Download' : (kIsWeb ? 'Downloads' : PlatformPaths.defaultDownloadsHint())), style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 11)),
                     trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), size: 20),
                     onTap: () async {
                       Navigator.of(ctx2).pop();

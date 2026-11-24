@@ -16,9 +16,15 @@ class SessionPaths {
 
   static bool get isDesktop => PlatformPaths.isDesktop;
 
-  /// The real OS Downloads folder on desktop, and the app's private
-  /// documents directory elsewhere.
+  /// The real OS Downloads folder on desktop, and the default device Download directory on Android.
   static Future<String> downloadsDir() async {
+    if (Platform.isAndroid) {
+      for (final base in ['/storage/emulated/0/Download', '/sdcard/Download', '/storage/emulated/0/Downloads']) {
+        final d = Directory(base);
+        if (d.existsSync()) return base;
+      }
+      return '/storage/emulated/0/Download';
+    }
     if (isDesktop) {
       final hint = PlatformPaths.defaultDownloadsHint();
       if (hint.isNotEmpty) return hint;
