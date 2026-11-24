@@ -1931,11 +1931,12 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   void _closeBrowserTab(int id) {
     final idx = _browserTabs.indexWhere((t) => t.id == id);
+    BrowserTab? closedTab;
     if (idx >= 0) {
-      final tab = _browserTabs[idx];
-      if (tab.url.isNotEmpty && !tab.incognito) {
-        _recentTabs.removeWhere((t) => t['url'] == tab.url);
-        _recentTabs.insert(0, {'url': tab.url, 'title': tab.title});
+      closedTab = _browserTabs[idx];
+      if (closedTab.url.isNotEmpty && !closedTab.incognito) {
+        _recentTabs.removeWhere((t) => t['url'] == closedTab!.url);
+        _recentTabs.insert(0, {'url': closedTab.url, 'title': closedTab.title});
         if (_recentTabs.length > _maxRecentTabs) _recentTabs.removeLast();
       }
     }
@@ -1950,10 +1951,17 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _browserSubView = BrowserSubView.newTab;
         _viewMode = ViewMode.newTab;
       } else if (_activeBrowserTabId == id) {
-        final next = _browserTabs[idx > 0 ? idx - 1 : 0];
-        _activeBrowserTabId = next.id;
-        _browserSubView = next.isEmpty ? BrowserSubView.newTab : BrowserSubView.browsing;
-        _viewMode = !next.isEmpty ? ViewMode.browsing : ViewMode.newTab;
+        final wasIncognito = closedTab?.incognito ?? false;
+        final matchingTabs = _browserTabs.where((t) => t.incognito == wasIncognito).toList();
+        if (matchingTabs.isNotEmpty) {
+          _activeBrowserTabId = matchingTabs.last.id;
+        } else {
+          final safeIdx = (idx >= _browserTabs.length) ? _browserTabs.length - 1 : (idx > 0 ? idx - 1 : 0);
+          _activeBrowserTabId = _browserTabs[safeIdx].id;
+        }
+        final activeTab = _browserTabs.firstWhere((t) => t.id == _activeBrowserTabId, orElse: () => _browserTabs.first);
+        _browserSubView = activeTab.isEmpty ? BrowserSubView.newTab : BrowserSubView.browsing;
+        _viewMode = !activeTab.isEmpty ? ViewMode.browsing : ViewMode.newTab;
       }
     });
     _syncUrlController();
@@ -2223,7 +2231,53 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     );
   }
 
-  // ─── Media Sniffer ──────────────────────────────────────────────────────────
+  // ─── Media Sniffer & Downloads ───────────────────────────────────────────────
+
+  /// Intercepts file download requests, checks if the file has already been downloaded,
+  /// and prompts the user with "Download again?" so they can cancel if triggered by error.
+  Future<void> _handleDownloadRequest(String url, {String? filename}) async {
+    final mgr = _downloadManager;
+    if (mgr == null) return;
+
+    final resolvedFilename = mgr.resolveFilename(url, filename: filename);
+    final isDup = mgr.isDuplicate(url, filename: filename);
+
+    if (isDup && mounted) {
+      final shouldDownload = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: kSurfaceElevated,
+          title: const Text('Download again?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Text(
+            'You have already downloaded "$resolvedFilename". Do you want to download it again?',
+            style: const TextStyle(color: kTextSecondary, fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel', style: TextStyle(color: kTextSecondary)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF14B8A6)),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Download again'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldDownload != true) {
+        return;
+      }
+
+      await mgr.enqueue(url, filename: resolvedFilename, forceNew: true);
+      _showToast('Downloading: $resolvedFilename');
+      return;
+    }
+
+    await mgr.enqueue(url, filename: resolvedFilename);
+    _showToast('Downloading: $resolvedFilename');
+  }
 
   void _showMediaSnifferPage() {
     if (_pendingMedia.isEmpty) return;
@@ -2240,15 +2294,14 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         items: items,
         showToast: _showToast,
         onDownload: (item) {
-          _downloadManager?.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
+          _handleDownloadRequest(item.url, filename: item.url.split('/').last.split('?').first);
           setState(() {});
         },
-        onDownloadAll: (items) {
+        onDownloadAll: (items) async {
           for (final item in items) {
-            _downloadManager?.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
+            await _handleDownloadRequest(item.url, filename: item.url.split('/').last.split('?').first);
             _pendingMedia.removeWhere((m) => m.url == item.url);
           }
-          _showToast('Downloading ${items.length} item(s)');
           setState(() {});
         },
         onClear: () {
@@ -6763,11 +6816,7 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
           final uriPath = downloadStartRequest.url.uriValue.path;
           filename = uriPath.split('/').lastWhere((s) => s.isNotEmpty, orElse: () => 'download');
         }
-        if (!filename.contains('.')) {
-          filename = '$filename.bin';
-        }
-        _downloadManager?.enqueue(fileUrl, filename: filename);
-        _showToast('Downloading: $filename');
+        await _handleDownloadRequest(fileUrl, filename: filename);
       },
       onProgressChanged: (ctrl, progress) {
         _tabProgress[tab.id] = progress;
@@ -7828,8 +7877,7 @@ try {
                                     IconButton(
                                       icon: Icon(Icons.download, size: 18, color: Colors.cyan),
                                       onPressed: () {
-                                        _downloadManager?.enqueue(item.url, filename: item.url.split('/').last.split('?').first);
-                                        _showToast('Added to downloads');
+                                        _handleDownloadRequest(item.url, filename: item.url.split('/').last.split('?').first);
                                       },
                                       tooltip: 'Download original',
                                     ),
@@ -7850,8 +7898,7 @@ try {
                                 children: item.formats.map((f) {
                                   return InkWell(
                                     onTap: () {
-                                      _downloadManager?.enqueue(f.url, filename: f.url.split('/').last.split('?').first);
-                                      _showToast('Downloading ${f.label}');
+                                      _handleDownloadRequest(f.url, filename: f.url.split('/').last.split('?').first);
                                     },
                                     child: Container(
                                       padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),

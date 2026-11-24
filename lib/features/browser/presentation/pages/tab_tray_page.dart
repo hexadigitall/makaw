@@ -77,6 +77,9 @@ class _TabTrayPageState extends State<TabTrayPage> {
   void _closeTab(int id) {
     setState(() {
       _tabs.removeWhere((t) => t.id == id);
+      if (_showIncognito && !_tabs.any((t) => t.incognito)) {
+        _showIncognito = false;
+      }
     });
     widget.onCloseTab(id);
   }
@@ -335,7 +338,7 @@ class _TabTrayPageState extends State<TabTrayPage> {
                         DismissDirection.endToStart: 0.15,
                       },
                       movementDuration: const Duration(milliseconds: 100),
-                      resizeDuration: const Duration(milliseconds: 80),
+                      resizeDuration: null,
                       background: Container(
                         alignment: Alignment.center,
                         decoration: BoxDecoration(

@@ -79,6 +79,7 @@ class DownloadItem {
 }
 
 class DownloadService extends ChangeNotifier {
+  bool _isDisposed = false;
   final List<DownloadItem> _downloads = [];
   final Dio _dio;
   final String Function() _getDownloadDir;
@@ -160,10 +161,49 @@ class DownloadService extends ChangeNotifier {
     return !u.contains('.m3u8') && !u.contains('.ts');
   }
 
-  Future<DownloadItem> enqueue(String url, {String? filename}) async {
-    final id = DateTime.now().millisecondsSinceEpoch.toString();
+  /// Resolves the final safe filename with proper extension.
+  String resolveFilename(String url, {String? filename}) {
     final name = filename ?? url.split('/').last.split('?').first.split('#').first;
-    final safeName = ensureExtension(url, Uri.decodeComponent(name));
+    final decoded = Uri.decodeComponent(name.isEmpty ? 'download' : name);
+    return ensureExtension(url, decoded);
+  }
+
+  /// Checks whether a download for the given URL or resolved filename already exists
+  /// (either already completed on disk, currently downloading, or queued).
+  bool isDuplicate(String url, {String? filename}) {
+    final resolvedName = resolveFilename(url, filename: filename);
+    final dir = _getDownloadDir();
+    final filePath = p.join(dir, resolvedName);
+    if (File(filePath).existsSync()) return true;
+    return _downloads.any((d) =>
+        (d.url == url || d.filename == resolvedName) &&
+        (d.state == DownloadState.completed ||
+            d.state == DownloadState.downloading ||
+            d.state == DownloadState.queued));
+  }
+
+  /// Generates a non-colliding filename if a file already exists on disk or in active downloads:
+  /// e.g. "report.pdf" -> "report (1).pdf"
+  String getUniqueFilename(String filename) {
+    final dir = _getDownloadDir();
+    final ext = p.extension(filename);
+    final base = p.basenameWithoutExtension(filename);
+    var candidate = filename;
+    int counter = 1;
+    while (File(p.join(dir, candidate)).existsSync() ||
+        _downloads.any((d) => d.filename == candidate && d.state != DownloadState.failed)) {
+      candidate = '$base ($counter)$ext';
+      counter++;
+    }
+    return candidate;
+  }
+
+  Future<DownloadItem> enqueue(String url, {String? filename, bool forceNew = false}) async {
+    final id = DateTime.now().millisecondsSinceEpoch.toString();
+    var safeName = resolveFilename(url, filename: filename);
+    if (forceNew) {
+      safeName = getUniqueFilename(safeName);
+    }
     final item = DownloadItem(id: id, url: url, filename: safeName);
     _downloads.insert(0, item);
     notifyListeners();
@@ -330,7 +370,14 @@ class DownloadService extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (_isDisposed) return;
+    super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _isDisposed = true;
     _speedTimer?.cancel();
     for (final d in _downloads.where((d) => d.state == DownloadState.downloading)) {
       d.cancelToken?.cancel('Disposed');
