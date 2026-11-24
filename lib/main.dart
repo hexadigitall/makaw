@@ -1230,6 +1230,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   // AI
   String _aiApiKey = '';
+  String _aiModel = 'gemini-3.8-flash';
 
   void _onMusicChanged() {
     // A setState issued during widget build throws; defer to the next frame.
@@ -7529,16 +7530,27 @@ try {
   Future<void> _loadAiKey() async {
     final prefs = await SharedPreferences.getInstance();
     _aiApiKey = AiChatPage.cleanApiKey(prefs.getString('gemini_api_key') ?? '');
+    _aiModel = prefs.getString('gemini_model') ?? 'gemini-3.8-flash';
   }
 
   Future<String?> _showAISettings() {
-    final ctrl = TextEditingController(text: _aiApiKey);
+    final keyCtrl = TextEditingController(text: _aiApiKey);
+    final modelCtrl = TextEditingController(text: _aiModel);
     bool obscure = true;
+    final presetModels = [
+      'gemini-3.8-flash',
+      'gemini-3.5-flash',
+      'gemini-3.0-flash',
+      'gemini-2.5-flash',
+      'gemini-1.5-flash',
+    ];
+    String selectedModel = presetModels.contains(_aiModel) ? _aiModel : 'custom';
+
     return showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          final trimmed = ctrl.text.trim();
+          final trimmed = keyCtrl.text.trim();
           final isStandard = trimmed.startsWith('AIzaSy');
           return AlertDialog(
             backgroundColor: kSurfaceElevated,
@@ -7554,7 +7566,7 @@ try {
                   ),
                   const SizedBox(height: 12),
                   TextField(
-                    controller: ctrl,
+                    controller: keyCtrl,
                     style: const TextStyle(color: Colors.white),
                     obscureText: obscure,
                     onChanged: (_) => setDialogState(() {}),
@@ -7583,6 +7595,60 @@ try {
                       ),
                     ),
                   ],
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Gemini Model',
+                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: selectedModel,
+                    dropdownColor: kSurfaceElevated,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
+                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
+                      isDense: true,
+                    ),
+                    items: [
+                      ...presetModels.map((m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(
+                              m == 'gemini-3.8-flash' ? '$m (Default)' : m,
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          )),
+                      const DropdownMenuItem(
+                        value: 'custom',
+                        child: Text('Custom Model...', style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                    onChanged: (val) {
+                      if (val == null) return;
+                      setDialogState(() {
+                        selectedModel = val;
+                        if (val != 'custom') {
+                          modelCtrl.text = val;
+                        }
+                      });
+                    },
+                  ),
+                  if (selectedModel == 'custom') ...[
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: modelCtrl,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Custom Model ID',
+                        labelStyle: TextStyle(color: kTextSecondary),
+                        hintText: 'e.g. gemini-3.8-flash',
+                        hintStyle: TextStyle(color: kTextSecondary),
+                        border: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
+                        isDense: true,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -7594,13 +7660,22 @@ try {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF14B8A6)),
                 onPressed: () async {
-                  final key = AiChatPage.cleanApiKey(ctrl.text);
-                  if (key.isEmpty) return;
+                  final key = AiChatPage.cleanApiKey(keyCtrl.text);
+                  final chosenModel = (selectedModel == 'custom'
+                          ? modelCtrl.text.trim()
+                          : selectedModel)
+                      .trim();
+                  final effectiveModel =
+                      chosenModel.isNotEmpty ? chosenModel : 'gemini-3.8-flash';
                   final prefs = await SharedPreferences.getInstance();
-                  await prefs.setString('gemini_api_key', key);
-                  _aiApiKey = key;
+                  if (key.isNotEmpty) {
+                    await prefs.setString('gemini_api_key', key);
+                    _aiApiKey = key;
+                  }
+                  await prefs.setString('gemini_model', effectiveModel);
+                  _aiModel = effectiveModel;
                   if (ctx.mounted) Navigator.of(ctx).pop(key);
-                  _showToast('AI configured');
+                  _showToast('AI configured ($effectiveModel)');
                 },
                 child: const Text('Save'),
               ),
@@ -7615,6 +7690,7 @@ try {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => AiChatPage(
         apiKey: _aiApiKey,
+        initialModel: _aiModel,
         onOpenSettings: _showAISettings,
         pageTitle: pageTitle,
         pageUrl: pageUrl,

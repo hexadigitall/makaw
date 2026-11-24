@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Gemini chat screen.
 ///
@@ -13,6 +14,7 @@ import 'package:http/http.dart' as http;
 /// never rebuilt.
 class AiChatPage extends StatefulWidget {
   final String apiKey;
+  final String? initialModel;
   final Future<String?> Function()? onOpenSettings;
 
   /// Optional page context (opened from the Browser AI button). The context is
@@ -24,6 +26,7 @@ class AiChatPage extends StatefulWidget {
   const AiChatPage({
     super.key,
     required this.apiKey,
+    this.initialModel,
     this.onOpenSettings,
     this.pageTitle,
     this.pageUrl,
@@ -65,17 +68,22 @@ class _AiChatPageState extends State<AiChatPage> {
   bool _lastFailed = false;
   String _lastQuestion = '';
 
-  String _activeModel = 'gemini-1.5-flash';
+  String _activeModel = 'gemini-3.8-flash';
   static const List<String> _candidateModels = [
+    'gemini-3.8-flash',
+    'gemini-3.5-flash',
+    'gemini-3.0-flash',
+    'gemini-2.5-flash',
     'gemini-1.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-pro',
   ];
 
   @override
   void initState() {
     super.initState();
     _key = AiChatPage.cleanApiKey(widget.apiKey);
+    if (widget.initialModel != null && widget.initialModel!.trim().isNotEmpty) {
+      _activeModel = widget.initialModel!.trim();
+    }
     _ensureSession();
   }
 
@@ -83,8 +91,17 @@ class _AiChatPageState extends State<AiChatPage> {
   void didUpdateWidget(AiChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     final cleaned = AiChatPage.cleanApiKey(widget.apiKey);
+    final newModel = widget.initialModel?.trim();
+    bool shouldReset = false;
     if (cleaned != _key) {
       _key = cleaned;
+      shouldReset = true;
+    }
+    if (newModel != null && newModel.isNotEmpty && newModel != _activeModel) {
+      _activeModel = newModel;
+      shouldReset = true;
+    }
+    if (shouldReset) {
       _model = null;
       _chat = null;
       _ensureSession();
@@ -171,8 +188,8 @@ class _AiChatPageState extends State<AiChatPage> {
           'Please wait a moment before trying again, or check your Google AI Studio plan.';
     }
     if (s.contains('not found') || s.contains('404')) {
-      return 'Gemini model is currently unavailable on this API key.\n\n'
-          'Please check your API key permissions at aistudio.google.com.';
+      return 'Gemini model "$_activeModel" was not found or is deprecated.\n\n'
+          'Please tap the Settings icon (⚙) to switch to gemini-3.8-flash.';
     }
     return 'Error: $error\n\nPlease check your network connection and API key.';
   }
@@ -314,11 +331,14 @@ class _AiChatPageState extends State<AiChatPage> {
   Future<void> _openSettings() async {
     final handler = widget.onOpenSettings;
     if (handler == null) return;
-    final key = await handler();
-    if (!mounted || key == null || key.isEmpty) return;
-    final cleaned = AiChatPage.cleanApiKey(key);
+    await handler();
+    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final savedKey = prefs.getString('gemini_api_key');
+    final savedModel = prefs.getString('gemini_model');
     setState(() {
-      _key = cleaned;
+      if (savedKey != null) _key = AiChatPage.cleanApiKey(savedKey);
+      if (savedModel != null && savedModel.isNotEmpty) _activeModel = savedModel;
       _model = null;
       _chat = null;
     });
@@ -426,11 +446,28 @@ class _AiChatPageState extends State<AiChatPage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.auto_awesome, size: 20, color: _accent),
-          const SizedBox(width: 8),
-          const Text('AI Assistant'),
-        ]),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.auto_awesome, size: 20, color: _accent),
+                SizedBox(width: 8),
+                Text('AI Assistant'),
+              ],
+            ),
+            Text(
+              _activeModel,
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
         backgroundColor: Theme.of(context).colorScheme.surface,
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
