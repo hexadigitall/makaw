@@ -4658,11 +4658,20 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       context: context,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       isScrollControlled: true,
+      enableDrag: true,
+      showDragHandle: true,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) {
         final bookmarked = _isCurrentPageBookmarked();
-        return SafeArea(
-          child: Column(
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onVerticalDragEnd: (details) {
+            if (details.primaryVelocity != null && details.primaryVelocity! > 200) {
+              Navigator.of(ctx).pop();
+            }
+          },
+          child: SafeArea(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               // Header action icons
@@ -4750,10 +4759,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               ),
             ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   Widget _ellipsisAction(IconData icon, String label, VoidCallback onTap) {
     return GestureDetector(
@@ -6300,7 +6310,8 @@ TappableIcon(
     'responservbzh.icu','aclib.js','acscdn.com','d33f51dyacx7bd.cloudfront.net',
     'dpjf9a2rbjbvp.cloudfront.net','1xbet','bet9ja','betway','bet365',
     'casino.com',
-    'popunder','clickunder','adnxs.com','criteo.com','pubmatic.com',
+    'isatissalaam.cyou','isatissalaam','.cyou','alwingulla.com','monetag.com',
+    'onclickmega.com','popunder','clickunder','adnxs.com','criteo.com','pubmatic.com',
     'outbrain.com','taboola.com','revcontent.com','mgid.com','spotx.tv',
     'smartadserver.com','rubiconproject.com','indexww.com','openx.net',
     'casalemedia.com','bidswitch.net','sharethrough.com','teads.tv',
@@ -6312,15 +6323,26 @@ TappableIcon(
     'popunder','clickunder','popads','popcash',
     'malware','phishing','keylogger','ransomware',
     'apkpure','apk-dl','download-app','install-app',
+    'isatissalaam','alwingulla','monetag',
   ];
 
   static bool _isBlockedRedirect(String url) {
+    if (url.isEmpty || url == 'about:blank') return false;
     final lower = url.toLowerCase();
     for (final d in _blockedRedirectDomains) {
       if (lower.contains(d)) return true;
     }
     for (final k in _blockedRedirectKeywords) {
       if (lower.contains(k)) return true;
+    }
+    final uri = Uri.tryParse(lower);
+    final host = uri?.host ?? lower;
+    if (host.endsWith('.cyou') || host.contains('.cyou/')) return true;
+    const spamTlds = ['.cyou', '.hair', '.beauty', '.skin', '.rest', '.quest', '.monster', '.buzz', '.click'];
+    for (final tld in spamTlds) {
+      if (host.endsWith(tld) && !_trustedHosts.any((th) => host.endsWith(th))) {
+        return true;
+      }
     }
     return false;
   }
@@ -6375,7 +6397,8 @@ TappableIcon(
       'casino','betting','gambling','slots','poker',
       'popunder','clickunder','popads','malware','phishing','adsterra',
       'popcash','monetag','propellerads','exoclick','adcash','onclickmega','trafficjunky',
-      'adxcore','adnxs','zeroredirect','smartadserver','doubleclick'
+      'adxcore','adnxs','zeroredirect','smartadserver','doubleclick',
+      'isatissalaam','.cyou','alwingulla'
     ];
     function _isBadRedirect(url) {
       if (!url || typeof url !== 'string') return false;
@@ -6400,6 +6423,8 @@ TappableIcon(
     var origOpen = window.open.bind(window);
     window.open = function(url, target, features) {
       if (_isBadRedirect(url)) return null;
+      if (url && (url.indexOf('.cyou') >= 0 || url.indexOf('isatissalaam') >= 0)) return null;
+      if (loc.indexOf('o2tvseries') >= 0 && url && url.indexOf('o2tvseries') < 0) return null;
       var evt = window.event;
       if (!evt || evt.isTrusted === false) {
         if (!url || url === 'about:blank' || _isBadRedirect(url)) return null;
@@ -6407,7 +6432,23 @@ TappableIcon(
       return origOpen(url, target, features);
     };
 
-    // 3. Neutralize transparent full-screen clickjacking overlays
+    // 3. Block clickjacking rogue links targeting spam or ad networks
+    document.addEventListener('click', function(e) {
+      var t = e.target;
+      while (t && t.tagName !== 'A') {
+        t = t.parentElement;
+      }
+      if (t && t.tagName === 'A') {
+        var h = t.getAttribute('href') || '';
+        if (_isBadRedirect(h) || h.indexOf('.cyou') >= 0 || h.indexOf('isatissalaam') >= 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+      }
+    }, true);
+
+    // 4. Neutralize transparent full-screen clickjacking overlays
     function removeClickjackOverlays() {
       try {
         var all = document.querySelectorAll('div, iframe');
@@ -6530,6 +6571,27 @@ TappableIcon(
           debugPrint('MAKAW-POPUP blocked $targetUrl');
           return true;
         }
+
+        // If current site is a movie/streaming/download site (e.g. o2tvseries),
+        // block any cross-origin popup window!
+        try {
+          final curUri = await ctrl.getUrl();
+          final curHost = curUri?.host.toLowerCase() ?? '';
+          final targetUri = Uri.parse(targetUrl);
+          final targetHost = targetUri.host.toLowerCase();
+          if (curHost.contains('o2tvseries') ||
+              curHost.contains('fzmovies') ||
+              curHost.contains('netnaija') ||
+              curHost.contains('series') ||
+              curHost.contains('tvshows')) {
+            final curBase = curHost.replaceAll(RegExp(r'^www\.'), '');
+            final targetBase = targetHost.replaceAll(RegExp(r'^www\.'), '');
+            if (curBase != targetBase && !targetBase.endsWith(curBase)) {
+              debugPrint('MAKAW-POPUP blocked streaming ad popup from $curHost to $targetUrl');
+              return true;
+            }
+          }
+        } catch (_) {}
 
         // Same-origin navigation: keep in the current tab!
         try {
@@ -6770,9 +6832,17 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
         }
         return NavigationActionPolicy.ALLOW;
       },
-      onLoadStart: (ctrl, url) {
+      onLoadStart: (ctrl, url) async {
         final urlStr = url.toString();
         final tabId = tab.id;
+        if (_isBlockedRedirect(urlStr) || _adBlocker.isBlocked(urlStr)) {
+          debugPrint('MAKAW-LOADSTART intercepted spam redirect: $urlStr');
+          await ctrl.stopLoading();
+          if (await ctrl.canGoBack()) {
+            await ctrl.goBack();
+          }
+          return;
+        }
         debugPrint('MAKAW-LOADSTART tab=$tabId active=$_activeBrowserTabId url=$urlStr');
         _tabProgress[tabId] = 0;
         _tabErrorUrls.remove(tabId);

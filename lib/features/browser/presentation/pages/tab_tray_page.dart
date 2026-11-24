@@ -171,21 +171,33 @@ class _TabTrayPageState extends State<TabTrayPage> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Column(
-        children: [
-          Container(
-            color: Theme.of(context).colorScheme.surface,
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.add_circle_outline, color: _showIncognito ? _kIncognitoPurple : kAccentTeal, size: 28),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    _showIncognito ? widget.onCreateIncognitoTab?.call() : widget.onCreateTab();
-                  },
-                  splashRadius: 20,
-                ),
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragEnd: (details) {
+          if (details.primaryVelocity != null && details.primaryVelocity! > 250) {
+            Navigator.of(context).pop();
+          }
+        },
+        child: SafeArea(
+          child: Column(
+          children: [
+            Container(
+              color: Theme.of(context).colorScheme.surface,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.keyboard_arrow_down_rounded, color: Theme.of(context).colorScheme.onSurface, size: 28),
+                    tooltip: 'Close tabs (Swipe down)',
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.add_circle_outline, color: _showIncognito ? _kIncognitoPurple : kAccentTeal, size: 28),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _showIncognito ? widget.onCreateIncognitoTab?.call() : widget.onCreateTab();
+                    },
+                    splashRadius: 20,
+                  ),
                 Spacer(),
                 GestureDetector(
                   onTap: () => setState(() => _showIncognito = false),
@@ -425,6 +437,7 @@ class _TabTrayPageState extends State<TabTrayPage> {
         ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

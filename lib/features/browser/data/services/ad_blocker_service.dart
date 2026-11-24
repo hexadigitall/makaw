@@ -12,7 +12,31 @@ class AdBlockerService {
   AdBlockerService._();
 
   // ── Domain sets (Set for O(1) lookup) ──────────────────────────────────────
-  final Set<String> _hardcodedDomains = {};
+  final Set<String> _hardcodedDomains = {
+    'isatissalaam.cyou',
+    'alwingulla.com',
+    'monetag.com',
+    'popads.net',
+    'popcash.net',
+    'exoclick.com',
+    'propellerads.com',
+    'adsterra.com',
+    'hilltopads.com',
+    'clickadu.com',
+    'trafficjunky.com',
+    'juicyads.com',
+    'trafficfactory.com',
+    'galaksion.com',
+    'onclickmega.com',
+    'monuanceli.com',
+    'surmounttemperbooklet.com',
+    'lievestcrasser.com',
+    'responservbzh.icu',
+    'adnxs.com',
+    'smartadserver.com',
+    'doubleclick.net',
+    'zeroredirect.com',
+  };
   final Set<String> _dynamicDomains = {};
   bool _loaded = false;
   bool get loaded => _loaded;
@@ -144,6 +168,19 @@ class AdBlockerService {
     // Fast domain lookup (Set.contains is O(1))
     if (_hardcodedDomains.contains(domain)) return true;
     if (_dynamicDomains.contains(domain)) return true;
+
+    // Block rogue ad redirect networks & spam domains
+    if (domain.endsWith('.cyou') ||
+        domain.contains('isatissalaam') ||
+        domain.contains('alwingulla') ||
+        domain.contains('monetag')) {
+      return true;
+    }
+
+    const spamTlds = ['.cyou', '.hair', '.beauty', '.skin', '.rest', '.quest', '.monster', '.buzz', '.click'];
+    for (final tld in spamTlds) {
+      if (domain.endsWith(tld)) return true;
+    }
 
     // Check subdomains: e.g. "ads.example.com" → check "example.com"
     final dotIdx = domain.indexOf('.');

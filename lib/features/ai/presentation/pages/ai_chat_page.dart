@@ -1,25 +1,167 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:http/http.dart' as http;
+import 'package:open_filex/open_filex.dart';
+import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Gemini chat screen.
-///
-/// Owns its own message list: the previous implementation built the page once
-/// inside a `MaterialPageRoute` and called `setState` on the *host* app state,
-/// so prompts were sent and then silently dropped because the pushed route was
-/// never rebuilt.
+import '../../../../core/platform/session_paths.dart';
+
+// ── Models ───────────────────────────────────────────────────────────────────
+
+enum AiAttachmentType { file, repo, link, image }
+
+class AiAttachment {
+  final String id;
+  final String name;
+  final AiAttachmentType type;
+  final String? path;
+  final String? textContent;
+  final Uint8List? bytes;
+  final String? mimeType;
+  final int sizeInBytes;
+
+  const AiAttachment({
+    required this.id,
+    required this.name,
+    required this.type,
+    this.path,
+    this.textContent,
+    this.bytes,
+    this.mimeType,
+    required this.sizeInBytes,
+  });
+
+  String get formattedSize {
+    if (sizeInBytes <= 0) return '';
+    if (sizeInBytes < 1024) return '$sizeInBytes B';
+    if (sizeInBytes < 1024 * 1024) return '${(sizeInBytes / 1024).toStringAsFixed(1)} KB';
+    return '${(sizeInBytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'type': type.name,
+    'path': path,
+    'textContent': textContent,
+    'mimeType': mimeType,
+    'sizeInBytes': sizeInBytes,
+  };
+
+  factory AiAttachment.fromJson(Map<String, dynamic> json) => AiAttachment(
+    id: json['id'] as String? ?? UniqueKey().toString(),
+    name: json['name'] as String? ?? 'attachment',
+    type: AiAttachmentType.values.firstWhere(
+      (e) => e.name == json['type'],
+      orElse: () => AiAttachmentType.file,
+    ),
+    path: json['path'] as String?,
+    textContent: json['textContent'] as String?,
+    mimeType: json['mimeType'] as String?,
+    sizeInBytes: (json['sizeInBytes'] as num?)?.toInt() ?? 0,
+  );
+}
+
+class AiChatMessage {
+  final String id;
+  final String role; // 'user' or 'model'
+  String text;
+  final DateTime timestamp;
+  final List<AiAttachment> attachments;
+  bool isError;
+
+  AiChatMessage({
+    required this.id,
+    required this.role,
+    required this.text,
+    DateTime? timestamp,
+    this.attachments = const [],
+    this.isError = false,
+  }) : timestamp = timestamp ?? DateTime.now();
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'role': role,
+    'text': text,
+    'timestamp': timestamp.toIso8601String(),
+    'attachments': attachments.map((a) => a.toJson()).toList(),
+    'isError': isError,
+  };
+
+  factory AiChatMessage.fromJson(Map<String, dynamic> json) => AiChatMessage(
+    id: json['id'] as String? ?? UniqueKey().toString(),
+    role: json['role'] as String? ?? 'user',
+    text: json['text'] as String? ?? '',
+    timestamp: json['timestamp'] != null
+        ? DateTime.tryParse(json['timestamp'] as String) ?? DateTime.now()
+        : DateTime.now(),
+    attachments: (json['attachments'] as List?)
+            ?.map((a) => AiAttachment.fromJson(Map<String, dynamic>.from(a as Map)))
+            .toList() ??
+        const [],
+    isError: json['isError'] as bool? ?? false,
+  );
+}
+
+class AiChatSession {
+  final String id;
+  String title;
+  final DateTime createdAt;
+  DateTime updatedAt;
+  final List<AiChatMessage> messages;
+
+  AiChatSession({
+    required this.id,
+    required this.title,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    List<AiChatMessage>? messages,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now(),
+        messages = messages ?? [];
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    'messages': messages.map((m) => m.toJson()).toList(),
+  };
+
+  factory AiChatSession.fromJson(Map<String, dynamic> json) => AiChatSession(
+    id: json['id'] as String? ?? UniqueKey().toString(),
+    title: json['title'] as String? ?? 'New Chat',
+    createdAt: json['createdAt'] != null
+        ? DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now()
+        : DateTime.now(),
+    updatedAt: json['updatedAt'] != null
+        ? DateTime.tryParse(json['updatedAt'] as String) ?? DateTime.now()
+        : DateTime.now(),
+    messages: (json['messages'] as List?)
+            ?.map((m) => AiChatMessage.fromJson(Map<String, dynamic>.from(m as Map)))
+            .toList() ??
+        [],
+  );
+}
+
+// ── Screen Widget ────────────────────────────────────────────────────────────
+
 class AiChatPage extends StatefulWidget {
   final String apiKey;
   final String? initialModel;
   final Future<String?> Function()? onOpenSettings;
 
-  /// Optional page context (opened from the Browser AI button). The context is
-  /// sent to the model with each question but never renders as a fake user
-  /// message, and it never touches the WebView.
+  /// Optional page context (opened from Browser AI mode).
   final String? pageTitle;
   final String? pageUrl;
 
@@ -32,8 +174,6 @@ class AiChatPage extends StatefulWidget {
     this.pageUrl,
   });
 
-  /// Cleans an entered API key by stripping leading/trailing whitespace,
-  /// surrounding quotes, and accidental prefixes like `export GEMINI_API_KEY=`.
   static String cleanApiKey(String raw) {
     var key = raw.trim();
     if (key.startsWith('export ')) {
@@ -55,10 +195,11 @@ class AiChatPage extends StatefulWidget {
 
 class _AiChatPageState extends State<AiChatPage> {
   static const _accent = Color(0xFF14B8A6);
+  static const _kStorageKey = 'makaw_ai_chat_sessions_v2';
 
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
-  final List<Map<String, String>> _messages = [];
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   String _key = '';
   GenerativeModel? _model;
@@ -77,6 +218,27 @@ class _AiChatPageState extends State<AiChatPage> {
     'gemini-1.5-flash',
   ];
 
+  // Sessions and History
+  List<AiChatSession> _sessions = [];
+  String _currentSessionId = '';
+
+  // Pending attachments for the next query
+  final List<AiAttachment> _pendingAttachments = [];
+
+  // TTS Read aloud
+  FlutterTts? _tts;
+  String? _currentlySpeakingMessageId;
+
+  AiChatSession get _currentSession {
+    final idx = _sessions.indexWhere((s) => s.id == _currentSessionId);
+    if (idx != -1) return _sessions[idx];
+    if (_sessions.isNotEmpty) return _sessions.first;
+    final fresh = AiChatSession(id: DateTime.now().millisecondsSinceEpoch.toString(), title: 'New Chat');
+    _sessions.add(fresh);
+    _currentSessionId = fresh.id;
+    return fresh;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -84,7 +246,26 @@ class _AiChatPageState extends State<AiChatPage> {
     if (widget.initialModel != null && widget.initialModel!.trim().isNotEmpty) {
       _activeModel = widget.initialModel!.trim();
     }
-    _ensureSession();
+    _initTts();
+    _loadSessions().then((_) {
+      _ensureSession();
+    });
+  }
+
+  Future<void> _initTts() async {
+    try {
+      _tts = FlutterTts();
+      await _tts?.setLanguage('en-US');
+      await _tts?.setSpeechRate(0.5);
+      await _tts?.setVolume(1.0);
+      await _tts?.setPitch(1.0);
+      _tts?.setCompletionHandler(() {
+        if (mounted) setState(() => _currentlySpeakingMessageId = null);
+      });
+      _tts?.setErrorHandler((_) {
+        if (mounted) setState(() => _currentlySpeakingMessageId = null);
+      });
+    } catch (_) {}
   }
 
   @override
@@ -113,8 +294,139 @@ class _AiChatPageState extends State<AiChatPage> {
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
     _httpClient?.close();
+    _tts?.stop();
     super.dispose();
   }
+
+  // ── Session persistence ────────────────────────────────────────────────────
+
+  Future<void> _loadSessions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kStorageKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw) as List;
+        _sessions = decoded
+            .map((s) => AiChatSession.fromJson(Map<String, dynamic>.from(s as Map)))
+            .toList();
+      }
+    } catch (_) {}
+
+    if (_sessions.isEmpty) {
+      final initial = AiChatSession(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: 'New Chat',
+      );
+      _sessions.add(initial);
+      _currentSessionId = initial.id;
+    } else {
+      _sessions.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      _currentSessionId = _sessions.first.id;
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _saveSessions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = jsonEncode(_sessions.map((s) => s.toJson()).toList());
+      await prefs.setString(_kStorageKey, raw);
+    } catch (_) {}
+  }
+
+  void _createNewChat() {
+    final fresh = AiChatSession(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      title: 'New Chat',
+    );
+    setState(() {
+      _sessions.insert(0, fresh);
+      _currentSessionId = fresh.id;
+      _pendingAttachments.clear();
+      _chat = null;
+    });
+    _saveSessions();
+    _ensureSession();
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop(); // close drawer
+    }
+  }
+
+  void _switchChat(String sessionId) {
+    if (_currentSessionId == sessionId) {
+      if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+    setState(() {
+      _currentSessionId = sessionId;
+      _pendingAttachments.clear();
+      _chat = null;
+    });
+    _ensureSession();
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+    }
+    _scrollToEnd();
+  }
+
+  Future<void> _deleteChat(String sessionId) async {
+    setState(() {
+      _sessions.removeWhere((s) => s.id == sessionId);
+      if (_sessions.isEmpty) {
+        final fresh = AiChatSession(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          title: 'New Chat',
+        );
+        _sessions.add(fresh);
+        _currentSessionId = fresh.id;
+      } else if (_currentSessionId == sessionId) {
+        _currentSessionId = _sessions.first.id;
+      }
+      _chat = null;
+    });
+    await _saveSessions();
+    _ensureSession();
+  }
+
+  Future<void> _renameChat(AiChatSession session) async {
+    final ctrl = TextEditingController(text: session.title);
+    final newTitle = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
+        title: const Text('Rename Chat'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: 'Enter chat title',
+            filled: true,
+            fillColor: Theme.of(ctx).cardColor,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: _accent),
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (newTitle != null && newTitle.isNotEmpty) {
+      setState(() {
+        session.title = newTitle;
+        session.updatedAt = DateTime.now();
+      });
+      await _saveSessions();
+    }
+  }
+
+  // ── Gemini session ─────────────────────────────────────────────────────────
 
   bool _ensureSession({String? model}) {
     if (_key.isEmpty) return false;
@@ -128,17 +440,22 @@ class _AiChatPageState extends State<AiChatPage> {
         apiKey: _key,
         httpClient: _httpClient,
       );
-      _chat = _model!.startChat();
+      // Rebuild chat history into session
+      final history = <Content>[];
+      for (final msg in _currentSession.messages) {
+        if (msg.text.isNotEmpty && !msg.isError) {
+          if (msg.role == 'user') {
+            history.add(Content.text(msg.text));
+          } else {
+            history.add(Content.model([TextPart(msg.text)]));
+          }
+        }
+      }
+      _chat = _model!.startChat(history: history.isNotEmpty ? history : null);
       return true;
     } catch (_) {
       return false;
     }
-  }
-
-  void _resetChat() {
-    setState(_messages.clear);
-    _chat = null;
-    _ensureSession();
   }
 
   void _scrollToEnd() {
@@ -151,21 +468,6 @@ class _AiChatPageState extends State<AiChatPage> {
         curve: Curves.easeOut,
       );
     });
-  }
-
-  String _promptWithContext(String text) {
-    final url = widget.pageUrl ?? '';
-    if (url.isEmpty) return text;
-    final title = widget.pageTitle ?? '';
-    final buffer = StringBuffer()
-      ..writeln('The user is currently viewing this page in their browser:')
-      ..writeln('URL: $url');
-    if (title.isNotEmpty && title != url) buffer.writeln('Title: $title');
-    buffer
-      ..writeln('Use this page as context when answering.')
-      ..writeln()
-      ..write(text);
-    return buffer.toString();
   }
 
   String _formatErrorMessage(Object error) {
@@ -194,31 +496,327 @@ class _AiChatPageState extends State<AiChatPage> {
     return 'Error: $error\n\nPlease check your network connection and API key.';
   }
 
-  Future<void> _send(String text) async {
-    if (text.isEmpty || _loading) return;
-    if (!_ensureSession()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Set your Gemini API key first')),
+  // ── Attachments Handling ───────────────────────────────────────────────────
+
+  Future<void> _showAttachmentMenu() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(left: 8, bottom: 12),
+                child: Text(
+                  'Add Context to AI Query',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: _accent.withValues(alpha: 0.15), shape: BoxShape.circle),
+                  child: const Icon(Icons.description_outlined, color: _accent, size: 22),
+                ),
+                title: const Text('Attach File / Document'),
+                subtitle: const Text('Code, text, markdown, json, pdf, etc.'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickFile();
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.blueAccent.withValues(alpha: 0.15), shape: BoxShape.circle),
+                  child: const Icon(Icons.folder_open_outlined, color: Colors.blueAccent, size: 22),
+                ),
+                title: const Text('Attach Code Repo / Workspace Folder'),
+                subtitle: const Text('Summarize directory structure and files'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickDirectory();
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.purpleAccent.withValues(alpha: 0.15), shape: BoxShape.circle),
+                  child: const Icon(Icons.image_outlined, color: Colors.purpleAccent, size: 22),
+                ),
+                title: const Text('Attach Image'),
+                subtitle: const Text('Ask Gemini to analyze screenshots or diagrams'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickImage();
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.amberAccent.withValues(alpha: 0.15), shape: BoxShape.circle),
+                  child: const Icon(Icons.link_rounded, color: Colors.amberAccent, size: 22),
+                ),
+                title: const Text('Attach Web Link / URL'),
+                subtitle: const Text('Reference a web page or article'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showAddLinkDialog();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        allowMultiple: false,
+        withData: true,
       );
+      if (res != null && res.files.isNotEmpty) {
+        final f = res.files.first;
+        String? content;
+        if (f.bytes != null) {
+          try {
+            content = utf8.decode(f.bytes!);
+          } catch (_) {}
+        } else if (f.path != null) {
+          final file = File(f.path!);
+          if (await file.exists()) {
+            try {
+              content = await file.readAsString();
+            } catch (_) {}
+          }
+        }
+        setState(() {
+          _pendingAttachments.add(AiAttachment(
+            id: UniqueKey().toString(),
+            name: f.name,
+            type: AiAttachmentType.file,
+            path: f.path,
+            textContent: content,
+            sizeInBytes: f.size,
+          ));
+        });
+      }
+    } catch (e) {
+      _showToast('Failed to attach file: $e');
+    }
+  }
+
+  Future<void> _pickDirectory() async {
+    try {
+      final dirPath = await FilePicker.platform.getDirectoryPath();
+      if (dirPath != null && dirPath.isNotEmpty) {
+        final dir = Directory(dirPath);
+        if (await dir.exists()) {
+          final buffer = StringBuffer();
+          buffer.writeln('Repository/Directory: ${p.basename(dirPath)}');
+          buffer.writeln('Path: $dirPath\n');
+          buffer.writeln('Contents summary:');
+          int count = 0;
+          await for (final entity in dir.list(recursive: true, followLinks: false)) {
+            if (entity.path.contains('.git') || entity.path.contains('.dart_tool') || entity.path.contains('build')) {
+              continue;
+            }
+            final rel = p.relative(entity.path, from: dirPath);
+            buffer.writeln('- $rel');
+            count++;
+            if (count >= 100) {
+              buffer.writeln('... (truncated total items)');
+              break;
+            }
+          }
+          setState(() {
+            _pendingAttachments.add(AiAttachment(
+              id: UniqueKey().toString(),
+              name: p.basename(dirPath),
+              type: AiAttachmentType.repo,
+              path: dirPath,
+              textContent: buffer.toString(),
+              sizeInBytes: buffer.length,
+            ));
+          });
+        }
+      }
+    } catch (e) {
+      _showToast('Failed to attach directory: $e');
+    }
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+      if (res != null && res.files.isNotEmpty) {
+        final f = res.files.first;
+        Uint8List? bytes = f.bytes;
+        if (bytes == null && f.path != null) {
+          bytes = await File(f.path!).readAsBytes();
+        }
+        final ext = p.extension(f.name).toLowerCase();
+        final mime = ext == '.png' ? 'image/png' : 'image/jpeg';
+        setState(() {
+          _pendingAttachments.add(AiAttachment(
+            id: UniqueKey().toString(),
+            name: f.name,
+            type: AiAttachmentType.image,
+            path: f.path,
+            bytes: bytes,
+            mimeType: mime,
+            sizeInBytes: f.size,
+          ));
+        });
+      }
+    } catch (e) {
+      _showToast('Failed to attach image: $e');
+    }
+  }
+
+  Future<void> _showAddLinkDialog() async {
+    final ctrl = TextEditingController();
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final clip = data?.text?.trim() ?? '';
+    if (clip.startsWith('http://') || clip.startsWith('https://')) {
+      ctrl.text = clip;
+    }
+    if (!mounted) return;
+    final link = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
+        title: const Text('Attach Web Link'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: 'https://example.com',
+            filled: true,
+            fillColor: Theme.of(ctx).cardColor,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: _accent),
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('Attach'),
+          ),
+        ],
+      ),
+    );
+    if (link != null && link.isNotEmpty) {
+      setState(() {
+        _pendingAttachments.add(AiAttachment(
+          id: UniqueKey().toString(),
+          name: Uri.tryParse(link)?.host ?? link,
+          type: AiAttachmentType.link,
+          textContent: link,
+          sizeInBytes: link.length,
+        ));
+      });
+    }
+  }
+
+  // ── Send and Processing ───────────────────────────────────────────────────
+
+  Future<void> _send(String text) async {
+    final queryText = text.trim();
+    if (queryText.isEmpty && _pendingAttachments.isEmpty) return;
+    if (_loading) return;
+
+    if (!_ensureSession()) {
+      _showToast('Set your Gemini API key first');
       await _openSettings();
       return;
     }
+
     _msgCtrl.clear();
-    _lastQuestion = text;
-    final replyIndex = _messages.length + 1;
+    final attached = List<AiAttachment>.from(_pendingAttachments);
+    _pendingAttachments.clear();
+
+    final userMsg = AiChatMessage(
+      id: UniqueKey().toString(),
+      role: 'user',
+      text: queryText.isNotEmpty ? queryText : 'Analyze attached input',
+      attachments: attached,
+    );
+    final modelMsg = AiChatMessage(
+      id: UniqueKey().toString(),
+      role: 'model',
+      text: '',
+    );
+
+    final session = _currentSession;
+    if (session.messages.isEmpty && session.title == 'New Chat' && queryText.isNotEmpty) {
+      session.title = queryText.length > 28 ? '${queryText.substring(0, 28)}...' : queryText;
+    }
+    session.updatedAt = DateTime.now();
+
     setState(() {
-      _messages.add({'role': 'user', 'text': text});
-      _messages.add({'role': 'model', 'text': ''});
+      session.messages.add(userMsg);
+      session.messages.add(modelMsg);
       _loading = true;
       _lastFailed = false;
+      _lastQuestion = userMsg.text;
     });
     _scrollToEnd();
+    await _saveSessions();
 
-    final promptText = _promptWithContext(text);
+    // Prepare prompt bundle with context and attachments
+    final promptBuffer = StringBuffer();
+    if ((widget.pageUrl ?? '').isNotEmpty) {
+      promptBuffer.writeln('Browser Context URL: ${widget.pageUrl}');
+      if ((widget.pageTitle ?? '').isNotEmpty) {
+        promptBuffer.writeln('Browser Context Title: ${widget.pageTitle}');
+      }
+      promptBuffer.writeln();
+    }
+    for (final att in attached) {
+      if (att.type == AiAttachmentType.file || att.type == AiAttachmentType.repo) {
+        promptBuffer.writeln('### Attached ${att.name}:');
+        if (att.textContent != null && att.textContent!.isNotEmpty) {
+          promptBuffer.writeln(att.textContent);
+        } else if (att.path != null) {
+          promptBuffer.writeln('File path: ${att.path}');
+        }
+        promptBuffer.writeln();
+      } else if (att.type == AiAttachmentType.link) {
+        promptBuffer.writeln('Referenced Link: ${att.textContent}\n');
+      }
+    }
+    promptBuffer.write(userMsg.text);
+    final finalPrompt = promptBuffer.toString();
+
+    // Multimodal image check
+    AiAttachment? imgAtt;
+    for (final a in attached) {
+      if (a.type == AiAttachmentType.image && a.bytes != null) {
+        imgAtt = a;
+        break;
+      }
+    }
+
     final buffer = StringBuffer();
     Object? lastError;
 
-    // Attempt streaming with retry for network/handshake hiccups
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt > 0) {
@@ -226,29 +824,44 @@ class _AiChatPageState extends State<AiChatPage> {
           await Future.delayed(Duration(milliseconds: 500 * attempt));
         }
 
-        final stream = _chat!
-            .sendMessageStream(Content.text(promptText))
-            .timeout(const Duration(seconds: 45));
+        if (imgAtt != null && imgAtt.bytes != null) {
+          // Multimodal call
+          final content = Content.multi([
+            TextPart(finalPrompt),
+            DataPart(imgAtt.mimeType ?? 'image/jpeg', imgAtt.bytes!),
+          ]);
+          final resp = await _model!.generateContent([content]).timeout(const Duration(seconds: 45));
+          if (resp.text != null && resp.text!.isNotEmpty) {
+            buffer.write(resp.text);
+            modelMsg.text = buffer.toString();
+            if (mounted) setState(() {});
+            break;
+          }
+        } else {
+          // Streaming text call
+          final stream = _chat!
+              .sendMessageStream(Content.text(finalPrompt))
+              .timeout(const Duration(seconds: 45));
 
-        buffer.clear();
-        await for (final chunk in stream) {
-          final piece = chunk.text;
-          if (piece == null || piece.isEmpty) continue;
-          buffer.write(piece);
-          if (!mounted) return;
-          setState(() => _messages[replyIndex] = {'role': 'model', 'text': buffer.toString()});
-          _scrollToEnd();
-        }
-
-        if (buffer.isNotEmpty) {
-          lastError = null;
-          break;
+          buffer.clear();
+          await for (final chunk in stream) {
+            final piece = chunk.text;
+            if (piece == null || piece.isEmpty) continue;
+            buffer.write(piece);
+            modelMsg.text = buffer.toString();
+            if (mounted) {
+              setState(() {});
+              _scrollToEnd();
+            }
+          }
+          if (buffer.isNotEmpty) {
+            lastError = null;
+            break;
+          }
         }
       } catch (e) {
         lastError = e;
         final errStr = e.toString().toLowerCase();
-
-        // If current model is not found, try fallback models
         if (errStr.contains('not found') || errStr.contains('no longer available') || errStr.contains('404')) {
           for (final candidate in _candidateModels) {
             if (candidate != _activeModel) {
@@ -258,36 +871,19 @@ class _AiChatPageState extends State<AiChatPage> {
           }
           continue;
         }
-
-        final isNetworkOrHandshake = e is HandshakeException ||
-            e is SocketException ||
-            e is http.ClientException ||
-            errStr.contains('handshake') ||
-            errStr.contains('connection terminated') ||
-            errStr.contains('connection closed');
-
-        if (isNetworkOrHandshake && attempt < 2) {
-          continue;
-        }
+        if (attempt < 2) continue;
         break;
       }
     }
 
-    // If streaming failed due to mobile network / TLS handshake drop,
-    // fallback to robust non-streaming generateContent (single standard HTTP POST)
-    if (buffer.isEmpty && lastError != null && _model != null) {
+    // Fallback standard generateContent
+    if (buffer.isEmpty && lastError != null && _model != null && imgAtt == null) {
       try {
         _ensureSession();
-        final response = await _model!
-            .generateContent([Content.text(promptText)])
-            .timeout(const Duration(seconds: 45));
-        final textResp = response.text;
-        if (textResp != null && textResp.isNotEmpty) {
-          buffer.write(textResp);
-          if (mounted) {
-            setState(() => _messages[replyIndex] = {'role': 'model', 'text': buffer.toString()});
-            _scrollToEnd();
-          }
+        final resp = await _model!.generateContent([Content.text(finalPrompt)]).timeout(const Duration(seconds: 45));
+        if (resp.text != null && resp.text!.isNotEmpty) {
+          buffer.write(resp.text);
+          modelMsg.text = buffer.toString();
           lastError = null;
         }
       } catch (fallbackErr) {
@@ -298,34 +894,188 @@ class _AiChatPageState extends State<AiChatPage> {
     if (!mounted) return;
 
     if (buffer.isEmpty) {
-      final timedOut = lastError is TimeoutException;
-      final errorMessage = timedOut
-          ? 'AI request timed out. Please tap Retry to try again.'
-          : _formatErrorMessage(lastError ?? 'No response received.');
-      setState(() {
-        _messages[replyIndex] = {
-          'role': 'model',
-          'text': errorMessage,
-        };
-        _lastFailed = true;
-      });
+      final msg = _formatErrorMessage(lastError ?? 'No response received.');
+      modelMsg.text = msg;
+      modelMsg.isError = true;
+      _lastFailed = true;
+    } else {
+      modelMsg.text = buffer.toString();
+      modelMsg.isError = false;
     }
 
     setState(() => _loading = false);
     _scrollToEnd();
+    await _saveSessions();
   }
 
   Future<void> _retry() async {
     if (_lastQuestion.isEmpty || _loading) return;
-    if (_messages.isNotEmpty && _messages.last['role'] == 'model') {
-      setState(() => _messages.removeLast());
+    final session = _currentSession;
+    if (session.messages.isNotEmpty && session.messages.last.role == 'model') {
+      session.messages.removeLast();
     }
-    if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
-      setState(() => _messages.removeLast());
+    if (session.messages.isNotEmpty && session.messages.last.role == 'user') {
+      session.messages.removeLast();
     }
     _chat = null;
     _ensureSession();
     await _send(_lastQuestion);
+  }
+
+  // ── Actions & Exports ──────────────────────────────────────────────────────
+
+  void _copyToClipboard(String text, String confirmation) {
+    Clipboard.setData(ClipboardData(text: text));
+    _showToast(confirmation);
+  }
+
+  Future<void> _speak(AiChatMessage msg) async {
+    if (_tts == null) return;
+    if (_currentlySpeakingMessageId == msg.id) {
+      await _tts?.stop();
+      setState(() => _currentlySpeakingMessageId = null);
+      return;
+    }
+    await _tts?.stop();
+    setState(() => _currentlySpeakingMessageId = msg.id);
+    await _tts?.speak(msg.text);
+  }
+
+  Future<void> _exportResponseModal(AiChatMessage msg) async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(left: 8, bottom: 12),
+                child: Text(
+                  'Export & Convert Response',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.code_rounded, color: _accent),
+                title: const Text('Export as Markdown (.md)'),
+                subtitle: const Text('Preserves markdown tables, lists, and formatting'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _exportToFile(msg, 'md');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.text_snippet_outlined, color: Colors.blueAccent),
+                title: const Text('Export as Plain Text (.txt)'),
+                subtitle: const Text('Clean plain text document'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _exportToFile(msg, 'txt');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.html_rounded, color: Colors.orangeAccent),
+                title: const Text('Export as HTML Document (.html)'),
+                subtitle: const Text('Interactive responsive web page'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _exportToFile(msg, 'html');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.data_object_rounded, color: Colors.greenAccent),
+                title: const Text('Export as JSON (.json)'),
+                subtitle: const Text('Structured prompt, model and response object'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _exportToFile(msg, 'json');
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportToFile(AiChatMessage msg, String format) async {
+    try {
+      final downloadDir = await SessionPaths.downloadsDir();
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final filename = 'Makaw_AI_Response_$stamp.$format';
+      final file = File(p.join(downloadDir, filename));
+
+      String content = '';
+      if (format == 'md') {
+        content = '''# Makaw AI Assistant Response
+Model: $_activeModel
+Date: ${DateTime.now().toLocal()}
+
+---
+
+${msg.text}
+''';
+      } else if (format == 'txt') {
+        content = msg.text;
+      } else if (format == 'html') {
+        content = '''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Makaw AI Response</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 24px; line-height: 1.6; }
+pre { background: #1e293b; padding: 16px; border-radius: 8px; overflow-x: auto; color: #38bdf8; font-family: monospace; }
+code { background: #1e293b; padding: 2px 6px; border-radius: 4px; color: #38bdf8; }
+.meta { color: #94a3b8; font-size: 13px; margin-bottom: 24px; border-bottom: 1px solid #334155; padding-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="meta"><strong>Makaw AI Assistant</strong> • Model: $_activeModel • ${DateTime.now().toLocal()}</div>
+<div>${msg.text.replaceAll('\n', '<br>')}</div>
+</body>
+</html>''';
+      } else if (format == 'json') {
+        content = const JsonEncoder.withIndent('  ').convert({
+          'generator': 'Makaw AI Assistant',
+          'model': _activeModel,
+          'timestamp': DateTime.now().toIso8601String(),
+          'response': msg.text,
+        });
+      }
+
+      await file.writeAsString(content);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved to ${file.path}'),
+          action: SnackBarAction(
+            label: 'Open',
+            textColor: _accent,
+            onPressed: () => OpenFilex.open(file.path),
+          ),
+        ),
+      );
+    } catch (e) {
+      _showToast('Failed to export response: $e');
+    }
+  }
+
+  void _showToast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
   }
 
   Future<void> _openSettings() async {
@@ -345,27 +1095,92 @@ class _AiChatPageState extends State<AiChatPage> {
     _ensureSession();
   }
 
-  Widget _buildContextChip(BuildContext context) {
-    final url = widget.pageUrl ?? '';
-    if (url.isEmpty) return const SizedBox.shrink();
-    final host = Uri.tryParse(url)?.host ?? url;
+  // ── Render Helpers & Markdown Parser ──────────────────────────────────────
+
+  Widget _buildCodeBlock(String code, String lang) {
+    final languageName = lang.trim().isNotEmpty ? lang.trim().toUpperCase() : 'CODE';
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
-        color: _accent.withValues(alpha: 0.12),
+        color: const Color(0xFF0F172A),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF334155)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.language, size: 16, color: _accent),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Context: $host',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: _accent, fontSize: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: const BoxDecoration(
+              color: Color(0xFF1E293B),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  languageName,
+                  style: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const Spacer(),
+                InkWell(
+                  onTap: () => _copyToClipboard(code, 'Code snippet copied'),
+                  borderRadius: BorderRadius.circular(6),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.copy_rounded, size: 14, color: _accent),
+                        SizedBox(width: 4),
+                        Text('Copy Code', style: TextStyle(color: _accent, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () async {
+                    try {
+                      final ext = lang.trim().isNotEmpty ? lang.trim().toLowerCase() : 'txt';
+                      final dir = await SessionPaths.downloadsDir();
+                      final file = File(p.join(dir, 'snippet_${DateTime.now().millisecondsSinceEpoch}.$ext'));
+                      await file.writeAsString(code);
+                      _showToast('Snippet saved to ${file.path}');
+                    } catch (e) {
+                      _showToast('Failed to save snippet: $e');
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.download_rounded, size: 14, color: Color(0xFF94A3B8)),
+                        SizedBox(width: 4),
+                        Text('Save', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SelectableText(
+              code,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12.5,
+                color: Color(0xFFE2E8F0),
+                height: 1.45,
+              ),
             ),
           ),
         ],
@@ -373,22 +1188,325 @@ class _AiChatPageState extends State<AiChatPage> {
     );
   }
 
-  Widget _buildEmptyState(BuildContext context) {
+  List<Widget> _parseFormattedText(String text) {
+    final widgets = <Widget>[];
+    final codeBlockRegex = RegExp(r'```([a-zA-Z0-9_\-\+]*)\n([\s\S]*?)```');
+    int lastEnd = 0;
+
+    for (final match in codeBlockRegex.allMatches(text)) {
+      if (match.start > lastEnd) {
+        final preceding = text.substring(lastEnd, match.start).trim();
+        if (preceding.isNotEmpty) {
+          widgets.add(SelectableText(
+            preceding,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontSize: 14.5,
+              height: 1.5,
+            ),
+          ));
+        }
+      }
+      final lang = match.group(1) ?? '';
+      final code = match.group(2) ?? '';
+      widgets.add(_buildCodeBlock(code, lang));
+      lastEnd = match.end;
+    }
+
+    if (lastEnd < text.length) {
+      final remainder = text.substring(lastEnd).trim();
+      if (remainder.isNotEmpty) {
+        widgets.add(SelectableText(
+          remainder,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurface,
+            fontSize: 14.5,
+            height: 1.5,
+          ),
+        ));
+      }
+    }
+
+    if (widgets.isEmpty) {
+      widgets.add(SelectableText(
+        text,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurface,
+          fontSize: 14.5,
+          height: 1.5,
+        ),
+      ));
+    }
+    return widgets;
+  }
+
+  Widget _buildBubble(AiChatMessage msg) {
+    final isUser = msg.role == 'user';
+    final isSpeaking = _currentlySpeakingMessageId == msg.id;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Align(
+            alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? _accent.withValues(alpha: 0.18)
+                    : Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(18).copyWith(
+                  bottomRight: isUser ? Radius.zero : null,
+                  bottomLeft: isUser ? null : Radius.zero,
+                ),
+                border: Border.all(
+                  color: isUser ? _accent.withValues(alpha: 0.35) : Colors.transparent,
+                ),
+              ),
+              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.88),
+              child: msg.text.isEmpty && !isUser
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (msg.attachments.isNotEmpty)
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: msg.attachments.map((a) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black26,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      a.type == AiAttachmentType.image
+                                          ? Icons.image
+                                          : a.type == AiAttachmentType.link
+                                              ? Icons.link
+                                              : a.type == AiAttachmentType.repo
+                                                  ? Icons.folder
+                                                  : Icons.description,
+                                      size: 14,
+                                      color: _accent,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      a.name,
+                                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        if (msg.attachments.isNotEmpty) const SizedBox(height: 8),
+                        ..._parseFormattedText(msg.text),
+                      ],
+                    ),
+            ),
+          ),
+          // Action row below each bubble
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+            child: isUser
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                        tooltip: 'Copy query',
+                        visualDensity: VisualDensity.compact,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                        onPressed: () => _copyToClipboard(msg.text, 'Query copied to clipboard'),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 16),
+                        tooltip: 'Edit query',
+                        visualDensity: VisualDensity.compact,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                        onPressed: () {
+                          _msgCtrl.text = msg.text;
+                          _msgCtrl.selection = TextSelection.fromPosition(
+                            TextPosition(offset: _msgCtrl.text.length),
+                          );
+                        },
+                      ),
+                    ],
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                        tooltip: 'Copy response',
+                        visualDensity: VisualDensity.compact,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                        onPressed: () => _copyToClipboard(msg.text, 'Response copied to clipboard'),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.share_outlined, size: 16),
+                        tooltip: 'Share response',
+                        visualDensity: VisualDensity.compact,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                        onPressed: () => Share.share(msg.text, subject: 'Makaw AI Response'),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          isSpeaking ? Icons.stop_circle_outlined : Icons.volume_up_outlined,
+                          size: 17,
+                          color: isSpeaking ? Colors.redAccent : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                        tooltip: isSpeaking ? 'Stop speaking' : 'Read aloud',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _speak(msg),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.file_download_outlined, size: 17),
+                        tooltip: 'Export / Download',
+                        visualDensity: VisualDensity.compact,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                        onPressed: () => _exportResponseModal(msg),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        tooltip: 'Regenerate',
+                        visualDensity: VisualDensity.compact,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                        onPressed: _retry,
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryDrawer() {
+    return Drawer(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.chat_bubble_outline_rounded, color: _accent, size: 22),
+                  const SizedBox(width: 8),
+                  const Text('Chat History', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.add_rounded, color: _accent),
+                    tooltip: 'New Chat',
+                    onPressed: _createNewChat,
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+            Expanded(
+              child: _sessions.isEmpty
+                  ? const Center(child: Text('No previous chats'))
+                  : ListView.builder(
+                      itemCount: _sessions.length,
+                      itemBuilder: (ctx, i) {
+                        final s = _sessions[i];
+                        final isSelected = s.id == _currentSessionId;
+                        return ListTile(
+                          dense: true,
+                          selected: isSelected,
+                          selectedTileColor: _accent.withValues(alpha: 0.12),
+                          leading: Icon(
+                            Icons.chat_outlined,
+                            size: 18,
+                            color: isSelected ? _accent : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                          ),
+                          title: Text(
+                            s.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isSelected ? _accent : Theme.of(context).colorScheme.onSurface,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${s.messages.length} messages',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                            ),
+                          ),
+                          trailing: PopupMenuButton<String>(
+                            icon: Icon(
+                              Icons.more_vert_rounded,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                            ),
+                            onSelected: (val) {
+                              if (val == 'rename') {
+                                _renameChat(s);
+                              } else if (val == 'delete') {
+                                _deleteChat(s.id);
+                              }
+                            },
+                            itemBuilder: (ctx) => [
+                              const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                              const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.redAccent))),
+                            ],
+                          ),
+                          onTap: () => _switchChat(s.id),
+                        );
+                      },
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(44),
+                  backgroundColor: _accent.withValues(alpha: 0.15),
+                ),
+                onPressed: _createNewChat,
+                icon: const Icon(Icons.add_rounded, color: _accent),
+                label: const Text('Start New Chat', style: TextStyle(color: _accent, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.auto_awesome, size: 48, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
           const SizedBox(height: 12),
-          Text('Ask me anything',
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                  fontSize: 16)),
+          Text(
+            'Ask me anything',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 16),
+          ),
           const SizedBox(height: 4),
-          Text('Powered by Gemini',
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                  fontSize: 12)),
+          Text(
+            'Powered by Gemini • $_activeModel',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5), fontSize: 12),
+          ),
           if ((widget.pageUrl ?? '').isNotEmpty) ...[
             const SizedBox(height: 20),
             FilledButton.tonalIcon(
@@ -410,149 +1528,249 @@ class _AiChatPageState extends State<AiChatPage> {
     );
   }
 
-  Widget _buildBubble(BuildContext context, Map<String, String> msg) {
-    final isUser = msg['role'] == 'user';
-    final text = msg['text'] ?? '';
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: isUser
-              ? _accent.withValues(alpha: 0.2)
-              : Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(16).copyWith(
-            bottomRight: isUser ? Radius.zero : null,
-            bottomLeft: isUser ? null : Radius.zero,
-          ),
-        ),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
-        child: text.isEmpty && !isUser
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
-              )
-            : Text(text,
-                style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface, fontSize: 14)),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final messages = _currentSession.messages;
+
     return Scaffold(
+      key: _scaffoldKey,
+      drawer: _buildHistoryDrawer(),
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        leading: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.auto_awesome, size: 20, color: _accent),
-                SizedBox(width: 8),
-                Text('AI Assistant'),
-              ],
-            ),
-            Text(
-              _activeModel,
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                fontWeight: FontWeight.normal,
-              ),
+            IconButton(
+              icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
+              tooltip: 'Close (Swipe down)',
+              onPressed: () => Navigator.of(context).pop(),
             ),
           ],
         ),
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
-          onPressed: () => Navigator.of(context).pop(),
+        title: InkWell(
+          onTap: () => _renameChat(_currentSession),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('AI Assistant', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      '• ${_currentSession.title}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13, color: _accent),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.edit_outlined, size: 12, color: _accent),
+                ],
+              ),
+              Text(
+                _activeModel,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
-          if (_messages.isNotEmpty)
-            IconButton(
-              icon: Icon(Icons.delete_outline,
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
-              onPressed: _resetChat,
-            ),
           IconButton(
-            icon: Icon(Icons.settings_outlined,
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
+            icon: const Icon(Icons.add_comment_outlined),
+            tooltip: 'New Chat',
+            onPressed: _createNewChat,
+          ),
+          IconButton(
+            icon: const Icon(Icons.history_rounded),
+            tooltip: 'Chat History',
+            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'AI Settings',
             onPressed: _openSettings,
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildContextChip(context),
-          Expanded(
-            child: _messages.isEmpty
-                ? _buildEmptyState(context)
-                : ListView.builder(
-                    controller: _scrollCtrl,
-                    padding: const EdgeInsets.all(12),
-                    itemCount: _messages.length,
-                    itemBuilder: (_, i) => _buildBubble(context, _messages[i]),
-                  ),
-          ),
-          if (_loading && _messages.isNotEmpty)
-            const Padding(
-              padding: EdgeInsets.all(8),
-              child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
-            ),
-          if (_lastFailed && !_loading)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _retry,
-                  icon: const Icon(Icons.refresh, size: 16, color: _accent),
-                  label: const Text('Retry', style: TextStyle(color: _accent)),
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragEnd: (details) {
+          if (details.primaryVelocity != null && details.primaryVelocity! > 300) {
+            Navigator.of(context).pop();
+          }
+        },
+        child: Column(
+          children: [
+            if ((widget.pageUrl ?? '').isNotEmpty)
+              Container(
+                margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.language, size: 16, color: _accent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Context: ${Uri.tryParse(widget.pageUrl!)?.host ?? widget.pageUrl}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: _accent, fontSize: 12),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+            Expanded(
+              child: SelectionArea(
+                child: messages.isEmpty
+                    ? _buildEmptyState()
+                    : ListView.builder(
+                        controller: _scrollCtrl,
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                        itemCount: messages.length,
+                        itemBuilder: (_, i) => _buildBubble(messages[i]),
+                      ),
+              ),
             ),
-          Container(
-            color: Theme.of(context).colorScheme.surface,
-            padding: EdgeInsets.fromLTRB(12, 8, 12, MediaQuery.of(context).padding.bottom + 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _msgCtrl,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: 'Type a message...',
-                      hintStyle: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                      filled: true,
-                      fillColor: Theme.of(context).cardColor,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      isDense: true,
-                    ),
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: _send,
+            if (_loading && messages.isNotEmpty)
+              const Padding(
+                padding: EdgeInsets.all(8),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
+                ),
+              ),
+            if (_lastFailed && !_loading)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _retry,
+                    icon: const Icon(Icons.refresh, size: 16, color: _accent),
+                    label: const Text('Retry', style: TextStyle(color: _accent)),
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send_rounded, color: _accent),
-                  onPressed: () => _send(_msgCtrl.text.trim()),
+              ),
+            // Input attachments bar
+            if (_pendingAttachments.isNotEmpty)
+              Container(
+                color: Theme.of(context).colorScheme.surface,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _pendingAttachments.map((att) {
+                      return Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).cardColor,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: _accent.withValues(alpha: 0.4)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              att.type == AiAttachmentType.image
+                                  ? Icons.image
+                                  : att.type == AiAttachmentType.link
+                                      ? Icons.link
+                                      : att.type == AiAttachmentType.repo
+                                          ? Icons.folder
+                                          : Icons.description,
+                              size: 16,
+                              color: _accent,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              att.name.length > 20 ? '${att.name.substring(0, 20)}...' : att.name,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            if (att.formattedSize.isNotEmpty) ...[
+                              const SizedBox(width: 4),
+                              Text(
+                                '(${att.formattedSize})',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(width: 4),
+                            InkWell(
+                              onTap: () {
+                                setState(() => _pendingAttachments.removeWhere((a) => a.id == att.id));
+                              },
+                              child: const Icon(Icons.close, size: 16),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
-              ],
+              ),
+            // Bottom input bar
+            Container(
+              color: Theme.of(context).colorScheme.surface,
+              padding: EdgeInsets.fromLTRB(8, 8, 8, MediaQuery.of(context).padding.bottom + 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline_rounded, color: _accent, size: 26),
+                    tooltip: 'Attach file, repo, link or image',
+                    onPressed: _showAttachmentMenu,
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _msgCtrl,
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
+                      maxLines: 4,
+                      minLines: 1,
+                      decoration: InputDecoration(
+                        hintText: 'Ask Gemini anything...',
+                        hintStyle: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: Theme.of(context).cardColor,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        isDense: true,
+                      ),
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: _send,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    icon: const Icon(Icons.send_rounded, color: _accent),
+                    tooltip: 'Send message',
+                    onPressed: () => _send(_msgCtrl.text),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
