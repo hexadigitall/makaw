@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
 
 /// Gemini chat screen.
 ///
@@ -27,6 +29,23 @@ class AiChatPage extends StatefulWidget {
     this.pageUrl,
   });
 
+  /// Cleans an entered API key by stripping leading/trailing whitespace,
+  /// surrounding quotes, and accidental prefixes like `export GEMINI_API_KEY=`.
+  static String cleanApiKey(String raw) {
+    var key = raw.trim();
+    if (key.startsWith('export ')) {
+      key = key.substring(7).trim();
+    }
+    if (key.contains('=')) {
+      key = key.split('=').last.trim();
+    }
+    if ((key.startsWith('"') && key.endsWith('"')) ||
+        (key.startsWith("'") && key.endsWith("'"))) {
+      key = key.substring(1, key.length - 1).trim();
+    }
+    return key;
+  }
+
   @override
   State<AiChatPage> createState() => _AiChatPageState();
 }
@@ -41,22 +60,31 @@ class _AiChatPageState extends State<AiChatPage> {
   String _key = '';
   GenerativeModel? _model;
   ChatSession? _chat;
+  http.Client? _httpClient;
   bool _loading = false;
   bool _lastFailed = false;
   String _lastQuestion = '';
 
+  String _activeModel = 'gemini-1.5-flash';
+  static const List<String> _candidateModels = [
+    'gemini-1.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-pro',
+  ];
+
   @override
   void initState() {
     super.initState();
-    _key = widget.apiKey;
+    _key = AiChatPage.cleanApiKey(widget.apiKey);
     _ensureSession();
   }
 
   @override
   void didUpdateWidget(AiChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.apiKey != _key) {
-      _key = widget.apiKey;
+    final cleaned = AiChatPage.cleanApiKey(widget.apiKey);
+    if (cleaned != _key) {
+      _key = cleaned;
       _model = null;
       _chat = null;
       _ensureSession();
@@ -67,18 +95,27 @@ class _AiChatPageState extends State<AiChatPage> {
   void dispose() {
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
+    _httpClient?.close();
     super.dispose();
   }
-
-  String _activeModel = 'gemini-2.5-flash';
 
   bool _ensureSession({String? model}) {
     if (_key.isEmpty) return false;
     final m = model ?? _activeModel;
     _activeModel = m;
-    _model = GenerativeModel(model: m, apiKey: _key);
-    _chat = _model!.startChat();
-    return true;
+    try {
+      _httpClient?.close();
+      _httpClient = http.Client();
+      _model = GenerativeModel(
+        model: m,
+        apiKey: _key,
+        httpClient: _httpClient,
+      );
+      _chat = _model!.startChat();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   void _resetChat() {
@@ -114,6 +151,32 @@ class _AiChatPageState extends State<AiChatPage> {
     return buffer.toString();
   }
 
+  String _formatErrorMessage(Object error) {
+    final s = error.toString().toLowerCase();
+    if (s.contains('handshake') ||
+        s.contains('connection terminated') ||
+        s.contains('socketexception')) {
+      return 'Network connection error (TLS handshake terminated).\n\n'
+          'The mobile network interrupted the secure connection to Gemini. '
+          'Please check your data/Wi-Fi and tap Retry.';
+    }
+    if (s.contains('api_key_invalid') ||
+        (s.contains('400') && s.contains('key')) ||
+        s.contains('api key not valid')) {
+      return 'Invalid Gemini API key.\n\n'
+          'Please tap the Settings icon (⚙) at the top right to verify and update your key.';
+    }
+    if (s.contains('resource_exhausted') || s.contains('429')) {
+      return 'Gemini API quota or rate limit exceeded.\n\n'
+          'Please wait a moment before trying again, or check your Google AI Studio plan.';
+    }
+    if (s.contains('not found') || s.contains('404')) {
+      return 'Gemini model is currently unavailable on this API key.\n\n'
+          'Please check your API key permissions at aistudio.google.com.';
+    }
+    return 'Error: $error\n\nPlease check your network connection and API key.';
+  }
+
   Future<void> _send(String text) async {
     if (text.isEmpty || _loading) return;
     if (!_ensureSession()) {
@@ -134,67 +197,105 @@ class _AiChatPageState extends State<AiChatPage> {
     });
     _scrollToEnd();
 
+    final promptText = _promptWithContext(text);
     final buffer = StringBuffer();
-    try {
-      final stream = _chat!
-          .sendMessageStream(Content.text(_promptWithContext(text)))
-          .timeout(const Duration(seconds: 45));
-      await for (final chunk in stream) {
-        final piece = chunk.text;
-        if (piece == null || piece.isEmpty) continue;
-        buffer.write(piece);
-        if (!mounted) return;
-        setState(() => _messages[replyIndex] = {'role': 'model', 'text': buffer.toString()});
-        _scrollToEnd();
+    Object? lastError;
+
+    // Attempt streaming with retry for network/handshake hiccups
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) {
+          _ensureSession();
+          await Future.delayed(Duration(milliseconds: 500 * attempt));
+        }
+
+        final stream = _chat!
+            .sendMessageStream(Content.text(promptText))
+            .timeout(const Duration(seconds: 45));
+
+        buffer.clear();
+        await for (final chunk in stream) {
+          final piece = chunk.text;
+          if (piece == null || piece.isEmpty) continue;
+          buffer.write(piece);
+          if (!mounted) return;
+          setState(() => _messages[replyIndex] = {'role': 'model', 'text': buffer.toString()});
+          _scrollToEnd();
+        }
+
+        if (buffer.isNotEmpty) {
+          lastError = null;
+          break;
+        }
+      } catch (e) {
+        lastError = e;
+        final errStr = e.toString().toLowerCase();
+
+        // If current model is not found, try fallback models
+        if (errStr.contains('not found') || errStr.contains('no longer available') || errStr.contains('404')) {
+          for (final candidate in _candidateModels) {
+            if (candidate != _activeModel) {
+              _ensureSession(model: candidate);
+              break;
+            }
+          }
+          continue;
+        }
+
+        final isNetworkOrHandshake = e is HandshakeException ||
+            e is SocketException ||
+            e is http.ClientException ||
+            errStr.contains('handshake') ||
+            errStr.contains('connection terminated') ||
+            errStr.contains('connection closed');
+
+        if (isNetworkOrHandshake && attempt < 2) {
+          continue;
+        }
+        break;
       }
-      if (!mounted) return;
-      if (buffer.isEmpty) {
-        setState(() {
-          _messages[replyIndex] = {'role': 'model', 'text': 'No response received.'};
-          _lastFailed = true;
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
-      Object activeErr = e;
-      final errStr = e.toString().toLowerCase();
-      if ((errStr.contains('not found') || errStr.contains('no longer available') || errStr.contains('404')) &&
-          _activeModel != 'gemini-1.5-flash') {
-        _model = null;
-        _chat = null;
-        _ensureSession(model: 'gemini-1.5-flash');
-        try {
-          final fallbackStream = _chat!
-              .sendMessageStream(Content.text(_promptWithContext(text)))
-              .timeout(const Duration(seconds: 45));
-          buffer.clear();
-          await for (final chunk in fallbackStream) {
-            final piece = chunk.text;
-            if (piece == null || piece.isEmpty) continue;
-            buffer.write(piece);
-            if (!mounted) return;
+    }
+
+    // If streaming failed due to mobile network / TLS handshake drop,
+    // fallback to robust non-streaming generateContent (single standard HTTP POST)
+    if (buffer.isEmpty && lastError != null && _model != null) {
+      try {
+        _ensureSession();
+        final response = await _model!
+            .generateContent([Content.text(promptText)])
+            .timeout(const Duration(seconds: 45));
+        final textResp = response.text;
+        if (textResp != null && textResp.isNotEmpty) {
+          buffer.write(textResp);
+          if (mounted) {
             setState(() => _messages[replyIndex] = {'role': 'model', 'text': buffer.toString()});
             _scrollToEnd();
           }
-          if (buffer.isNotEmpty) return;
-        } catch (retryErr) {
-          activeErr = retryErr;
+          lastError = null;
         }
+      } catch (fallbackErr) {
+        lastError = fallbackErr;
       }
-      final timedOut = activeErr is TimeoutException;
+    }
+
+    if (!mounted) return;
+
+    if (buffer.isEmpty) {
+      final timedOut = lastError is TimeoutException;
+      final errorMessage = timedOut
+          ? 'AI request timed out. Please tap Retry to try again.'
+          : _formatErrorMessage(lastError ?? 'No response received.');
       setState(() {
         _messages[replyIndex] = {
           'role': 'model',
-          'text': timedOut
-              ? 'AI timed out. Tap Retry to ask again.'
-              : 'Error: $activeErr\n\nCheck that the API key is valid.',
+          'text': errorMessage,
         };
         _lastFailed = true;
       });
-    } finally {
-      if (mounted) setState(() => _loading = false);
-      _scrollToEnd();
     }
+
+    setState(() => _loading = false);
+    _scrollToEnd();
   }
 
   Future<void> _retry() async {
@@ -215,8 +316,9 @@ class _AiChatPageState extends State<AiChatPage> {
     if (handler == null) return;
     final key = await handler();
     if (!mounted || key == null || key.isEmpty) return;
+    final cleaned = AiChatPage.cleanApiKey(key);
     setState(() {
-      _key = key;
+      _key = cleaned;
       _model = null;
       _chat = null;
     });

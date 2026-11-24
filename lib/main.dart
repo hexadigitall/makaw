@@ -7528,55 +7528,85 @@ try {
 
   Future<void> _loadAiKey() async {
     final prefs = await SharedPreferences.getInstance();
-    _aiApiKey = prefs.getString('gemini_api_key') ?? '';
+    _aiApiKey = AiChatPage.cleanApiKey(prefs.getString('gemini_api_key') ?? '');
   }
 
   Future<String?> _showAISettings() {
     final ctrl = TextEditingController(text: _aiApiKey);
+    bool obscure = true;
     return showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: kSurfaceElevated,
-        title: Text('AI Settings', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Enter your Gemini API key to enable AI features.',
-                style: TextStyle(color: kTextSecondary, fontSize: 13)),
-            SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              style: TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Gemini API Key',
-                labelStyle: TextStyle(color: kTextSecondary),
-                border: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
-                isDense: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final trimmed = ctrl.text.trim();
+          final isStandard = trimmed.startsWith('AIzaSy');
+          return AlertDialog(
+            backgroundColor: kSurfaceElevated,
+            title: const Text('AI Settings', style: TextStyle(color: Colors.white)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Enter your Gemini API key from Google AI Studio (aistudio.google.com).',
+                    style: TextStyle(color: kTextSecondary, fontSize: 13),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctrl,
+                    style: const TextStyle(color: Colors.white),
+                    obscureText: obscure,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: InputDecoration(
+                      labelText: 'Gemini API Key',
+                      labelStyle: const TextStyle(color: kTextSecondary),
+                      border: const OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
+                      enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
+                      isDense: true,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscure ? Icons.visibility : Icons.visibility_off,
+                          color: kTextSecondary,
+                        ),
+                        onPressed: () => setDialogState(() => obscure = !obscure),
+                      ),
+                    ),
+                  ),
+                  if (trimmed.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Length: ${trimmed.length} characters${isStandard ? " • Standard Gemini key format" : ""}',
+                      style: TextStyle(
+                        color: isStandard ? const Color(0xFF14B8A6) : kTextSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              obscureText: true,
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel', style: TextStyle(color: kTextSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF14B8A6)),
-            onPressed: () async {
-              final key = ctrl.text.trim();
-              if (key.isEmpty) return;
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('gemini_api_key', key);
-              _aiApiKey = key;
-              if (ctx.mounted) Navigator.of(ctx).pop(key);
-              _showToast('AI configured');
-            },
-            child: Text('Save'),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel', style: TextStyle(color: kTextSecondary)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF14B8A6)),
+                onPressed: () async {
+                  final key = AiChatPage.cleanApiKey(ctrl.text);
+                  if (key.isEmpty) return;
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('gemini_api_key', key);
+                  _aiApiKey = key;
+                  if (ctx.mounted) Navigator.of(ctx).pop(key);
+                  _showToast('AI configured');
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
