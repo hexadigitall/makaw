@@ -23,6 +23,7 @@ class MediaLibraryPage extends StatefulWidget {
   final void Function(ImageFileInfo image) onOpenImage;
   final VoidCallback onHome;
   final VoidCallback? onOpenMusicPlayer;
+  final VoidCallback? onOpenVideoPlayer;
 
   const MediaLibraryPage({
     super.key,
@@ -34,6 +35,7 @@ class MediaLibraryPage extends StatefulWidget {
     required this.onOpenImage,
     required this.onHome,
     this.onOpenMusicPlayer,
+    this.onOpenVideoPlayer,
   });
 
   @override
@@ -55,6 +57,11 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     super.initState();
     widget.musicService.addListener(_onServiceChanged);
     widget.videoService.addListener(_onServiceChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.musicService.scanAllSongs(force: false);
+      widget.videoService.scanAllVideos(force: false);
+    });
   }
 
   @override
@@ -133,6 +140,11 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.smart_display_rounded, color: Color(0xFF38BDF8)),
+            tooltip: 'Open Video Tool',
+            onPressed: widget.onOpenVideoPlayer,
+          ),
           IconButton(
             icon: const Icon(Icons.library_music_rounded, color: Color(0xFF818CF8)),
             tooltip: 'Open Music Tool',
@@ -452,18 +464,36 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
   }
 
   Widget _buildContent(bool isDesktop) {
+    Widget content;
     switch (_selectedCategory) {
       case MediaCategory.all:
-        return _buildAllUnified(isDesktop);
+        content = _buildAllUnified(isDesktop);
+        break;
       case MediaCategory.music:
-        return _buildMusicList();
+        content = _buildMusicList();
+        break;
       case MediaCategory.video:
-        return _buildVideoGrid(isDesktop);
+        content = _buildVideoGrid(isDesktop);
+        break;
       case MediaCategory.photos:
-        return _buildPhotoGrid(isDesktop);
+        content = _buildPhotoGrid(isDesktop);
+        break;
       case MediaCategory.needsAttention:
-        return _buildNeedsAttentionList();
+        content = _buildNeedsAttentionList();
+        break;
     }
+    return RefreshIndicator(
+      color: _accent,
+      backgroundColor: _surface,
+      onRefresh: () async {
+        await Future.wait([
+          widget.musicService.scanAllSongs(force: true),
+          widget.videoService.scanAllVideos(force: true),
+          widget.imageService.scanAllImages(),
+        ]);
+      },
+      child: content,
+    );
   }
 
   Widget _buildAllUnified(bool isDesktop) {
@@ -479,7 +509,12 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
       padding: const EdgeInsets.all(16),
       children: [
         if (videos.isNotEmpty) ...[
-          _buildSectionHeader('Videos (${videos.length})', () => setState(() => _selectedCategory = MediaCategory.video)),
+          _buildSectionHeader(
+            'Videos (${videos.length})',
+            widget.onOpenVideoPlayer ?? () => setState(() => _selectedCategory = MediaCategory.video),
+            actionLabel: 'Video Tool',
+            actionIcon: Icons.smart_display_rounded,
+          ),
           const SizedBox(height: 8),
           SizedBox(
             height: 150,
@@ -497,6 +532,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
             'Music (${songs.length})',
             widget.onOpenMusicPlayer ?? () => setState(() => _selectedCategory = MediaCategory.music),
             actionLabel: 'Music Tool',
+            actionIcon: Icons.library_music_rounded,
           ),
           const SizedBox(height: 8),
           ...songs.take(6).map((s) => _buildSongTile(s, songs)),
@@ -519,7 +555,12 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     );
   }
 
-  Widget _buildSectionHeader(String title, VoidCallback onSeeAll, {String actionLabel = 'See all'}) {
+  Widget _buildSectionHeader(
+    String title,
+    VoidCallback onSeeAll, {
+    String actionLabel = 'See all',
+    IconData? actionIcon,
+  }) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -535,7 +576,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
         TextButton.icon(
           onPressed: onSeeAll,
           icon: Icon(
-            actionLabel == 'See all' ? Icons.chevron_right_rounded : Icons.library_music_rounded,
+            actionIcon ?? (actionLabel == 'See all' ? Icons.chevron_right_rounded : Icons.open_in_new_rounded),
             size: 16,
             color: _accent,
           ),
@@ -681,6 +722,41 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
                 ),
               ),
             ),
+            if (song.formatBadge.isNotEmpty) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: song.isLossless
+                      ? const Color(0xFF06B6D4).withValues(alpha: 0.18)
+                      : (widget.musicService.hasMultipleFormats(song)
+                          ? const Color(0xFFF59E0B).withValues(alpha: 0.22)
+                          : const Color(0xFF6366F1).withValues(alpha: 0.14)),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: song.isLossless
+                        ? const Color(0xFF06B6D4)
+                        : (widget.musicService.hasMultipleFormats(song)
+                            ? const Color(0xFFF59E0B)
+                            : const Color(0xFF6366F1).withValues(alpha: 0.6)),
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  song.formatBadge,
+                  style: TextStyle(
+                    color: song.isLossless
+                        ? const Color(0xFF06B6D4)
+                        : (widget.musicService.hasMultipleFormats(song)
+                            ? const Color(0xFFF59E0B)
+                            : const Color(0xFF818CF8)),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
             if (isNew) ...[
               const SizedBox(width: 6),
               Container(
@@ -717,20 +793,81 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
 
   Widget _buildVideoGrid(bool isDesktop) {
     final videos = _filteredVideos;
-    if (videos.isEmpty) {
-      return _buildEmptyState('No videos found', 'No video files detected in storage.');
-    }
     final cols = isDesktop ? 4 : 2;
-    return GridView.builder(
+
+    return ListView(
       padding: const EdgeInsets.all(16),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: cols,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.25,
-      ),
-      itemCount: videos.length,
-      itemBuilder: (ctx, i) => _buildVideoCard(videos[i], null),
+      children: [
+        if (widget.onOpenVideoPlayer != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: InkWell(
+              onTap: widget.onOpenVideoPlayer,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.3)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF38BDF8).withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.smart_display_rounded, color: Color(0xFF38BDF8), size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Open Makaw Video Tool',
+                            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Playlists \u2022 Folders \u2022 Resume Watching \u2022 Video Browser',
+                            style: TextStyle(color: Color(0xFFBAE6FD), fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFF38BDF8), size: 16),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        if (videos.isEmpty)
+          _buildEmptyState('No videos found', 'No video files detected in storage.')
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: cols,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.25,
+            ),
+            itemCount: videos.length,
+            itemBuilder: (ctx, i) => _buildVideoCard(videos[i], null),
+          ),
+      ],
     );
   }
 

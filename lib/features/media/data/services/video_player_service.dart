@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../domain/entities/video_file_info.dart';
 import '../../../../core/platform/platform_paths.dart';
+import '../../../../core/utils/natural_sort.dart';
 export '../../domain/entities/video_file_info.dart';
 
 class VideoPlayerService extends ChangeNotifier {
@@ -29,7 +30,31 @@ class VideoPlayerService extends ChangeNotifier {
   bool _isScanning = false;
   bool get isScanning => _isScanning;
 
-  final List<String> _videoExts = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv', '.wmv', '.3gp'];
+  final List<String> _videoExts = [
+    '.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv', '.wmv', '.3gp', '.m4v', '.ts'
+  ];
+  final Set<String> _recentlyAddedPaths = {};
+  DateTime? _lastScanTime;
+
+  void registerNewDownload(String path) {
+    _recentlyAddedPaths.add(path);
+    scanAllVideos(force: true);
+  }
+
+  bool _isValidVideoFile(String path, int size) {
+    if (size <= 1024) return false; // Exclude 0-byte or corrupted dud files
+    final lower = path.toLowerCase();
+    final fileName = lower.split(Platform.pathSeparator).last;
+    if (fileName.startsWith('.')) return false; // Exclude hidden files
+    if (fileName.endsWith('.crdownload') ||
+        fileName.endsWith('.part') ||
+        fileName.endsWith('.tmp') ||
+        fileName.endsWith('.download') ||
+        fileName.endsWith('.pending')) {
+      return false; // Exclude partial / temporary download files
+    }
+    return _videoExts.any((ext) => lower.endsWith(ext));
+  }
 
   final Map<String, Map<String, int>> _resumeData = {};
 
@@ -147,6 +172,7 @@ class VideoPlayerService extends ChangeNotifier {
   }
 
   bool isNewFile(String filePath, {int hours = 48}) {
+    if (_recentlyAddedPaths.contains(filePath)) return true;
     final f = File(filePath);
     if (!f.existsSync()) return false;
     try {
@@ -170,7 +196,11 @@ class VideoPlayerService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> scanAllVideos() async {
+  Future<void> scanAllVideos({bool force = false}) async {
+    if (_isScanning) return;
+    if (!force && _lastScanTime != null && DateTime.now().difference(_lastScanTime!).inSeconds < 5) {
+      return;
+    }
     _isScanning = true;
     notifyListeners();
     final found = <VideoFileInfo>{};
@@ -212,9 +242,10 @@ class VideoPlayerService extends ChangeNotifier {
       if (await dir.exists()) {
         try {
           await for (final entity in dir.list(recursive: true, followLinks: false)) {
-            if (entity is File && seenPaths.add(entity.path) && _videoExts.any((e) => entity.path.toLowerCase().endsWith(e))) {
+            if (entity is File && seenPaths.add(entity.path)) {
               try {
                 final stat = await entity.stat();
+                if (!_isValidVideoFile(entity.path, stat.size)) continue;
                 final f = entity.parent.uri.pathSegments.last;
                 found.add(VideoFileInfo(
                   id: entity.path.hashCode, filePath: entity.path,
@@ -232,6 +263,7 @@ class VideoPlayerService extends ChangeNotifier {
 
     _allVideos = found.toList();
     _organize();
+    _lastScanTime = DateTime.now();
     _isScanning = false;
     notifyListeners();
   }
@@ -242,9 +274,10 @@ class VideoPlayerService extends ChangeNotifier {
       await for (final entity in dir.list(recursive: false, followLinks: false)) {
         if (entity is Directory) {
           await _scanDirStream(entity, found, seenPaths, depth: depth + 1);
-        } else if (entity is File && seenPaths.add(entity.path) && _videoExts.any((e) => entity.path.toLowerCase().endsWith(e))) {
+        } else if (entity is File && seenPaths.add(entity.path)) {
           try {
             final stat = await entity.stat();
+            if (!_isValidVideoFile(entity.path, stat.size)) continue;
             final f = entity.parent.uri.pathSegments.last;
             found.add(VideoFileInfo(
               id: entity.path.hashCode, filePath: entity.path,
@@ -265,9 +298,9 @@ class VideoPlayerService extends ChangeNotifier {
       _folders.putIfAbsent(v.folder, () => []).add(v);
     }
     for (final f in _folders.values) {
-      f.sort((a, b) => (b.dateTime ?? DateTime.now()).compareTo(a.dateTime ?? DateTime.now()));
+      f.sort((a, b) => naturalCompare(a.fileName, b.fileName));
     }
-    _allVideos.sort((a, b) => (b.dateTime ?? DateTime.now()).compareTo(a.dateTime ?? DateTime.now()));
+    _allVideos.sort((a, b) => naturalCompare(a.fileName, b.fileName));
   }
 
   void toggleFavorite(int id) {

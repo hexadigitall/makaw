@@ -15,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/platform/session_paths.dart';
+import '../widgets/ai_markdown_view.dart';
 
 // ── Models ───────────────────────────────────────────────────────────────────
 
@@ -964,6 +965,24 @@ class _AiChatPageState extends State<AiChatPage> {
                 ),
               ),
               ListTile(
+                leading: const Icon(Icons.description_rounded, color: Colors.indigoAccent),
+                title: const Text('Export as Word Document (.doc)'),
+                subtitle: const Text('Preserves bold, italics, tables, and styling in Word / Docs'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _exportToFile(msg, 'doc');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.html_rounded, color: Colors.orangeAccent),
+                title: const Text('Export as HTML Document (.html)'),
+                subtitle: const Text('Interactive responsive web page with styled typography'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _exportToFile(msg, 'html');
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.code_rounded, color: _accent),
                 title: const Text('Export as Markdown (.md)'),
                 subtitle: const Text('Preserves markdown tables, lists, and formatting'),
@@ -975,19 +994,10 @@ class _AiChatPageState extends State<AiChatPage> {
               ListTile(
                 leading: const Icon(Icons.text_snippet_outlined, color: Colors.blueAccent),
                 title: const Text('Export as Plain Text (.txt)'),
-                subtitle: const Text('Clean plain text document'),
+                subtitle: const Text('Clean plain text document without markdown symbols'),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _exportToFile(msg, 'txt');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.html_rounded, color: Colors.orangeAccent),
-                title: const Text('Export as HTML Document (.html)'),
-                subtitle: const Text('Interactive responsive web page'),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _exportToFile(msg, 'html');
                 },
               ),
               ListTile(
@@ -1024,32 +1034,26 @@ Date: ${DateTime.now().toLocal()}
 ${msg.text}
 ''';
       } else if (format == 'txt') {
-        content = msg.text;
+        content = AiMarkdownView.stripMarkdown(msg.text);
       } else if (format == 'html') {
-        content = '''<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Makaw AI Response</title>
-<style>
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 24px; line-height: 1.6; }
-pre { background: #1e293b; padding: 16px; border-radius: 8px; overflow-x: auto; color: #38bdf8; font-family: monospace; }
-code { background: #1e293b; padding: 2px 6px; border-radius: 4px; color: #38bdf8; }
-.meta { color: #94a3b8; font-size: 13px; margin-bottom: 24px; border-bottom: 1px solid #334155; padding-bottom: 12px; }
-</style>
-</head>
-<body>
-<div class="meta"><strong>Makaw AI Assistant</strong> • Model: $_activeModel • ${DateTime.now().toLocal()}</div>
-<div>${msg.text.replaceAll('\n', '<br>')}</div>
-</body>
-</html>''';
+        content = AiMarkdownView.markdownToHtml(
+          msg.text,
+          title: 'Makaw AI Response',
+          model: _activeModel,
+        );
+      } else if (format == 'doc') {
+        content = AiMarkdownView.markdownToDoc(
+          msg.text,
+          title: 'Makaw AI Response',
+          model: _activeModel,
+        );
       } else if (format == 'json') {
         content = const JsonEncoder.withIndent('  ').convert({
           'generator': 'Makaw AI Assistant',
           'model': _activeModel,
           'timestamp': DateTime.now().toIso8601String(),
           'response': msg.text,
+          'plainText': AiMarkdownView.stripMarkdown(msg.text),
         });
       }
 
@@ -1311,7 +1315,32 @@ code { background: #1e293b; padding: 2px 6px; border-radius: 4px; color: #38bdf8
                             }).toList(),
                           ),
                         if (msg.attachments.isNotEmpty) const SizedBox(height: 8),
-                        ..._parseFormattedText(msg.text),
+                        if (isUser)
+                          SelectableText(
+                            msg.text,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 14.5,
+                              height: 1.45,
+                            ),
+                          )
+                        else
+                          AiMarkdownView(
+                            text: msg.text,
+                            accentColor: _accent,
+                            onCopyCode: (code, lang) => _copyToClipboard(code, 'Code snippet copied'),
+                            onSaveCode: (code, lang) async {
+                              try {
+                                final ext = lang.trim().isNotEmpty ? lang.trim().toLowerCase() : 'txt';
+                                final dir = await SessionPaths.downloadsDir();
+                                final file = File(p.join(dir, 'snippet_${DateTime.now().millisecondsSinceEpoch}.$ext'));
+                                await file.writeAsString(code);
+                                _showToast('Snippet saved to ${file.path}');
+                              } catch (e) {
+                                _showToast('Failed to save snippet: $e');
+                              }
+                            },
+                          ),
                       ],
                     ),
             ),

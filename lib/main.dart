@@ -1357,7 +1357,21 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
           )),
           getDownloadDir: _defaultDownloadDir,
           showNotification: _showToast,
-          onComplete: null,
+          onComplete: (item) {
+            final filePath = item.savePath ?? item.filePath;
+            if (filePath != null && filePath.isNotEmpty) {
+              final lower = filePath.toLowerCase();
+              if (['.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv', '.wmv', '.3gp', '.m4v', '.ts'].any((e) => lower.endsWith(e))) {
+                _videoService.registerNewDownload(filePath);
+              } else if (['.mp3', '.flac', '.wav', '.ogg', '.aac', '.m4a', '.wma', '.opus'].any((e) => lower.endsWith(e))) {
+                _musicService.registerNewDownload(filePath);
+              } else {
+                _documentService.scanAllDocuments();
+              }
+              FileRecentsService.record(filePath);
+              unawaited(_loadHomeRecentFiles());
+            }
+          },
         );
         ref.read(downloadServiceProvider.notifier).state = _downloadManager;
         _adBlocker.onBlacklistUpdated = () {};
@@ -4212,6 +4226,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         videoService: _videoService,
         imageService: _imageService,
         onOpenMusicPlayer: () => _switchToView('music'),
+        onOpenVideoPlayer: () => _switchToView('player'),
         onPlaySong: (song, queue) {
           final idx = queue.indexOf(song);
           if (idx >= 0) {
@@ -5423,7 +5438,10 @@ TappableIcon(
   /// the page already surfaced under Continue).
   List<HomeActivityItem> _buildHomeRecentItems() {
     final items = <HomeActivityItem>[];
+    final seenFilePaths = <String>{};
     for (final file in _homeRecentFiles) {
+      final norm = file.path.replaceAll('\\', '/').toLowerCase();
+      if (!seenFilePaths.add(norm)) continue;
       final id = 'recent_file_${file.path}';
       if (_dismissedHomeItems.contains(id) || _dismissedHomeItems.contains('file_${file.path}')) continue;
       final name = file.name ?? p.basename(file.path);
@@ -5443,10 +5461,19 @@ TappableIcon(
     final continueUrl = items.any((it) => it.id.startsWith('browser_'))
         ? (_browserHistory.isNotEmpty ? _browserHistory.first['url']?.toString() : null)
         : null;
+    final seenSites = <String>{};
     var historyCount = 0;
     for (final entry in _browserHistory) {
       final url = entry['url']?.toString() ?? '';
       if (url.isEmpty || url == continueUrl) continue;
+
+      // Deduplicate by site/host and URL: if a tool has several instances on the same file, page, site etc.
+      // only the last instance is recorded and seen on Recent.
+      // All previous instances get updated to current instance, while all instances are preserved in Browser History.
+      final uri = Uri.tryParse(url);
+      final siteKey = (uri != null && uri.host.isNotEmpty) ? uri.host.toLowerCase() : url.toLowerCase();
+      if (!seenSites.add(siteKey)) continue;
+
       final id = 'recent_browser_$url';
       if (_dismissedHomeItems.contains(id) || _dismissedHomeItems.contains('browser_$url')) continue;
       final title = entry['title']?.toString() ?? '';
@@ -5551,9 +5578,17 @@ TappableIcon(
 
   Future<void> _loadHomeRecentFiles() async {
     try {
-      final recents = await FileRecentsService.getRecents(limit: 8);
+      final recents = await FileRecentsService.getRecents(limit: 20);
       if (!mounted) return;
-      setState(() => _homeRecentFiles = recents);
+      final seen = <String>{};
+      final deduped = <FileRecent>[];
+      for (final r in recents) {
+        final norm = r.path.replaceAll('\\', '/').toLowerCase();
+        if (seen.add(norm)) {
+          deduped.add(r);
+        }
+      }
+      setState(() => _homeRecentFiles = deduped);
     } catch (e) {
       debugPrint('MAKAW-HOME recents failed: $e');
     }
@@ -6004,6 +6039,7 @@ TappableIcon(
     // Record the open so it surfaces in the Documents ecosystem's recent
     // activity (best-effort, non-throwing).
     _documentService.recordRecentOpen(filePath);
+    unawaited(_loadHomeRecentFiles());
 
     final goBack = () {
       if (mounted && Navigator.of(context).canPop()) {

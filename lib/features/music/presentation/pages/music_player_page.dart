@@ -60,9 +60,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
     // (MakawHome) while MusicPlayerWidget's route is still mid-build.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_service.allSongs.isEmpty && !_service.isScanning) {
-        _service.scanAllSongs();
-      }
+      _service.scanAllSongs(force: false);
     });
   }
 
@@ -556,25 +554,46 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
       return const Center(child: CircularProgressIndicator(color: Color(0xFF818CF8)));
     }
     if (songs.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      return RefreshIndicator(
+        color: const Color(0xFF818CF8),
+        backgroundColor: const Color(0xFF1E293B),
+        onRefresh: () async => await _service.scanAllSongs(force: true),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: [
-            const Icon(Icons.music_note, color: Color(0xFF666680), size: 48),
-            const SizedBox(height: 12),
-            Text(_service.scanError.isNotEmpty ? _service.scanError : 'No songs found',
-                style: const TextStyle(color: Color(0xFF666680))),
+            SizedBox(
+              height: 300,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.music_note, color: Color(0xFF666680), size: 48),
+                    const SizedBox(height: 12),
+                    Text(_service.scanError.isNotEmpty ? _service.scanError : 'No songs found',
+                        style: const TextStyle(color: Color(0xFF666680))),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       );
     }
 
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-    final listView = Expanded(child: ListView.builder(
-      padding: const EdgeInsets.only(bottom: 8),
-      itemCount: songs.length,
-      itemBuilder: (_, i) => _songItem(songs[i], i, songs),
-    ));
+    final listView = Expanded(
+      child: RefreshIndicator(
+        color: const Color(0xFF818CF8),
+        backgroundColor: const Color(0xFF1E293B),
+        onRefresh: () async => await _service.scanAllSongs(force: true),
+        child: ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: 8),
+          itemCount: songs.length,
+          itemBuilder: (_, i) => _songItem(songs[i], i, songs),
+        ),
+      ),
+    );
 
     if (isLandscape) {
       final navBottom = MediaQuery.of(context).padding.bottom;
@@ -840,6 +859,41 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (song.formatBadge.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: song.isLossless
+                        ? const Color(0xFF06B6D4).withValues(alpha: 0.18)
+                        : (_service.hasMultipleFormats(song)
+                            ? const Color(0xFFF59E0B).withValues(alpha: 0.22)
+                            : const Color(0xFF6366F1).withValues(alpha: 0.14)),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: song.isLossless
+                          ? const Color(0xFF06B6D4)
+                          : (_service.hasMultipleFormats(song)
+                              ? const Color(0xFFF59E0B)
+                              : const Color(0xFF6366F1).withValues(alpha: 0.6)),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Text(
+                    song.formatBadge,
+                    style: TextStyle(
+                      color: song.isLossless
+                          ? const Color(0xFF06B6D4)
+                          : (_service.hasMultipleFormats(song)
+                              ? const Color(0xFFF59E0B)
+                              : const Color(0xFF818CF8)),
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
               if (isNew) ...[
                 const SizedBox(width: 6),
                 Container(

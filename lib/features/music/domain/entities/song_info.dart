@@ -28,6 +28,17 @@ class SongInfo {
   String get displayAlbum =>
       album.isNotEmpty && album != '<unknown>' ? album : 'Unknown Album';
   String get fileName => filePath.split(Platform.pathSeparator).last;
+  String get formatBadge {
+    final dot = filePath.lastIndexOf('.');
+    if (dot >= 0 && dot < filePath.length - 1) {
+      return filePath.substring(dot + 1).toUpperCase();
+    }
+    return '';
+  }
+  bool get isLossless {
+    final ext = formatBadge.toUpperCase();
+    return ext == 'FLAC' || ext == 'WAV' || ext == 'ALAC';
+  }
 
   SongInfo copyWith({
     int? id,

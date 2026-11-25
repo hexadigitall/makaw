@@ -8,6 +8,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/platform/platform_paths.dart';
 import '../../../../core/services/media_notification_service.dart';
+import '../../../../core/utils/natural_sort.dart';
 import '../../domain/entities/entities.dart';
 export '../../domain/entities/entities.dart';
 
@@ -105,6 +106,33 @@ class MusicPlayerService extends ChangeNotifier {
   String notificationStatus = 'unknown';
 
   final List<String> _audioExts = ['.mp3', '.flac', '.wav', '.ogg', '.aac', '.m4a', '.wma', '.opus'];
+  final Set<String> _multiFormatKeys = {};
+  DateTime? _lastScanTime;
+
+  bool hasMultipleFormats(SongInfo song) {
+    final normTitle = song.displayTitle.trim().toLowerCase();
+    final normArtist = song.displayArtist.trim().toLowerCase();
+    return _multiFormatKeys.contains('$normTitle|$normArtist');
+  }
+
+  void registerNewDownload(String path) {
+    scanAllSongs(force: true);
+  }
+
+  bool _isValidAudioFile(String path, int size) {
+    if (size <= 1024) return false; // Exclude 0-byte or corrupted dud files
+    final lower = path.toLowerCase();
+    final fileName = lower.split(Platform.pathSeparator).last;
+    if (fileName.startsWith('.')) return false; // Exclude hidden files
+    if (fileName.endsWith('.crdownload') ||
+        fileName.endsWith('.part') ||
+        fileName.endsWith('.tmp') ||
+        fileName.endsWith('.download') ||
+        fileName.endsWith('.pending')) {
+      return false; // Exclude partial / temporary downloads
+    }
+    return _audioExts.any((ext) => lower.endsWith(ext));
+  }
 
   void _setupPlayer() {
     player.positionStream.listen((p) {
@@ -152,7 +180,11 @@ class MusicPlayerService extends ChangeNotifier {
     return name.replaceAll(RegExp(r'^[\d\s\-\_\.]+'), '').trim();
   }
 
-  Future<void> scanAllSongs() async {
+  Future<void> scanAllSongs({bool force = false}) async {
+    if (_isScanning) return;
+    if (!force && _lastScanTime != null && DateTime.now().difference(_lastScanTime!).inSeconds < 5) {
+      return;
+    }
     _isScanning = true;
     _scanError = '';
     notifyListeners();
@@ -169,10 +201,12 @@ class MusicPlayerService extends ChangeNotifier {
         await for (final entity in dir.list(recursive: true, followLinks: false)) {
           if (entity is File) {
             final p = entity.path;
-            final ext = p.toLowerCase();
-            if (_audioExts.any((e) => ext.endsWith(e)) && seen.add(p)) {
-              foundRaw.add(MapEntry(idCounter++, p));
-            }
+            try {
+              final stat = await entity.stat();
+              if (_isValidAudioFile(p, stat.size) && seen.add(p)) {
+                foundRaw.add(MapEntry(idCounter++, p));
+              }
+            } catch (_) {}
           }
         }
       }
@@ -181,11 +215,13 @@ class MusicPlayerService extends ChangeNotifier {
         final root = Directory('/storage/emulated/0/');
         if (await root.exists()) {
           await for (final entity in root.list(recursive: false, followLinks: false)) {
-            if (entity is File && seen.add(entity.path)) {
-              final ext = entity.path.toLowerCase();
-              if (_audioExts.any((e) => ext.endsWith(e))) {
-                foundRaw.add(MapEntry(idCounter++, entity.path));
-              }
+            if (entity is File) {
+              try {
+                final stat = await entity.stat();
+                if (_isValidAudioFile(entity.path, stat.size) && seen.add(entity.path)) {
+                  foundRaw.add(MapEntry(idCounter++, entity.path));
+                }
+              } catch (_) {}
             }
           }
         }
@@ -206,24 +242,9 @@ class MusicPlayerService extends ChangeNotifier {
               final m = Map<String, dynamic>.from(r as Map);
               metaMap[m['path'] as String] = m;
             }
-            if (results.isNotEmpty) {
-              final sample = results[0] as Map<Object?, Object?>;
-              print('MakawMetadata: batch got ${results.length} results, sample title="${sample['title']}"');
-            }
           }
         } catch (e) {
           print('MakawMetadata: batch invoke failed: $e');
-        }
-      }
-
-      print('MakawMetadata: metaMap has ${metaMap.length} entries, foundRaw has ${foundRaw.length} files');
-      if (foundRaw.isNotEmpty && metaMap.isNotEmpty) {
-        final samplePath = foundRaw.first.value;
-        final sampleMeta = metaMap[samplePath];
-        if (sampleMeta != null) {
-          print('MakawMetadata: sample match for "$samplePath": artist="${sampleMeta['artist']}" album="${sampleMeta['album']}" duration=${sampleMeta['duration']}');
-        } else {
-          print('MakawMetadata: NO MATCH for "$samplePath" in metaMap keys: ${metaMap.keys.take(3).join(", ")}...');
         }
       }
 
@@ -241,11 +262,10 @@ class MusicPlayerService extends ChangeNotifier {
       final found = <SongInfo>[];
       for (final entry in foundRaw) {
         final p = entry.value;
-        // Try fresh extraction first; if it has no real data, use cache
         var meta = metaMap[p];
         if (meta != null) {
           final t = (meta['title'] as String? ?? '').trim();
-          if (t.isEmpty) meta = cache?[p]; // fresh extraction returned nothing, use cache
+          if (t.isEmpty) meta = cache?[p];
         } else {
           meta = cache?[p];
         }
@@ -253,6 +273,10 @@ class MusicPlayerService extends ChangeNotifier {
         final artist = (meta?['artist'] as String? ?? '').trim();
         final album = (meta?['album'] as String? ?? '').trim();
         final durationMs = (meta?['duration'] as int? ?? 0);
+        int fileSize = 0;
+        try {
+          fileSize = File(p).lengthSync();
+        } catch (_) {}
 
         found.add(SongInfo(
           id: entry.key,
@@ -261,11 +285,45 @@ class MusicPlayerService extends ChangeNotifier {
           album: album,
           filePath: p,
           duration: durationMs,
-          size: 0,
+          size: fileSize,
         ));
       }
 
-      _allSongs = found;
+      // Deduplicate identical title + artist + format tracks
+      final deduped = <String, SongInfo>{};
+      for (final song in found) {
+        final normTitle = song.displayTitle.trim().toLowerCase();
+        final normArtist = song.displayArtist.trim().toLowerCase();
+        final format = song.formatBadge.toUpperCase();
+        final formatKey = '$normTitle|$normArtist|$format';
+
+        if (deduped.containsKey(formatKey)) {
+          final existing = deduped[formatKey]!;
+          if (song.size > existing.size || (song.size == existing.size && song.duration > existing.duration)) {
+            deduped[formatKey] = song;
+          }
+        } else {
+          deduped[formatKey] = song;
+        }
+      }
+
+      // Identify multi-format tracks (e.g., MP3 vs FLAC vs WAV for same song)
+      _multiFormatKeys.clear();
+      final songCounts = <String, int>{};
+      for (final song in deduped.values) {
+        final normTitle = song.displayTitle.trim().toLowerCase();
+        final normArtist = song.displayArtist.trim().toLowerCase();
+        final baseKey = '$normTitle|$normArtist';
+        songCounts[baseKey] = (songCounts[baseKey] ?? 0) + 1;
+      }
+      for (final e in songCounts.entries) {
+        if (e.value > 1) {
+          _multiFormatKeys.add(e.key);
+        }
+      }
+
+      _allSongs = deduped.values.toList();
+      _lastScanTime = DateTime.now();
       if (_allSongs.isEmpty) _scanError = 'No music files found. Tap Scan to try again.';
 
       // Cache only entries that have actual metadata
@@ -421,8 +479,22 @@ class MusicPlayerService extends ChangeNotifier {
 
   void _applySort() {
     switch (_sortMode) {
-      case 'name': _allSongs.sort((a, b) => a.displayTitle.toLowerCase().compareTo(b.displayTitle.toLowerCase())); break;
-      case 'name_desc': _allSongs.sort((a, b) => b.displayTitle.toLowerCase().compareTo(a.displayTitle.toLowerCase())); break;
+      case 'name':
+        _allSongs.sort((a, b) {
+          final titleCmp = naturalCompare(a.displayTitle, b.displayTitle);
+          if (titleCmp != 0) return titleCmp;
+          final artistCmp = naturalCompare(a.displayArtist, b.displayArtist);
+          if (artistCmp != 0) return artistCmp;
+          return a.formatBadge.compareTo(b.formatBadge);
+        });
+        break;
+      case 'name_desc':
+        _allSongs.sort((a, b) {
+          final titleCmp = naturalCompare(b.displayTitle, a.displayTitle);
+          if (titleCmp != 0) return titleCmp;
+          return naturalCompare(b.displayArtist, a.displayArtist);
+        });
+        break;
       case 'date': _allSongs.sort((a, b) => b.id.compareTo(a.id)); break;
       case 'duration': _allSongs.sort((a, b) => b.duration.compareTo(a.duration)); break;
       case 'size': _allSongs.sort((a, b) => b.size.compareTo(a.size)); break;

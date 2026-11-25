@@ -250,6 +250,17 @@ class MainActivity : FlutterActivity() {
                     window.attributes = lp
                     result.success(true)
                 }
+                "setKeepScreenOn" -> {
+                    val keep = call.argument<Boolean>("keep") ?: true
+                    runOnUiThread {
+                        if (keep) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        }
+                    }
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }

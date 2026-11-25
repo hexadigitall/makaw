@@ -15,6 +15,7 @@ import '../../data/services/video_player_service.dart';
 import '../../data/services/media_thumbnail_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import '../../../../core/storage/subtitle_service.dart';
+import '../../../../core/utils/natural_sort.dart';
 
 // ─── Subtitle data ───────────────────────────────────────────────────────────
 class _SubtitleEntry {
@@ -167,6 +168,12 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     } catch (_) {}
   }
 
+  Future<void> _setKeepScreenOn(bool keep) async {
+    try {
+      await _videoChannel.invokeMethod('setKeepScreenOn', {'keep': keep});
+    } catch (_) {}
+  }
+
   void _initPlayer() {
     final path = _currentFile();
     if (path != null && File(path).existsSync()) {
@@ -185,6 +192,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
       _controller!.addListener(_onVideoEvent);
       _restoreResume();
       _controller!.play();
+      _setKeepScreenOn(true);
       final cur = _currentFile();
       if (cur != null && cur.isNotEmpty) {
         _resumeService.setActiveVideo(path: cur, title: widget.title, isPlaying: true);
@@ -206,7 +214,12 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
 
   void _onVideoEvent() {
     if (!mounted || _controller == null) return;
-    setState(() => _isPlaying = _controller!.value.isPlaying);
+    final isPlayingNow = _controller!.value.isPlaying;
+    if (_isPlaying != isPlayingNow) {
+      _isPlaying = isPlayingNow;
+      _setKeepScreenOn(isPlayingNow);
+      setState(() {});
+    }
     final now = DateTime.now();
     if (now.difference(_lastResumeSave).inSeconds >= 5) {
       _lastResumeSave = now;
@@ -293,6 +306,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
 
   @override
   void dispose() {
+    _setKeepScreenOn(false);
     _subtitleTimer?.cancel();
     _overlayTimer?.cancel();
     _doubleTapTimer?.cancel();
@@ -315,9 +329,11 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     if (_controller == null) return;
     if (_controller!.value.isPlaying) {
       _controller!.pause();
+      _setKeepScreenOn(false);
       _persistWatchProgress();
     } else {
       _controller!.play();
+      _setKeepScreenOn(true);
     }
     _startAutoHide();
   }
@@ -2064,7 +2080,7 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   String _searchQuery = '';
   int _playIndex = 0;
   String _displayMode = 'grid';
-  String _sortMode = 'date_new';
+  String _sortMode = 'name_az';
   final Map<String, String> _thumbCache = {};
   final _searchCtrl = TextEditingController();
   final _kDark = const Color(0xFF0F0F1A);
@@ -2072,13 +2088,42 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   final _kCard = const Color(0xFF1A1A2E);
   final _kMuted = const Color(0xFF666680);
 
+  List<VideoFileInfo> get _sortedVideos {
+    final list = List<VideoFileInfo>.from(_service.allVideos);
+    switch (_sortMode) {
+      case 'name_az':
+        list.sort((a, b) => naturalCompare(a.fileName, b.fileName));
+        break;
+      case 'name_za':
+        list.sort((a, b) => naturalCompare(b.fileName, a.fileName));
+        break;
+      case 'date_new':
+        list.sort((a, b) => (b.dateTime ?? DateTime.fromMillisecondsSinceEpoch(0)).compareTo(a.dateTime ?? DateTime.fromMillisecondsSinceEpoch(0)));
+        break;
+      case 'date_old':
+        list.sort((a, b) => (a.dateTime ?? DateTime.fromMillisecondsSinceEpoch(0)).compareTo(b.dateTime ?? DateTime.fromMillisecondsSinceEpoch(0)));
+        break;
+      case 'size_largest':
+        list.sort((a, b) => b.fileSize.compareTo(a.fileSize));
+        break;
+      case 'size_smallest':
+        list.sort((a, b) => a.fileSize.compareTo(b.fileSize));
+        break;
+      default:
+        list.sort((a, b) => naturalCompare(a.fileName, b.fileName));
+        break;
+    }
+    return list;
+  }
+
   @override
   void initState() {
     super.initState();
     _service.addListener(_onServiceChanged);
-    if (_service.allVideos.isEmpty && !_service.isScanning) {
-      _service.scanAllVideos();
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _service.scanAllVideos(force: false);
+    });
   }
 
   void _onServiceChanged() {
@@ -2312,23 +2357,50 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   // ─── Videos Tab ────────────────────────────────────────────────────────────
   Widget _buildVideosTab() {
     if (_service.allVideos.isEmpty) {
-      return Center(child: Text(_service.isScanning ? 'Scanning...' : 'No videos found', style: const TextStyle(color: Color(0xFF666680))));
+      return RefreshIndicator(
+        color: _kAccent,
+        backgroundColor: _kCard,
+        onRefresh: () async => await _service.scanAllVideos(force: true),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: 300,
+              child: Center(
+                child: Text(
+                  _service.isScanning ? 'Scanning for videos...' : 'No videos found',
+                  style: const TextStyle(color: Color(0xFF666680)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
     }
-    if (_displayMode == 'grid') return _buildGridVideos();
-    if (_displayMode == 'list') return _buildListVideos();
-    return _buildDetailsVideos();
+    return RefreshIndicator(
+      color: _kAccent,
+      backgroundColor: _kCard,
+      onRefresh: () async => await _service.scanAllVideos(force: true),
+      child: _displayMode == 'grid'
+          ? _buildGridVideos()
+          : _displayMode == 'list'
+              ? _buildListVideos()
+              : _buildDetailsVideos(),
+    );
   }
 
   Widget _buildGridVideos() {
+    final videos = _sortedVideos;
     return LayoutBuilder(builder: (context, constraints) {
       final cols = _videoColumns(constraints.maxWidth);
       return GridView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(8),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: cols, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 0.85,
         ),
-        itemCount: _service.allVideos.length,
-        itemBuilder: (_, i) => _gridCard(_service.allVideos[i], i),
+        itemCount: videos.length,
+        itemBuilder: (_, i) => _gridCard(videos[i], i),
       );
     });
   }
@@ -2348,13 +2420,14 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   Widget _gridCard(VideoFileInfo v, int index) {
     final isCurrent = _service.activeVideoPath == v.filePath;
     final isPlaying = isCurrent && _service.isVideoPlaying;
-    final isNew = _service.isNewFile(v.filePath) ||
-        (v.dateTime != null && DateTime.now().difference(v.dateTime!).inHours < 72) ||
-        v.folder.toLowerCase().contains('download');
+    final isNew = _service.isNewFile(v.filePath);
     final progress = _service.resumeProgress(v.filePath);
 
     return GestureDetector(
-      onTap: () => setState(() { _playIndex = index; _page = 'player'; }),
+      onTap: () {
+        final actualIdx = _service.allVideos.indexOf(v);
+        setState(() { _playIndex = actualIdx >= 0 ? actualIdx : index; _page = 'player'; });
+      },
       child: Container(
         decoration: BoxDecoration(
           color: isCurrent ? _kAccent.withValues(alpha: 0.12) : _kCard,
@@ -2456,16 +2529,16 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   }
 
   Widget _buildListVideos() {
+    final videos = _sortedVideos;
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(8),
-      itemCount: _service.allVideos.length,
+      itemCount: videos.length,
       itemBuilder: (_, i) {
-        final v = _service.allVideos[i];
+        final v = videos[i];
         final isCurrent = _service.activeVideoPath == v.filePath;
         final isPlaying = isCurrent && _service.isVideoPlaying;
-        final isNew = _service.isNewFile(v.filePath) ||
-            (v.dateTime != null && DateTime.now().difference(v.dateTime!).inHours < 72) ||
-            v.folder.toLowerCase().contains('download');
+        final isNew = _service.isNewFile(v.filePath);
         final progress = _service.resumeProgress(v.filePath);
 
         return Container(
@@ -2558,7 +2631,10 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
                 PopupMenuItem(value: 'share', child: Text('Share')),
               ],
             ),
-            onTap: () => setState(() { _playIndex = i; _page = 'player'; }),
+            onTap: () {
+              final actualIdx = _service.allVideos.indexOf(v);
+              setState(() { _playIndex = actualIdx >= 0 ? actualIdx : i; _page = 'player'; });
+            },
           ),
         );
       },
@@ -2566,16 +2642,16 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
   }
 
   Widget _buildDetailsVideos() {
+    final videos = _sortedVideos;
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(8),
-      itemCount: _service.allVideos.length,
+      itemCount: videos.length,
       itemBuilder: (_, i) {
-        final v = _service.allVideos[i];
+        final v = videos[i];
         final isCurrent = _service.activeVideoPath == v.filePath;
         final isPlaying = isCurrent && _service.isVideoPlaying;
-        final isNew = _service.isNewFile(v.filePath) ||
-            (v.dateTime != null && DateTime.now().difference(v.dateTime!).inHours < 72) ||
-            v.folder.toLowerCase().contains('download');
+        final isNew = _service.isNewFile(v.filePath);
         final progress = _service.resumeProgress(v.filePath);
 
         return Container(
@@ -2590,7 +2666,10 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
-            onTap: () => setState(() { _playIndex = i; _page = 'player'; }),
+            onTap: () {
+              final actualIdx = _service.allVideos.indexOf(v);
+              setState(() { _playIndex = actualIdx >= 0 ? actualIdx : i; _page = 'player'; });
+            },
             child: Padding(
               padding: const EdgeInsets.all(10),
               child: Row(

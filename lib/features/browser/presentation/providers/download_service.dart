@@ -18,6 +18,7 @@ class DownloadItem {
   int receivedBytes;
   int totalBytes;
   String? savePath;
+  String? get filePath => savePath;
   String? error;
   DateTime createdAt;
   DateTime? completedAt;
