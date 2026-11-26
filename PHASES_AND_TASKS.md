@@ -130,12 +130,28 @@
 
 ### Phase 7: Verification, Device Testing & Release (PRD Milestone M7)
 - [x] **7.1 Automated Test Suite**
-  - [x] Full automated unit test suite passing (93/93 tests across Core, Domain, Studio, Documents, and Browser).
-  - [x] Unit tests for file exclusion filter, document reader contract, studio terminal, and entity serialization.
+  - [x] Full automated unit test suite passing (93/93 tests across Core, Domain, Studio, Documents, and Browser; plus Sprint 7 media sorting, markdown export & AI session suites passing).
+  - [x] Unit tests for file exclusion filter, document reader contract, studio terminal, media natural sort/format badges/markdown exports, and entity serialization.
 - [x] **7.2 Device Testing & CI Checklist**
-  - [x] Android CI verification: `build-android.yml` Run ID `44709694251` succeeded (per-ABI split APKs and AAB generated).
+  - [x] Android CI verification: `build-android.yml` Run ID `44709694251` and Run ID `45526057854` succeeded (per-ABI split APKs and AAB generated).
   - [x] Windows CI verification: `build-windows.yml` Run ID `44713455869` succeeded (Release EXE and portable ZIP generated).
 - [ ] **7.3 Release Packaging & GitHub Tagging**
   - [x] Bump version to `1.0.3+103` in `pubspec.yaml`.
   - [ ] Tag `v1.0.3` to trigger GitHub Actions release pipeline.
   - [ ] Verify APKs, AAB, and Windows release artifacts attached to GitHub Release.
+
+---
+
+### Phase 8: Media Experience, Home Hygiene, AI Rich Text & Music UI Overhaul
+- [x] **8.1 Direct Video Tool Access & Playback Wake Lock**
+  - [x] Prominent Video Tool entry card, AppBar action, and section button inside `MediaLibraryPage`.
+  - [x] Android `FLAG_KEEP_SCREEN_ON` MethodChannel (`setKeepScreenOn`) keeping screen awake during active video playback.
+- [x] **8.2 Natural Alphabetical Sorting, Filtering & Deduplication**
+  - [x] Chunked natural sort (`0-9` then `A-Z`) with `NEW` badge retention and dud/partial-download filtering.
+  - [x] Music deduplication preserving distinct format variants with clear `[FLAC]`, `[WAV]`, `[AAC]`, `[MP3]` badges.
+  - [x] Live download completion auto-refresh hooks and pull-to-refresh across Video, Music, and Media Library.
+- [x] **8.3 Home Recent Deduplication & AI Rich Formatting**
+  - [x] Deduplicate Home `Recent` items to latest instance while preserving full Browser History.
+  - [x] Native AI markdown rendering plus `.md`, `.txt`, `.html`, `.doc`, and `.json` formatted exports.
+- [x] **8.4 Music Tool Aesthetic Redesign**
+  - [x] Live animated spectrum visualizer (`MusicVisualizerBars`), floating glass mini-player with bottom progress bar, Studio header card, pill capsule tabs, and thematic gradient cards.

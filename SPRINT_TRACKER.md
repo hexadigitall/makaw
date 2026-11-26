@@ -29,6 +29,7 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 4** | Studio Workspace Modernization & Windows Terminal (M2) | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Android Run 44709694251 Passed |
 | **Sprint 5** | Desktop-Native Polish (Shortcuts, Menus, In-Place Navigation) | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Windows Run 44713455869 Passed |
 | **Sprint 6** | End-to-End Testing, Device Sign-Off & v1.0.3 Release | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Android & Windows CI Passed |
+| **Sprint 7** | Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign | 2026-11-24 | 2026-11-26 | **IN PROGRESS** | **TECNO CG8h Installed** (Awaiting Redmi 14C USB attach) | Android Run 45526057854 Passed |
 
 ---
 
@@ -179,3 +180,29 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
   - Process Launch: Verified active running process (`PID 7056`, `Responding: True`, 95 MB WorkingSet)
   - Status: **PASSED & VERIFIED**
 - **Sign-off By:** Engineering Team — Full DoD Achieved
+
+---
+
+### Sprint 7: Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign
+- **Status:** **IN PROGRESS** (Installed on TECNO CG8h; awaiting second device USB connection)
+- **Commits:** `24ec29e`, `a8f1a1e`
+
+#### Task Progress Checklist
+- [x] Direct Video Tool entry card, AppBar icon, and Videos section action button in `MediaLibraryPage` ([media_library_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/media_library_page.dart))
+- [x] Screen wake lock during active video playback (`setKeepScreenOn` in [MainActivity.kt](file:///D:/projects/makaw/android/app/src/main/kotlin/com/hexadigitall/makaw/MainActivity.kt) and [video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart))
+- [x] Natural alphabetical sort (Numbers 0-9 then A-Z) in [natural_sort.dart](file:///D:/projects/makaw/lib/core/utils/natural_sort.dart), dud/partial file filtering, and `NEW` tag preservation
+- [x] Music deduplication & clear format badges (`[FLAC]`, `[WAV]`, `[AAC]`, `[MP3]`) plus auto-refresh on downloads
+- [x] Home screen `Recent` section deduplication (single latest instance) while preserving full Browser History ([main.dart](file:///D:/projects/makaw/lib/main.dart))
+- [x] AI Assistant native markdown rendering and clean formatted exports (`.md`, `.txt`, `.html`, `.doc`, `.json`) in [ai_markdown_view.dart](file:///D:/projects/makaw/lib/features/ai/presentation/widgets/ai_markdown_view.dart)
+- [x] Music Player visual redesign with live animated spectrum visualizer ([music_visualizer_bars.dart](file:///D:/projects/makaw/lib/features/music/presentation/widgets/music_visualizer_bars.dart)), floating glass mini-player, pill tabs, Studio bar, and thematic cards ([music_player_page.dart](file:///D:/projects/makaw/lib/features/music/presentation/pages/music_player_page.dart))
+- [x] Unit tests passing (`test/features/media/media_sorting_dedup_and_markdown_test.dart`: 7/7 passed; `test/features/ai/ai_chat_sessions_and_spam_blocker_test.dart`: 7/7 passed)
+
+#### Verification & Device Log
+- **Local Tests:** 14/14 passed across media sorting, format badges, markdown export, AI chat sessions, and spam blocker tests (last full feature test run on commit `a8f1a1e`: 7/7 passed in `media_sorting_dedup_and_markdown_test.dart`)
+- **Static Analysis:** `flutter analyze --no-pub` reported 0 errors and 0 warnings across modified Dart files
+- **Android CI Artifacts:** Run `45526057854` (`makaw-apks`) — `app-arm64-v8a-release.apk` (91.0 MB), `app-armeabi-v7a-release.apk` (123.6 MB), `app-x86_64-release.apk` (100.3 MB)
+- **Physical Device 1 (TECNO CG8h, `H854CG8012345678`):**
+  - Streamed ADB Install: `Success` (`app-arm64-v8a-release.apk`)
+  - Launch Verification: Active process `com.hexadigitall.makaw` (PID `6137`)
+- **Physical Device 2 (Redmi 14C, `JF9HQ8XOT4LVYPKV`):**
+  - Pending USB attachment (`adb devices` currently lists only `H854CG8012345678`)
