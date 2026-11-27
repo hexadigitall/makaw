@@ -3679,7 +3679,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         setState(() => _currentView = 'studio');
         return;
       }
-      if (ecosystemId == 'documents' || ecosystemId == 'files') {
+      if (ecosystemId == 'documents') {
+        setState(() => _currentView = 'documents');
+        return;
+      }
+      if (ecosystemId == 'files') {
         setState(() => _currentView = 'files');
         return;
       }
@@ -3700,7 +3704,11 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       _switchToView('studio');
       return;
     }
-    if (ecosystemId == 'documents' || ecosystemId == 'files') {
+    if (ecosystemId == 'documents') {
+      _switchToView('documents');
+      return;
+    }
+    if (ecosystemId == 'files') {
       _switchToView('files');
       return;
     }
