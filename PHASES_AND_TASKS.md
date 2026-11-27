@@ -207,5 +207,5 @@
 - [x] **10.4 Video Player Redesign, Auto-Hide Start Over & Global Multi-Select**
   - [x] Redesign `DirectVideoPlayer` overlay layout, dimensions/aspect ratio geometry, playlist sheet, centered `-10s / Play / +10s` transport, and deterministic 4-second auto-dismissing `"Resumed from MM:SS · Start Over"` pill ([video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart)).
   - [x] Implement consistent hold-to-select + tap-to-add multi-select & batch action bars across `VideoPlayerWidget`, `MediaLibraryPage`, `DocumentWidget`, and `ImageViewerWidget`.
-  - [x] **10.5 Sprint 9 Sign-Off:** Commit/push `1f9bbaa`, Android CI Run `45943369919` (`12m29s`), and install `app-arm64-v8a-release.apk` on TECNO CG8h (`H854CG8012345678`, `PID 3055`) & Redmi 14C (`JF9HQ8XOT4LVYPKV`, `PID 32260`).
+  - [x] **10.5 Sprint 9 Sign-Off:** Commit/push `1f9bbaa` & `d6f6c2c` (`_openEcosystem('documents')` routing fix), Android CI Run `45947892328` (`8m34s`), and install `app-arm64-v8a-release.apk` on TECNO CG8h (`H854CG8012345678`, `PID 7124`) & Redmi 14C (`JF9HQ8XOT4LVYPKV`, `PID 15944`).
   - [ ] Phase E future enhancements: OLE2 binary CFBF parser (`DOC/XLS/PPT/MSG`) & SQLite FTS5 document full-text search.

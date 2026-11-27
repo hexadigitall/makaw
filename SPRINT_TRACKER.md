@@ -31,7 +31,7 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 6** | End-to-End Testing, Device Sign-Off & v1.0.3 Release | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Android & Windows CI Passed |
 | **Sprint 7** | Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign | 2026-11-24 | 2026-11-26 | **COMPLETED** | **TECNO CG8h Installed** | Android Run 45526057854 Passed |
 | **Sprint 8** | Video Scrub/Browser Jitter Fix, File Explorer Search & Archives, Download Banners, Lyrics Creator & Sync Studio, Music/Video Settings & EQ, Home Card & AI Upgrades | 2026-11-26 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45930971191 Passed |
-| **Sprint 9** | Documents Workspace Overhaul (145+ Formats, Thumbnails, Comics, Slides, Sheets, PIM/Vector), Video Player Redesign, Auto-Hide Start Over & Global Multi-Select | 2026-11-27 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45943369919 Passed |
+| **Sprint 9** | Documents Workspace Overhaul (145+ Formats, Thumbnails, Comics, Slides, Sheets, PIM/Vector), Video Player Redesign, Auto-Hide Start Over & Global Multi-Select | 2026-11-27 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45947892328 Passed |
 
 ---
 
@@ -236,11 +236,11 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 ---
 
 ### Sprint 9: Documents Workspace Overhaul, Video Player UX & Global Multi-Select
-- **Status:** **COMPLETED** (Verified locally 141/141 tests + 0 analyze errors/warnings; CI Run `45943369919` succeeded; installed & verified on both TECNO CG8h `PID 3055` and Redmi 14C `PID 32260`)
-- **Commits:** `503a2dd` (Sprint 8.1) -> `1f9bbaa` (Sprint 9)
-- **Android CI Verification:** `build-android.yml` Run `45943369919` (`12m29s`)
-- **Physical Device 1 (TECNO CG8h, `H854CG8012345678`):** `app-arm64-v8a-release.apk` Streamed Install `Success`; launched (`PID 3055`)
-- **Physical Device 2 (Redmi 14C, `JF9HQ8XOT4LVYPKV`):** `app-arm64-v8a-release.apk` Streamed Install `Success`; launched (`PID 32260`)
+- **Status:** **COMPLETED** (Verified locally 141/141 tests + 0 analyze errors/warnings; CI Run `45947892328` succeeded; installed & verified on both TECNO CG8h `PID 7124` and Redmi 14C `PID 15944`)
+- **Commits:** `503a2dd` (Sprint 8.1) -> `1f9bbaa` (Sprint 9) -> `d6f6c2c` (Documents Home/Desktop routing fix)
+- **Android CI Verification:** `build-android.yml` Run `45947892328` (`8m34s`)
+- **Physical Device 1 (TECNO CG8h, `H854CG8012345678`):** `app-arm64-v8a-release.apk` Streamed Install `Success`; launched (`PID 7124`)
+- **Physical Device 2 (Redmi 14C, `JF9HQ8XOT4LVYPKV`):** `app-arm64-v8a-release.apk` Streamed Install `Success`; launched (`PID 15944`)
 - **Local Tests:** `flutter test --no-pub --reporter compact` — **141/141 passed** across all 19 test files.
 - **Static Analysis:** `flutter analyze --no-pub` — **0 errors, 0 warnings** (`ANALYZE_CLEAN`).
 - **Delivered Scope:**
