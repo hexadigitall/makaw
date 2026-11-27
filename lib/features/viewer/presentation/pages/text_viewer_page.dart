@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../ai/presentation/widgets/ai_markdown_view.dart';
 
 class TextViewerPage extends StatefulWidget {
   final String filePath;
@@ -20,6 +21,12 @@ class _TextViewerPageState extends State<TextViewerPage> {
   String? _error;
   bool _wrap = false;
   double _fontSize = 13;
+  bool _richMarkdown = true;
+
+  bool get _isMarkdown {
+    final lower = widget.filePath.toLowerCase();
+    return lower.endsWith('.md') || lower.endsWith('.markdown');
+  }
 
   @override
   void initState() {
@@ -62,6 +69,28 @@ class _TextViewerPageState extends State<TextViewerPage> {
           onPressed: widget.onClose ?? () => Navigator.pop(context),
         ),
         actions: [
+          if (_isMarkdown)
+            IconButton(
+              icon: Icon(
+                _richMarkdown ? Icons.code_rounded : Icons.article_outlined,
+                color: Theme.of(context).colorScheme.onSurface,
+                size: 20,
+              ),
+              onPressed: () => setState(() => _richMarkdown = !_richMarkdown),
+              tooltip: _richMarkdown ? 'Raw source' : 'Rendered Markdown',
+            ),
+          IconButton(
+            icon: const Icon(Icons.copy_rounded, size: 19),
+            onPressed: _content == null
+                ? null
+                : () {
+                    Clipboard.setData(ClipboardData(text: _content!));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 2)),
+                    );
+                  },
+            tooltip: 'Copy all',
+          ),
           IconButton(
             icon: Icon(Icons.record_voice_over, color: Theme.of(context).colorScheme.onSurface, size: 20),
             onPressed: _content == null
@@ -95,15 +124,25 @@ class _TextViewerPageState extends State<TextViewerPage> {
               ? Center(child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary))
               : SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
-                  child: SelectableText(
-                    _content!,
-                    contextMenuBuilder: buildLearningSelectionToolbar,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontSize: _fontSize,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
+                  child: (_isMarkdown && _richMarkdown)
+                      ? AiMarkdownView(
+                          text: _content!,
+                          onCopyCode: (code, _) {
+                            Clipboard.setData(ClipboardData(text: code));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Code copied'), duration: Duration(seconds: 2)),
+                            );
+                          },
+                        )
+                      : SelectableText(
+                          _content!,
+                          contextMenuBuilder: buildLearningSelectionToolbar,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: _fontSize,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
                 ),
     );
   }

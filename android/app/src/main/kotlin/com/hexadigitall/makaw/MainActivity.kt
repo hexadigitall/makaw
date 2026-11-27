@@ -10,6 +10,8 @@ import android.app.Activity
 import android.content.Context
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.audiofx.BassBoost
+import android.media.audiofx.Equalizer
 import android.provider.MediaStore
 import android.util.Log
 import android.view.WindowManager
@@ -22,7 +24,11 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.hexadigitall.makaw/intent"
     private val SYSTEM_CHANNEL = "com.hexadigitall.makaw/system"
     private val MEDIA_CHANNEL = "com.hexadigitall.makaw/media"
+    private val AUDIO_FX_CHANNEL = "com.hexadigitall.makaw/audio_fx"
     private var serviceStarted = false
+    private var eq: Equalizer? = null
+    private var bassBoost: BassBoost? = null
+    private var attachedAudioSessionId: Int = -1
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -349,6 +355,70 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        val audioFxChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_FX_CHANNEL)
+        audioFxChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "attachSession" -> {
+                    val sessionId = call.argument<Int>("sessionId") ?: 0
+                    if (sessionId <= 0) {
+                        result.success(mapOf("supported" to false))
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        if (attachedAudioSessionId != sessionId) {
+                            eq?.release()
+                            bassBoost?.release()
+                            eq = Equalizer(0, sessionId)
+                            bassBoost = BassBoost(0, sessionId)
+                            attachedAudioSessionId = sessionId
+                        }
+                        val e = eq!!
+                        val bands = e.numberOfBands.toInt()
+                        val minLevel = e.bandLevelRange[0].toInt()
+                        val maxLevel = e.bandLevelRange[1].toInt()
+                        val freqs = (0 until bands).map { e.getCenterFreq(it.toShort()) / 1000 }
+                        val levels = (0 until bands).map { e.getBandLevel(it.toShort()).toInt() }
+                        result.success(mapOf(
+                            "supported" to true,
+                            "bands" to bands,
+                            "minLevel" to minLevel,
+                            "maxLevel" to maxLevel,
+                            "freqsHz" to freqs,
+                            "levels" to levels,
+                        ))
+                    } catch (ex: Exception) {
+                        result.success(mapOf("supported" to false, "error" to (ex.message ?: "")))
+                    }
+                }
+                "setEnabled" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    try {
+                        eq?.enabled = enabled
+                        bassBoost?.enabled = enabled
+                    } catch (_: Exception) {}
+                    result.success(true)
+                }
+                "setBandLevel" -> {
+                    val band = (call.argument<Int>("band") ?: 0).toShort()
+                    val level = (call.argument<Int>("level") ?: 0).toShort()
+                    try {
+                        eq?.setBandLevel(band, level)
+                    } catch (_: Exception) {}
+                    result.success(true)
+                }
+                "setBassBoost" -> {
+                    val strength = (call.argument<Int>("strength") ?: 0).coerceIn(0, 1000).toShort()
+                    try {
+                        if (bassBoost?.strengthSupported == true) {
+                            bassBoost?.setStrength(strength)
+                        }
+                    } catch (_: Exception) {}
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -360,6 +430,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            eq?.release()
+            bassBoost?.release()
+        } catch (_: Exception) {}
         MediaSessionService.flutterCallback = null
         super.onDestroy()
     }

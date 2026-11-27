@@ -50,7 +50,9 @@ import 'features/viewer/presentation/pages/spreadsheet_viewer_page.dart';
 import 'features/viewer/presentation/pages/html_viewer_page.dart';
 import 'core/services/text_action_service.dart';
 import 'features/music/presentation/pages/music_player_page.dart';
+import 'features/music/presentation/widgets/music_visualizer_bars.dart';
 import 'features/media/presentation/pages/image_viewer_page.dart';
+import 'features/media/data/services/media_thumbnail_service.dart';
 import 'features/music/data/services/music_player_service.dart';
 import 'features/media/data/services/image_viewer_service.dart';
 import 'features/media/data/services/video_player_service.dart';
@@ -992,6 +994,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool _ready = false;
   bool _miniPlayerDismissed = false;
   int? _lastMusicSongId;
+  bool _lastMusicIsPlaying = false;
+  int _lastMusicQueueLen = -1;
   bool _sessionLoaded = false;
   Database? _db;
   String _projectPath = '';
@@ -1115,7 +1119,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       case 'git': return _buildFeatureScaffold('Git', Icons.account_tree, _buildGitTab());
       case 'cloud': return _buildFeatureScaffold('Cloud Sync', Icons.cloud, _buildCloudTab());
       case 'terminal': return _buildTerminalPage();
-      case 'downloads': return _browserToolPage(const DownloadsPage());
+      case 'downloads': return _browserToolPage(DownloadsPage(onOpenFile: _openFile));
       case 'media': return _buildMediaLibraryPage();
       case 'player': return VideoPlayerWidget(onOpenMusic: () => _switchToView('music'), onHome: () => Navigator.of(context).pop());
       case 'music': return _buildMusicPlayerPage();
@@ -1191,6 +1195,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   bool _browserDockVisible = true;
   String? _pendingOpenFilePath;
   String? _pendingOpenMimeType = '';
+  String? _pendingExplorerPath;
 
   // VPN / Proxy
   bool _vpnEnabled = false;
@@ -1230,17 +1235,29 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   // AI
   String _aiApiKey = '';
-  String _aiModel = 'gemini-3.8-flash';
+  String _aiModel = 'gemini-2.5-flash';
 
   void _onMusicChanged() {
-    // A setState issued during widget build throws; defer to the next frame.
+    // Only rebuild root MakawHome when structural playback state changes
+    // (track switched, play/pause flipped, or queue count changed) — NOT on
+    // 200ms position ticks which otherwise force InAppWebView / layout rebuilds
+    // and cause video stutter/skipping in the browser!
     if (!mounted) return;
     final songId = _musicService.currentSong?.id;
+    final playing = _musicService.isPlaying;
+    final qLen = _musicService.queueLength;
+    final changed = songId != _lastMusicSongId ||
+        playing != _lastMusicIsPlaying ||
+        qLen != _lastMusicQueueLen;
+    if (!changed) return;
+
     if (songId != _lastMusicSongId) {
       // A new track started: bring the player back even if it was dismissed.
       _lastMusicSongId = songId;
       _miniPlayerDismissed = false;
     }
+    _lastMusicIsPlaying = playing;
+    _lastMusicQueueLen = qLen;
     if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
       setState(() {});
     } else {
@@ -1351,12 +1368,16 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
         _documentService.scanAllDocuments();
         _downloadManager = DownloadService(
           dio: Dio(BaseOptions(
-            connectTimeout: Duration(seconds: 15),
-            receiveTimeout: Duration(seconds: 60),
-            sendTimeout: Duration(seconds: 30),
+            connectTimeout: const Duration(seconds: 15),
+            receiveTimeout: const Duration(seconds: 60),
+            sendTimeout: const Duration(seconds: 30),
           )),
           getDownloadDir: _defaultDownloadDir,
           showNotification: _showToast,
+          onStarted: (item) {
+            if (!mounted) return;
+            _showDownloadBanner(item, completed: false);
+          },
           onComplete: (item) {
             final filePath = item.savePath ?? item.filePath;
             if (filePath != null && filePath.isNotEmpty) {
@@ -1370,6 +1391,13 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
               }
               FileRecentsService.record(filePath);
               unawaited(_loadHomeRecentFiles());
+            }
+            if (mounted) {
+              _showDownloadBanner(
+                item,
+                completed: item.state == DownloadState.completed,
+                failed: item.state == DownloadState.failed,
+              );
             }
           },
         );
@@ -2284,12 +2312,193 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       }
 
       await mgr.enqueue(url, filename: resolvedFilename, forceNew: true);
-      _showToast('Downloading: $resolvedFilename');
       return;
     }
 
     await mgr.enqueue(url, filename: resolvedFilename);
-    _showToast('Downloading: $resolvedFilename');
+  }
+
+  void _showDownloadBanner(DownloadItem item, {required bool completed, bool failed = false}) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+
+    final filePath = item.savePath ?? item.filePath;
+    final accent = failed
+        ? const Color(0xFFEF4444)
+        : (completed ? const Color(0xFF10B981) : const Color(0xFFFB923C));
+    final badgeText = failed
+        ? 'DOWNLOAD FAILED'
+        : (completed ? 'DOWNLOAD COMPLETED' : 'DOWNLOAD STARTED');
+    final subText = failed
+        ? (item.error ?? 'Could not complete download')
+        : (completed
+            ? '${item.sizeStr != '--' ? '${item.sizeStr}  \u2022  ' : ''}Saved to ${filePath != null ? p.basename(p.dirname(filePath)) : 'Downloads'}'
+            : 'Saving to ${filePath != null ? p.basename(p.dirname(filePath)) : 'Downloads'}');
+
+    IconData fileIcon = Icons.insert_drive_file_rounded;
+    final lower = item.filename.toLowerCase();
+    if (['.mp4', '.mkv', '.webm', '.mov', '.avi'].any(lower.endsWith)) fileIcon = Icons.movie_rounded;
+    else if (['.mp3', '.flac', '.wav', '.aac', '.m4a'].any(lower.endsWith)) fileIcon = Icons.music_note_rounded;
+    else if (['.zip', '.rar', '.7z', '.tar', '.gz'].any(lower.endsWith)) fileIcon = Icons.folder_zip_rounded;
+    else if (lower.endsWith('.pdf')) fileIcon = Icons.picture_as_pdf_rounded;
+    else if (['.jpg', '.jpeg', '.png', '.webp'].any(lower.endsWith)) fileIcon = Icons.image_rounded;
+    else if (lower.endsWith('.apk')) fileIcon = Icons.android_rounded;
+
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: completed ? 5 : 3),
+        padding: EdgeInsets.zero,
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF131C30), Color(0xFF0E1525)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: accent.withValues(alpha: 0.65), width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: accent.withValues(alpha: 0.22),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+              const BoxShadow(
+                color: Color(0x88000000),
+                blurRadius: 12,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accent.withValues(alpha: 0.45)),
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      failed
+                          ? Icons.error_outline_rounded
+                          : (completed ? Icons.check_circle_rounded : fileIcon),
+                      color: accent,
+                      size: 22,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text(
+                            badgeText,
+                            style: TextStyle(
+                              color: accent,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.7,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      item.filename,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (completed && filePath != null && filePath.isNotEmpty) ...[
+                InkWell(
+                  onTap: () {
+                    messenger.hideCurrentSnackBar();
+                    _openFile(filePath);
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: accent,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text('Open', style: TextStyle(color: Colors.black, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: () {
+                    messenger.hideCurrentSnackBar();
+                    _openFileExplorerAt(p.dirname(filePath));
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.folder_open_rounded, color: Colors.white, size: 17),
+                  ),
+                ),
+              ] else if (!failed) ...[
+                InkWell(
+                  onTap: () {
+                    messenger.hideCurrentSnackBar();
+                    _switchToView('downloads');
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: accent.withValues(alpha: 0.4)),
+                    ),
+                    child: Text('View', style: TextStyle(color: accent, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _showMediaSnifferPage() {
@@ -3907,263 +4116,371 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildHomeMusicPlayerCard() {
-    final song = _musicService.currentSong;
-    if (song == null) return const SizedBox.shrink();
-    final progress = _musicService.duration.inMilliseconds > 0
-        ? (_musicService.position.inMilliseconds / _musicService.duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF334155)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 8,
-            offset: Offset(0, 3),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              InkWell(
-                onTap: () => _switchToView('music'),
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: kAccentTeal.withOpacity(0.18),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.music_note_rounded, color: kAccentTeal, size: 24),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: InkWell(
-                  onTap: () => _switchToView('music'),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        song.displayTitle,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${song.displayArtist} · ${_musicService.isPlaying ? 'Playing' : 'Paused'}',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.65),
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 22),
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                padding: EdgeInsets.zero,
-                tooltip: 'Previous',
-                onPressed: () => _musicService.previousSong(),
-              ),
-              IconButton(
-                icon: Icon(
-                  _musicService.isPlaying
-                      ? Icons.pause_circle_filled_rounded
-                      : Icons.play_circle_filled_rounded,
-                  color: kAccentTeal,
-                  size: 36,
-                ),
-                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-                padding: EdgeInsets.zero,
-                tooltip: _musicService.isPlaying ? 'Pause' : 'Play',
-                onPressed: () => _musicService.togglePlayPause(),
-              ),
-              IconButton(
-                icon: const Icon(Icons.skip_next_rounded, color: Colors.white70, size: 22),
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                padding: EdgeInsets.zero,
-                tooltip: 'Next',
-                onPressed: () => _musicService.nextSong(),
-              ),
-              const SizedBox(width: 2),
-              IconButton(
-                icon: const Icon(Icons.queue_music_rounded, color: Colors.white70, size: 20),
-                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                padding: EdgeInsets.zero,
-                tooltip: 'Queue',
-                onPressed: _showMiniPlayerQueue,
-              ),
-              const SizedBox(width: 2),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                padding: EdgeInsets.zero,
-                tooltip: 'Stop & close',
-                onPressed: () {
-                  setState(() {
-                    _musicService.clearQueue();
-                    _miniPlayerDismissed = true;
-                  });
-                },
+    return AnimatedBuilder(
+      animation: _musicService,
+      builder: (_, __) {
+        final song = _musicService.currentSong;
+        if (song == null) return const SizedBox.shrink();
+        final durMs = _musicService.duration.inMilliseconds;
+        final posMs = _musicService.position.inMilliseconds;
+        final sliderMax = durMs > 0 ? durMs.toDouble() : 1.0;
+        final sliderVal = posMs.toDouble().clamp(0.0, sliderMax);
+        final isFav = _musicService.isFavorite(song.id);
+
+        return Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF172236), Color(0xFF1E293B)],
+            ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: _musicService.isPlaying
+                  ? kAccentTeal.withValues(alpha: 0.45)
+                  : const Color(0xFF334155),
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x3D000000),
+                blurRadius: 14,
+                offset: Offset(0, 5),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(2),
-            child: LinearProgressIndicator(
-              value: progress,
-              backgroundColor: const Color(0xFF334155),
-              valueColor: const AlwaysStoppedAnimation<Color>(kAccentTeal),
-              minHeight: 2.5,
-            ),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  InkWell(
+                    onTap: () => _switchToView('music'),
+                    borderRadius: BorderRadius.circular(14),
+                    child: MediaArtworkWidget(
+                      filePath: song.filePath,
+                      isVideo: false,
+                      width: 64,
+                      height: 64,
+                      borderRadius: BorderRadius.circular(14),
+                      fit: BoxFit.cover,
+                      fallbackColor: const Color(0xFF0F172A),
+                      iconColor: kAccentTeal,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _switchToView('music'),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            song.displayTitle,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              height: 1.22,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${song.displayArtist}${song.displayAlbum.isNotEmpty && song.displayAlbum != "Unknown Album" ? " · ${song.displayAlbum}" : ""}',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.72),
+                              fontSize: 12.5,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              if (song.formatBadge.isNotEmpty) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: kAccentTeal.withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(5),
+                                    border: Border.all(color: kAccentTeal.withValues(alpha: 0.35)),
+                                  ),
+                                  child: Text(
+                                    song.formatBadge,
+                                    style: const TextStyle(
+                                      color: kAccentTeal,
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.4,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              MusicVisualizerBars(
+                                isPlaying: _musicService.isPlaying,
+                                color: kAccentTeal,
+                                height: 12,
+                                barWidth: 2.5,
+                                spacing: 2,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '${_homeClock(posMs)} / ${_homeClock(durMs)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.55),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        padding: EdgeInsets.zero,
+                        tooltip: 'Stop & close',
+                        onPressed: () {
+                          setState(() {
+                            _musicService.clearQueue();
+                            _miniPlayerDismissed = true;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 4),
+                      IconButton(
+                        icon: const Icon(Icons.open_in_full_rounded, color: Colors.white54, size: 16),
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        padding: EdgeInsets.zero,
+                        tooltip: 'Open Music Player',
+                        onPressed: () => _switchToView('music'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              SliderTheme(
+                data: const SliderThemeData(
+                  trackHeight: 3,
+                  thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5),
+                  overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+                  activeTrackColor: kAccentTeal,
+                  inactiveTrackColor: Color(0xFF334155),
+                  thumbColor: kAccentTeal,
+                ),
+                child: Slider(
+                  value: sliderVal,
+                  max: sliderMax,
+                  onChanged: durMs > 0
+                      ? (v) => _musicService.seek(Duration(milliseconds: v.round()))
+                      : null,
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                      color: isFav ? const Color(0xFFF472B6) : Colors.white60,
+                      size: 20,
+                    ),
+                    tooltip: 'Favourite',
+                    onPressed: () => _musicService.toggleFavorite(song.id),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 26),
+                    tooltip: 'Previous',
+                    onPressed: () => _musicService.previousSong(),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      _musicService.isPlaying
+                          ? Icons.pause_circle_filled_rounded
+                          : Icons.play_circle_filled_rounded,
+                      color: kAccentTeal,
+                      size: 40,
+                    ),
+                    tooltip: _musicService.isPlaying ? 'Pause' : 'Play',
+                    onPressed: () => _musicService.togglePlayPause(),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.skip_next_rounded, color: Colors.white70, size: 26),
+                    tooltip: 'Next',
+                    onPressed: () => _musicService.nextSong(),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.queue_music_rounded, color: Colors.white60, size: 21),
+                    tooltip: 'Queue',
+                    onPressed: _showMiniPlayerQueue,
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
   Widget _buildHomeVideoPlayerCard(String videoPath) {
-    final title = p.basename(videoPath);
-    final pos = _videoService.resumePosition(videoPath);
-    final dur = _videoService.videoDuration(videoPath);
-    final progress = _videoService.resumeProgress(videoPath);
-    final isPlaying = _videoService.isVideoPlaying && _videoService.activeVideoPath == videoPath;
+    return AnimatedBuilder(
+      animation: _videoService,
+      builder: (_, __) {
+        final title = p.basename(videoPath);
+        final pos = _videoService.activeVideoPath == videoPath && _videoService.activePositionMs > 0
+            ? _videoService.activePositionMs
+            : _videoService.resumePosition(videoPath);
+        final dur = _videoService.activeVideoPath == videoPath && _videoService.activeDurationMs > 0
+            ? _videoService.activeDurationMs
+            : _videoService.videoDuration(videoPath);
+        final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : _videoService.resumeProgress(videoPath);
+        final isPlaying = _videoService.isVideoPlaying && _videoService.activeVideoPath == videoPath;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF334155)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 8,
-            offset: Offset(0, 3),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              InkWell(
-                onTap: () => _openFile(videoPath),
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF818CF8).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.movie_outlined, color: Color(0xFF818CF8), size: 24),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: InkWell(
-                  onTap: () => _openFile(videoPath),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        dur > 0
-                            ? 'Continue watching · ${_homeClock(pos)} / ${_homeClock(dur)}'
-                            : 'Continue watching · ${_homeClock(pos)}',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.65),
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: Icon(
-                  isPlaying
-                      ? Icons.pause_circle_filled_rounded
-                      : Icons.play_circle_filled_rounded,
-                  color: const Color(0xFF818CF8),
-                  size: 36,
-                ),
-                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-                padding: EdgeInsets.zero,
-                tooltip: isPlaying ? 'Pause' : 'Resume watching',
-                onPressed: () {
-                  if (_videoService.activeVideoPath == videoPath && _videoService.onTogglePlayback != null) {
-                    _videoService.toggleActiveVideoPlayPause();
-                  } else {
-                    _openFile(videoPath);
-                  }
-                },
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                padding: EdgeInsets.zero,
-                tooltip: 'Dismiss',
-                onPressed: () {
-                  setState(() {
-                    _videoService.clearResume(videoPath);
-                    _videoService.stopActiveVideo();
-                    _dismissedHomeItems.add('video_tile_$videoPath');
-                  });
-                  _persistDismissedHomeItems();
-                },
+        return Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF192038), Color(0xFF1E293B)],
+            ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isPlaying
+                  ? const Color(0xFF818CF8).withValues(alpha: 0.45)
+                  : const Color(0xFF334155),
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x3D000000),
+                blurRadius: 14,
+                offset: Offset(0, 5),
               ),
             ],
           ),
-          if (progress > 0) ...[
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(
-                value: progress,
-                backgroundColor: const Color(0xFF334155),
-                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
-                minHeight: 2.5,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  InkWell(
+                    onTap: () => _openFile(videoPath),
+                    borderRadius: BorderRadius.circular(12),
+                    child: MediaArtworkWidget(
+                      filePath: videoPath,
+                      isVideo: true,
+                      width: 64,
+                      height: 64,
+                      borderRadius: BorderRadius.circular(12),
+                      fit: BoxFit.cover,
+                      fallbackColor: const Color(0xFF0F172A),
+                      iconColor: const Color(0xFF818CF8),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _openFile(videoPath),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            dur > 0
+                                ? '${isPlaying ? "Playing" : "Continue watching"} · ${_homeClock(pos)} / ${_homeClock(dur)}'
+                                : 'Continue watching · ${_homeClock(pos)}',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.68),
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      isPlaying
+                          ? Icons.pause_circle_filled_rounded
+                          : Icons.play_circle_filled_rounded,
+                      color: const Color(0xFF818CF8),
+                      size: 38,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                    padding: EdgeInsets.zero,
+                    tooltip: isPlaying ? 'Pause' : 'Resume watching',
+                    onPressed: () {
+                      if (_videoService.activeVideoPath == videoPath && _videoService.onTogglePlayback != null) {
+                        _videoService.toggleActiveVideoPlayPause();
+                      } else {
+                        _openFile(videoPath);
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    padding: EdgeInsets.zero,
+                    tooltip: 'Dismiss',
+                    onPressed: () {
+                      setState(() {
+                        _videoService.clearResume(videoPath);
+                        _videoService.stopActiveVideo();
+                        _dismissedHomeItems.add('video_tile_$videoPath');
+                      });
+                      _persistDismissedHomeItems();
+                    },
+                  ),
+                ],
               ),
-            ),
-          ],
-        ],
-      ),
+              if (progress > 0) ...[
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: const Color(0xFF334155),
+                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF818CF8)),
+                    minHeight: 3,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -4288,6 +4605,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildFoldersPage() {
+    final initPath = _pendingExplorerPath;
+    _pendingExplorerPath = null;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -4296,6 +4615,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         }
       },
       child: FoldersPage(
+        initialPath: initPath,
         openFile: (path) => _openFile(path),
       ),
     );
@@ -5279,7 +5599,58 @@ TappableIcon(
       }
     });
   }
-  // ─── Makaw Root Portal Footer Menu (main Makaw menu) ────────────────────────
+  Widget? _buildHomeWorkspaceBar() {
+    final openTabs = _browserTabs.where((t) => !t.incognito && t.url.isNotEmpty).length;
+    final privateTabs = _browserTabs.where((t) => t.incognito).length;
+    if (openTabs == 0 && privateTabs == 0) return null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.layers_outlined, color: Color(0xFF38BDF8), size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: InkWell(
+              onTap: _showTabSwitcher,
+              child: Text(
+                openTabs > 0
+                    ? '$openTabs active ${openTabs == 1 ? "browser tab" : "browser tabs"}'
+                    : '$privateTabs private ${privateTabs == 1 ? "tab" : "tabs"}',
+                style: const TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _showTabSwitcher,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF38BDF8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Tabs', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 6),
+          TextButton(
+            onPressed: () => _switchToView('downloads'),
+            style: TextButton.styleFrom(
+              foregroundColor: kAccentTeal,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Downloads', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildBottomNavBar() {
     final items = <(IconData, Color, String, VoidCallback)>[
@@ -5297,8 +5668,7 @@ TappableIcon(
           height: 66,
           child: Row(
             children: [
-              for (final it in items)
-                _footerItem(it.$1, it.$2, it.$3, it.$4),
+              for (final it in items) _footerItem(it.$1, it.$2, it.$3, it.$4),
             ],
           ),
         ),
@@ -5348,6 +5718,7 @@ TappableIcon(
       continueItems: _buildHomeContinueItems(),
       recentItems: _buildHomeRecentItems(),
       playerWidget: _buildHomePlayerWidget(),
+      workspaceBar: _buildHomeWorkspaceBar(),
       onClearContinue: _clearHomeContinueGroup,
       onClearRecent: _clearHomeRecentGroup,
       onDismissItem: _dismissHomeActivityItem,
@@ -5631,6 +6002,7 @@ TappableIcon(
       _openFile(path);
       return;
     }
+    _pendingExplorerPath = Directory(path).existsSync() ? path : p.dirname(path);
     _switchToView('files');
   }
 
@@ -6088,8 +6460,16 @@ TappableIcon(
       _playAudioFileFromIntent(filePath);
     } else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].contains(ext)) {
       Navigator.of(context).push(fastRoute(_buildImageViewer(filePath, goBack)));
-    } else if (['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'log', 'csv'].contains(ext)) {
+    } else if ([
+      'txt', 'md', 'markdown', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'log', 'csv',
+      'dart', 'py', 'js', 'jsx', 'ts', 'tsx', 'java', 'kt', 'kts', 'swift',
+      'c', 'cpp', 'cc', 'h', 'hpp', 'cs', 'go', 'rs', 'rb', 'php',
+      'sh', 'bash', 'ps1', 'bat', 'cmd', 'sql', 'css', 'scss', 'toml', 'env',
+      'lrc', 'srt', 'vtt', 'ass', 'ssa', 'sub',
+    ].contains(ext)) {
       Navigator.of(context).push(fastRoute(TextViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
+    } else if (['zip', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z'].contains(ext)) {
+      _openFileExplorerAt(Directory(filePath).parent.path);
     } else if (['html', 'htm', 'xhtml'].contains(ext)) {
       Navigator.of(context).push(fastRoute(HtmlViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
     } else if (['doc', 'docx', 'odt', 'rtf', 'pages'].contains(ext)) {
@@ -6484,14 +6864,23 @@ TappableIcon(
       }
     }, true);
 
-    // 4. Neutralize transparent full-screen clickjacking overlays
+    // 4. Neutralize transparent full-screen clickjacking overlays without
+    // triggering layout reflows while video playback is active.
     function removeClickjackOverlays() {
       try {
-        var all = document.querySelectorAll('div, iframe');
+        var vids = document.getElementsByTagName('video');
+        for (var v = 0; v < vids.length; v++) {
+          if (!vids[v].paused && !vids[v].ended) return;
+        }
+        var root = document.body;
+        if (!root) return;
         var w = window.innerWidth || document.documentElement.clientWidth;
         var h = window.innerHeight || document.documentElement.clientHeight;
-        for (var i = 0; i < all.length; i++) {
-          var el = all[i];
+        var children = root.children;
+        for (var i = 0; i < children.length; i++) {
+          var el = children[i];
+          var tag = el.tagName;
+          if (tag !== 'DIV' && tag !== 'IFRAME' && tag !== 'A') continue;
           var style = window.getComputedStyle(el);
           if (style.position === 'fixed' || style.position === 'absolute') {
             var z = parseInt(style.zIndex, 10);
@@ -6513,9 +6902,10 @@ TappableIcon(
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', removeClickjackOverlays);
     } else {
-      removeClickjackOverlays();
+      setTimeout(removeClickjackOverlays, 600);
     }
-    setInterval(removeClickjackOverlays, 2000);
+    if (window._makawTapjackTimer) clearInterval(window._makawTapjackTimer);
+    window._makawTapjackTimer = setInterval(removeClickjackOverlays, 6000);
   } catch(e) {}
 })();
 ''';
@@ -6543,6 +6933,8 @@ TappableIcon(
       preferredContentMode: isDesktop
           ? UserPreferredContentMode.DESKTOP
           : UserPreferredContentMode.MOBILE,
+      hardwareAcceleration: true,
+      useHybridComposition: true,
       offscreenPreRaster: false,
       incognito: tab.incognito,
       useOnDownloadStart: true,
@@ -6970,8 +7362,12 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
         await _handleDownloadRequest(fileUrl, filename: filename);
       },
       onProgressChanged: (ctrl, progress) {
+        final prev = _tabProgress[tab.id];
+        if (prev == progress) return;
         _tabProgress[tab.id] = progress;
-        if (tab.id == _activeBrowserTabId) setState(() {});
+        if (tab.id == _activeBrowserTabId && (progress < 100 || prev != 100)) {
+          setState(() {});
+        }
       },
       onReceivedError: (ctrl, request, error) {
         if (request.isForMainFrame ?? false) {
@@ -7160,7 +7556,8 @@ try {
   function guessQuality(src, videoEl) {
     var formats = [];
     var label = '';
-    var lower = (src + ' ' + (videoEl ? videoEl.outerHTML : '')).toLowerCase();
+    var meta = src + ' ' + (videoEl ? ((videoEl.className || '') + ' ' + (videoEl.id || '') + ' ' + (videoEl.getAttribute('title') || '')) : '');
+    var lower = meta.toLowerCase();
     for (var i = 0; i < knownQualities.length; i++) {
       if (lower.indexOf(knownQualities[i]) >= 0) {
         label = knownQualities[i].charAt(0).toUpperCase() + knownQualities[i].slice(1);
@@ -7310,20 +7707,24 @@ try {
       }
     });
 
-    // 9. Inline scripts for URLs
-    document.querySelectorAll('script:not([src])').forEach(function(s) {
-      var text = s.textContent || '';
-      var urlMatches = text.match(/https?:\\/\\/[^\\"'\\s]+(?:mp4|webm|mkv|m3u8|mpd|jpg|jpeg|png|pdf)(?:[?#][^\\"'\\s]*)?/gi);
-      if (urlMatches) {
-        urlMatches.forEach(function(u) {
-          u = u.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
-          if (isDownloadableUrl(u) && !seen[u]) {
-            seen[u] = true;
-            results.push({url: u, type: classifyExt(u.split('?')[0].split('.').pop().toLowerCase()), title: '', formats: []});
-          }
-        });
-      }
-    });
+    // 9. Inline scripts for URLs (run once per page load so video frames never drop)
+    if (!window._makawSnifferScriptsDone) {
+      window._makawSnifferScriptsDone = true;
+      document.querySelectorAll('script:not([src])').forEach(function(s) {
+        var text = s.textContent || '';
+        if (text.length > 150000) return;
+        var urlMatches = text.match(/https?:\\/\\/[^\\"'\\s]+(?:mp4|webm|mkv|m3u8|mpd|jpg|jpeg|png|pdf)(?:[?#][^\\"'\\s]*)?/gi);
+        if (urlMatches) {
+          urlMatches.forEach(function(u) {
+            u = u.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+            if (isDownloadableUrl(u) && !seen[u]) {
+              seen[u] = true;
+              results.push({url: u, type: classifyExt(u.split('?')[0].split('.').pop().toLowerCase()), title: '', formats: []});
+            }
+          });
+        }
+      });
+    }
 
     // 10. Try fetching HLS/DASH manifests
     var manifestUrls = results.filter(function(r) { return r.url.indexOf('.m3u8') >= 0; });
@@ -7344,10 +7745,14 @@ try {
   }
 
   scanMedia();
-  window._makawMediaSnifferIntervalIds.push(setInterval(scanMedia, 4000));
+  window._makawMediaSnifferIntervalIds.push(setInterval(function() {
+    var v = document.querySelector('video');
+    if (v && !v.paused && !v.ended) return;
+    scanMedia();
+  }, 8000));
   var origPushState = history.pushState;
-  history.pushState = function() { origPushState.apply(this, arguments); setTimeout(scanMedia, 800); };
-  window.addEventListener('popstate', function() { setTimeout(scanMedia, 800); });
+  history.pushState = function() { origPushState.apply(this, arguments); window._makawSnifferScriptsDone = false; setTimeout(scanMedia, 1200); };
+  window.addEventListener('popstate', function() { window._makawSnifferScriptsDone = false; setTimeout(scanMedia, 1200); });
 })();
 ''')).catchError((_) {});
   }
@@ -7511,22 +7916,30 @@ try {
     } catch(e) {}
   }
 
-  media = document.querySelector('video, audio');
-  if (media) {
-    ['play','pause','loadedmetadata','ended','seeked','timeupdate'].forEach(function(evt) {
-      media.addEventListener(evt, tryBridge, {passive: true});
+  function bindMedia(m) {
+    if (!m || m._makawBound) return;
+    m._makawBound = true;
+    ['play','pause','loadedmetadata','ended','seeked'].forEach(function(evt) {
+      m.addEventListener(evt, tryBridge, {passive: true});
     });
   }
 
+  var initialMedia = document.querySelector('video, audio');
+  if (initialMedia) {
+    bindMedia(initialMedia);
+  }
+
+  var obsTimer = null;
   var obs = new MutationObserver(function() {
-    var m = document.querySelector('video, audio');
-    if (m && !m._makawBound) {
-      m._makawBound = true;
-      ['play','pause','loadedmetadata','ended','seeked','timeupdate'].forEach(function(evt) {
-        m.addEventListener(evt, tryBridge, {passive: true});
-      });
-      tryBridge();
-    }
+    if (obsTimer) return;
+    obsTimer = setTimeout(function() {
+      obsTimer = null;
+      var m = document.querySelector('video, audio');
+      if (m && !m._makawBound) {
+        bindMedia(m);
+        tryBridge();
+      }
+    }, 1500);
   });
   if (document.body) obs.observe(document.body, {childList: true, subtree: true});
 })();
@@ -7730,7 +8143,15 @@ try {
   Future<void> _loadAiKey() async {
     final prefs = await SharedPreferences.getInstance();
     _aiApiKey = AiChatPage.cleanApiKey(prefs.getString('gemini_api_key') ?? '');
-    _aiModel = prefs.getString('gemini_model') ?? 'gemini-3.8-flash';
+    final savedModel = (prefs.getString('gemini_model') ?? '').trim();
+    if (savedModel.isEmpty ||
+        savedModel.startsWith('gemini-3.') ||
+        savedModel == 'gemini-1.5-flash' ||
+        savedModel == 'gemini-1.5-pro') {
+      _aiModel = 'gemini-2.5-flash';
+    } else {
+      _aiModel = savedModel;
+    }
   }
 
   Future<String?> _showAISettings() {
@@ -7738,11 +8159,10 @@ try {
     final modelCtrl = TextEditingController(text: _aiModel);
     bool obscure = true;
     final presetModels = [
-      'gemini-3.8-flash',
-      'gemini-3.5-flash',
-      'gemini-3.0-flash',
       'gemini-2.5-flash',
-      'gemini-1.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-2.0-flash',
+      'gemini-2.5-pro',
     ];
     String selectedModel = presetModels.contains(_aiModel) ? _aiModel : 'custom';
 
@@ -7814,7 +8234,7 @@ try {
                       ...presetModels.map((m) => DropdownMenuItem(
                             value: m,
                             child: Text(
-                              m == 'gemini-3.8-flash' ? '$m (Default)' : m,
+                              m == 'gemini-2.5-flash' ? '$m (Fast · Default)' : m,
                               style: const TextStyle(color: Colors.white),
                             ),
                           )),
@@ -7841,7 +8261,7 @@ try {
                       decoration: const InputDecoration(
                         labelText: 'Custom Model ID',
                         labelStyle: TextStyle(color: kTextSecondary),
-                        hintText: 'e.g. gemini-3.8-flash',
+                        hintText: 'e.g. gemini-2.5-flash',
                         hintStyle: TextStyle(color: kTextSecondary),
                         border: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
                         enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
@@ -7866,7 +8286,7 @@ try {
                           : selectedModel)
                       .trim();
                   final effectiveModel =
-                      chosenModel.isNotEmpty ? chosenModel : 'gemini-3.8-flash';
+                      chosenModel.isNotEmpty ? chosenModel : 'gemini-2.5-flash';
                   final prefs = await SharedPreferences.getInstance();
                   if (key.isNotEmpty) {
                     await prefs.setString('gemini_api_key', key);
@@ -7892,6 +8312,7 @@ try {
         apiKey: _aiApiKey,
         initialModel: _aiModel,
         onOpenSettings: _showAISettings,
+        onOpenFile: _openFile,
         pageTitle: pageTitle,
         pageUrl: pageUrl,
       ),

@@ -1,24 +1,23 @@
 import 'dart:io';
-import 'dart:convert';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:http/http.dart' as http;
+import 'package:open_filex/open_filex.dart';
 import 'package:palette_generator/palette_generator.dart';
+import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
 import '../../data/services/music_player_service.dart';
 import '../../../media/data/services/media_thumbnail_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import 'music_playlist_page.dart';
-import '../../../../core/storage/lyric_service.dart';
+import 'lyrics_creator_page.dart';
+import '../../../../core/storage/lrc_storage_service.dart';
 import '../../../../core/services/global_player_state.dart';
+import '../../../documents/presentation/pages/folders_page.dart';
 import '../widgets/music_visualizer_bars.dart';
-
-class _LrcLine {
-  final Duration time;
-  final String text;
-  const _LrcLine(this.time, this.text);
-}
+import '../widgets/synced_lyrics_view.dart';
 
 class MusicPlayerWidget extends ConsumerStatefulWidget {
   final VoidCallback? onOpenVideos;
@@ -43,8 +42,10 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
   bool _showLyrics = false;
   String _lyricsText = '';
   bool _lyricsLoading = false;
-  List<_LrcLine> _lrcLines = [];
-  bool _hasLrc = false;
+  List<LrcLine> _lrcLines = [];
+  String _lyricsSource = '';
+  int _lyricsOffsetMs = 0;
+  bool get _hasLrc => _lrcLines.isNotEmpty;
 
   // Dynamic color palette from album art
   Color _dominantColor = const Color(0xFF0F0F1A);
@@ -74,10 +75,17 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
 
   void _onChange() {
     if (mounted) {
-      setState(() {});
       if (_service.currentSong != null && _service.currentSong!.id != _prevSongId) {
+        _lyricsText = '';
+        _lrcLines = [];
+        _lyricsSource = '';
+        _lyricsOffsetMs = 0;
         _updateDominantColor();
+        if (_showLyrics) {
+          _fetchLyrics(forceOnline: true);
+        }
       }
+      setState(() {});
     }
   }
 
@@ -117,212 +125,243 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
   }
 
   // ─── Lyrics ────────────────────────────────────────────────────────────────
-  List<_LrcLine> _parseLrc(String text) {
-    final lines = <_LrcLine>[];
-    final regex = RegExp(r'\[(\d{2}):(\d{2})[\.:](\d{2,3})\](.*)');
-    for (final line in text.split('\n')) {
-      final match = regex.firstMatch(line.trim());
-      if (match != null) {
-        final min = int.parse(match.group(1)!);
-        final sec = int.parse(match.group(2)!);
-        final ms = int.parse(match.group(3)!.padRight(3, '0').substring(0, 3));
-        final lyric = match.group(4)?.trim() ?? '';
-        if (lyric.isNotEmpty) {
-          lines.add(_LrcLine(Duration(milliseconds: min * 60000 + sec * 1000 + ms), lyric));
-        }
-      }
-    }
-    lines.sort((a, b) => a.time.compareTo(b.time));
-    return lines;
-  }
-
-  Future<void> _fetchLyrics() async {
+  Future<void> _fetchLyrics({bool forceOnline = false}) async {
     final song = _service.currentSong;
     if (song == null) return;
-    setState(() { _lyricsLoading = true; _lyricsText = ''; _lrcLines = []; _hasLrc = false; });
+    setState(() {
+      _lyricsLoading = true;
+      _lyricsText = '';
+      _lrcLines = [];
+      _lyricsSource = '';
+    });
 
-    // 1. Check for .lrc file next to audio
-    final lrcFile = File(song.filePath.replaceAll(RegExp(r'\.[^.]+$'), '.lrc'));
-    if (await lrcFile.exists()) {
-      final raw = await lrcFile.readAsString();
-      final parsed = _parseLrc(raw);
-      if (parsed.isNotEmpty) {
-        setState(() { _lrcLines = parsed; _hasLrc = true; _lyricsLoading = false; });
-        _persistCurrentLyrics();
-        return;
-      }
-    }
-
-    final artist = Uri.encodeComponent(song.displayArtist.replaceAll('Unknown Artist', ''));
-    final title = Uri.encodeComponent(song.displayTitle);
-
-    // 2. Try lrclib.net (returns synced LRC)
-    try {
-      final res = await http.get(
-        Uri.parse('https://lrclib.net/api/get?artist_name=$artist&track_name=$title'),
-        headers: {'User-Agent': 'Makaw/1.0'},
-      ).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final synced = data['syncedLyrics'] as String?;
-        final plain = data['plainLyrics'] as String?;
-        if (synced != null && synced.isNotEmpty) {
-          final parsed = _parseLrc(synced);
-          if (parsed.isNotEmpty) {
-            setState(() { _lrcLines = parsed; _hasLrc = true; _lyricsLoading = false; });
-            _persistCurrentLyrics();
-            return;
-          }
-        }
-        if (plain != null && plain.isNotEmpty) {
-          setState(() { _lyricsText = plain; _lyricsLoading = false; });
-          _persistCurrentLyrics();
-          return;
-        }
-      }
-    } catch (_) {}
-
-    // 3. Fallback to lyrics.ovh
-    try {
-      final res = await http.get(Uri.parse('https://api.lyrics.ovh/v1/$artist/$title'))
-          .timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final lyrics = data['lyrics'] as String?;
-        if (lyrics != null && lyrics.isNotEmpty) {
-          setState(() { _lyricsText = lyrics; _lyricsLoading = false; });
-          _persistCurrentLyrics();
-          return;
-        }
-      }
-    } catch (_) {}
-
-    setState(() { _lyricsText = 'No lyrics found'; _lyricsLoading = false; });
+    final resolved = await LrcStorageService.resolveLyrics(
+      songPath: song.filePath,
+      title: song.displayTitle,
+      artist: song.displayArtist,
+      album: song.displayAlbum,
+      allowOnline: forceOnline || _service.autoFetchLyrics,
+    );
+    if (!mounted) return;
+    setState(() {
+      _lrcLines = resolved.syncedLines;
+      _lyricsText = resolved.plainText;
+      _lyricsSource = resolved.sourceLabel;
+      _lyricsLoading = false;
+    });
   }
 
-  void _editLyricsDialog() {
-    final ctrl = TextEditingController(text: _hasLrc
-        ? _lrcLines.map((l) => '[${l.time.inMinutes}:${(l.time.inSeconds % 60).toString().padLeft(2, '0')}.${(l.time.inMilliseconds % 1000).toString().padLeft(3, '0')}]${l.text}').join('\n')
-        : _lyricsText);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('Edit Lyrics', style: TextStyle(color: Colors.white, fontSize: 16)),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: TextField(
-            controller: ctrl,
-            maxLines: null,
-            expands: true,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-            decoration: const InputDecoration(
-              hintText: 'Paste lyrics or LRC format here...',
-              hintStyle: TextStyle(color: Color(0xFF666680)),
-              border: OutlineInputBorder(),
-            ),
-          ),
+  Future<void> _openLyricsCreator() async {
+    final song = _service.currentSong;
+    if (song == null) return;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => LyricsCreatorPage(
+          service: _service,
+          song: song,
+          initialLines: _lrcLines,
+          initialPlainText: _lyricsText,
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.white70))),
-          TextButton(
-            onPressed: () {
-              final text = ctrl.text.trim();
-              if (text.isEmpty) return;
-              final parsed = _parseLrc(text);
-              if (parsed.isNotEmpty) {
-                setState(() { _lrcLines = parsed; _hasLrc = true; _lyricsText = ''; });
-              } else {
-                setState(() { _lyricsText = text; _lrcLines = []; _hasLrc = false; });
-              }
-              _persistCurrentLyrics();
-              Navigator.pop(ctx);
-            },
-            child: const Text('Save', style: TextStyle(color: Color(0xFF818CF8))),
-          ),
-        ],
+      ),
+    );
+    if (mounted) {
+      await _fetchLyrics(forceOnline: false);
+    }
+  }
+
+  Future<void> _importLrcFile() async {
+    final song = _service.currentSong;
+    if (song == null) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['lrc', 'txt'],
+      );
+      final path = result?.files.single.path;
+      if (path == null) return;
+      final raw = await File(path).readAsString();
+      final parsed = LrcStorageService.parseLrc(raw);
+      final saved = await LrcStorageService.saveLyricsForSong(
+        songPath: song.filePath,
+        title: song.displayTitle,
+        artist: song.displayArtist,
+        album: song.displayAlbum,
+        syncedLines: parsed,
+        plainText: parsed.isEmpty ? raw : '',
+      );
+      if (!mounted) return;
+      setState(() {
+        _lrcLines = parsed;
+        _lyricsText = parsed.isEmpty ? raw : '';
+        _lyricsSource = 'Imported .lrc';
+      });
+      _toast('Saved to MakawLyrics (${p.basename(saved)})');
+    } catch (e) {
+      _toast('Import failed: $e');
+    }
+  }
+
+  Future<void> _pasteLyricsFromClipboard() async {
+    final song = _service.currentSong;
+    if (song == null) return;
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final raw = data?.text?.trim() ?? '';
+    if (raw.isEmpty) {
+      _toast('Clipboard is empty');
+      return;
+    }
+    final parsed = LrcStorageService.parseLrc(raw);
+    await LrcStorageService.saveLyricsForSong(
+      songPath: song.filePath,
+      title: song.displayTitle,
+      artist: song.displayArtist,
+      album: song.displayAlbum,
+      syncedLines: parsed,
+      plainText: parsed.isEmpty ? raw : '',
+    );
+    if (!mounted) return;
+    setState(() {
+      _lrcLines = parsed;
+      _lyricsText = parsed.isEmpty ? raw : '';
+      _lyricsSource = parsed.isNotEmpty ? 'Pasted .lrc' : 'Pasted text';
+    });
+    _toast(parsed.isNotEmpty
+        ? 'Imported ${parsed.length} timed lines to MakawLyrics'
+        : 'Pasted lyrics — open Studio to add timers');
+  }
+
+  Future<void> _openMakawLyricsFolder() async {
+    final folder = await LrcStorageService.lyricsFolderPath();
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FoldersPage(
+          initialPath: folder,
+          openFile: (path) async => OpenFilex.open(path),
+        ),
       ),
     );
   }
 
-  /// Persist the currently-loaded lyrics into the Lyrics manager so they appear
-  /// in the Lyrics hub.
-  void _persistCurrentLyrics() {
+  void _expandLyricsFullscreen() {
     final song = _service.currentSong;
     if (song == null) return;
-    final songId = '${song.displayTitle} — ${song.displayArtist}';
-    if (_hasLrc && _lrcLines.isNotEmpty) {
-      try {
-        final lines = _lrcLines.map((l) => Lyric(
-              songId: songId,
-              songTitle: song.displayTitle,
-              artist: song.displayArtist,
-              text: l.text,
-              startMs: l.time.inMilliseconds,
-              endMs: _lrcLines.length > _lrcLines.indexOf(l)
-                  ? (_lrcLines[_lrcLines.indexOf(l) + 1].time.inMilliseconds - 1).clamp(l.time.inMilliseconds, 1 << 62)
-                  : l.time.inMilliseconds + 3000,
-              createdAt: DateTime.now(),
-              updatedAt: DateTime.now(),
-            )).toList();
-        LyricService.saveTimedLyrics(
-          songId: songId,
-          songTitle: song.displayTitle,
-          artist: song.displayArtist,
-          lines: lines,
-        );
-      } catch (_) {}
-    } else if (!_hasLrc && _lyricsText.isNotEmpty && _lyricsText != 'No lyrics found' && _lyricsText != 'Could not fetch lyrics') {
-      try {
-        LyricService.saveFullLyric(
-          songId: songId,
-          songTitle: song.displayTitle,
-          artist: song.displayArtist,
-          text: _lyricsText,
-        );
-      } catch (_) {}
-    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0A0F1A),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AnimatedBuilder(
+          animation: _service,
+          builder: (_, __) => SafeArea(
+            child: SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.92,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                song.displayTitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+                              ),
+                              Text(
+                                song.displayArtist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Copy .lrc',
+                          icon: const Icon(Icons.copy_all_rounded, color: Colors.white70, size: 20),
+                          onPressed: () async {
+                            final out = _hasLrc
+                                ? LrcStorageService.formatLrc(
+                                    lines: _lrcLines,
+                                    title: song.displayTitle,
+                                    artist: song.displayArtist,
+                                    album: song.displayAlbum,
+                                  )
+                                : _lyricsText;
+                            await Clipboard.setData(ClipboardData(text: out));
+                            _toast('Copied lyrics to clipboard');
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: SyncedLyricsView(
+                      syncedLines: _lrcLines,
+                      plainText: _lyricsText,
+                      sourceLabel: _lyricsSource,
+                      position: _service.position,
+                      accentColor: _accentColor,
+                      isLoading: _lyricsLoading,
+                      offsetMs: _lyricsOffsetMs,
+                      onOffsetChanged: (o) {
+                        setState(() => _lyricsOffsetMs = o);
+                        setModalState(() {});
+                      },
+                      onSeekToLine: (d) => _service.seek(d),
+                      onOpenCreator: () {
+                        Navigator.pop(ctx);
+                        _openLyricsCreator();
+                      },
+                      onSearchOnline: () => _fetchLyrics(forceOnline: true),
+                      onImportFile: _importLrcFile,
+                      onPasteClipboard: _pasteLyricsFromClipboard,
+                      onOpenLyricsFolder: _openMakawLyricsFolder,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // ─── LRC-aware now-playing body ────────────────────────────────────────────
   Widget _buildLyricsView() {
-    if (_lyricsLoading) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFF818CF8)));
-    }
-    if (_hasLrc) {
-      final pos = _service.position;
-      int activeIdx = 0;
-      for (int i = 0; i < _lrcLines.length; i++) {
-        if (_lrcLines[i].time <= pos) activeIdx = i;
-      }
-      return ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _lrcLines.length,
-        itemBuilder: (_, i) {
-          final isActive = i == activeIdx;
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Text(
-              _lrcLines[i].text,
-              style: TextStyle(
-                color: isActive ? const Color(0xFF818CF8) : Colors.white54,
-                fontSize: isActive ? 16 : 14,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          );
-        },
-      );
-    }
-    if (_lyricsText.isNotEmpty) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Text(_lyricsText, style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.6)),
-      );
-    }
-    return const Center(child: Text('Tap "Lyrics" to fetch', style: TextStyle(color: Colors.white38)));
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.42),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: SyncedLyricsView(
+        syncedLines: _lrcLines,
+        plainText: _lyricsText,
+        sourceLabel: _lyricsSource,
+        position: _service.position,
+        accentColor: _accentColor,
+        isLoading: _lyricsLoading,
+        offsetMs: _lyricsOffsetMs,
+        onOffsetChanged: (o) => setState(() => _lyricsOffsetMs = o),
+        onSeekToLine: (d) => _service.seek(d),
+        onOpenCreator: _openLyricsCreator,
+        onSearchOnline: () => _fetchLyrics(forceOnline: true),
+        onImportFile: _importLrcFile,
+        onPasteClipboard: _pasteLyricsFromClipboard,
+        onOpenLyricsFolder: _openMakawLyricsFolder,
+        onExpandFullscreen: _expandLyricsFullscreen,
+      ),
+    );
   }
 
   // ─── End lyrics ────────────────────────────────────────────────────────────
@@ -2221,7 +2260,9 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
         const SizedBox(width: 12),
         _actionChip(Icons.lyrics, 'Lyrics', _showLyrics, () {
           setState(() => _showLyrics = !_showLyrics);
-          if (_showLyrics && _lyricsText.isEmpty) _fetchLyrics();
+          if (_showLyrics && _lrcLines.isEmpty && _lyricsText.isEmpty) {
+            _fetchLyrics(forceOnline: true);
+          }
         }),
         const SizedBox(width: 12),
         _actionChip(Icons.speed, '${_service.player.speed}x', _service.player.speed != 1.0, () => _speedSheet()),
@@ -2232,7 +2273,8 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
           itemBuilder: (_) => [
             const PopupMenuItem(value: 'add_playlist', child: ListTile(title: Text('Add to Playlist'), leading: Icon(Icons.playlist_add))),
             const PopupMenuItem(value: 'tag_editor', child: ListTile(title: Text('Edit Tags'), leading: Icon(Icons.edit))),
-            const PopupMenuItem(value: 'edit_lyrics', child: ListTile(title: Text('Edit Lyrics'), leading: Icon(Icons.edit_note))),
+            const PopupMenuItem(value: 'edit_lyrics', child: ListTile(title: Text('Lyrics Creator / Studio'), leading: Icon(Icons.edit_note))),
+            const PopupMenuItem(value: 'lyrics_folder', child: ListTile(title: Text('Open MakawLyrics Folder'), leading: Icon(Icons.folder_open))),
             const PopupMenuItem(value: 'rename', child: ListTile(title: Text('Rename File'), leading: Icon(Icons.drive_file_rename_outline))),
             const PopupMenuItem(value: 'share', child: ListTile(title: Text('Share'), leading: Icon(Icons.share))),
             const PopupMenuItem(value: 'delete', child: ListTile(title: Text('Delete', style: TextStyle(color: Colors.redAccent)), leading: Icon(Icons.delete, color: Colors.redAccent))),
@@ -2290,9 +2332,16 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
   void _npMenu(String v, SongInfo song) {
     if (v == 'add_playlist') _addToPlaylistSheet(song.id);
     else if (v == 'tag_editor') _tagEditorDialog(song);
-    else if (v == 'edit_lyrics') _editLyricsDialog();
+    else if (v == 'edit_lyrics') _openLyricsCreator();
+    else if (v == 'lyrics_folder') _openMakawLyricsFolder();
     else if (v == 'rename') _renameDialog(song);
-    else if (v == 'share') _toast('Share coming soon');
+    else if (v == 'share') {
+      if (File(song.filePath).existsSync()) {
+        Share.shareXFiles([XFile(song.filePath)]);
+      } else {
+        _toast('Audio file not found');
+      }
+    }
     else if (v == 'delete') _deleteSong(song);
   }
 
@@ -2527,7 +2576,7 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
                 speeds.map((s) => ListTile(
                   title: Text('${s}x', style: TextStyle(color: cur == s ? const Color(0xFF818CF8) : Colors.white)),
                   trailing: cur == s ? const Icon(Icons.check, color: Color(0xFF818CF8), size: 20) : null,
-                  onTap: () { _service.player.setSpeed(s); Navigator.pop(context); },
+                  onTap: () { _service.setPlaybackSpeed(s); Navigator.pop(context); },
                 )).toList(),
               ),
             ),
@@ -2550,21 +2599,359 @@ class _MusicPlayerWidgetState extends ConsumerState<MusicPlayerWidget> {
   void _openMusicSettings() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: const Color(0xFF131B2E),
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
       builder: (_) => StatefulBuilder(
         builder: (ctx, setDlg) => DraggableScrollableSheet(
-          initialChildSize: 0.6, maxChildSize: 0.85, minChildSize: 0.4,
-          builder: (_, sc) => CustomScrollView(controller: sc, slivers: [
-            const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.fromLTRB(16, 20, 16, 8), child: Text('Music Settings', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)))),
-            SliverToBoxAdapter(child: _settingsTile(Icons.refresh, 'Scan music folder', () { _service.scanAllSongs(); Navigator.pop(ctx); })),
-            SliverToBoxAdapter(child: _settingsTile(Icons.sort, 'Sort: ${_sortLabel(_service.sortMode)}', () => _showSortPicker(ctx, setDlg))),
-            SliverToBoxAdapter(child: _settingsTile(Icons.tune, 'Audio buffer: ${_service.bufferMs}ms', () => _showBufferPicker(ctx, setDlg))),
-            SliverToBoxAdapter(child: _settingsTile(Icons.info, 'About Makaw Music', () => _showAbout(ctx))),
-            SliverToBoxAdapter(child: _settingsTile(Icons.notifications, 'Notif: ${_service.notificationStatus}', () => _showAbout(ctx))),
-            const SliverToBoxAdapter(child: SizedBox(height: 32)),
-          ]),
+          initialChildSize: 0.78,
+          maxChildSize: 0.94,
+          minChildSize: 0.45,
+          expand: false,
+          builder: (_, sc) => CustomScrollView(
+            controller: sc,
+            slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          const Text(
+                            'Music Settings',
+                            style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: () {
+                              _service.scanAllSongs(force: true);
+                              Navigator.pop(ctx);
+                            },
+                            icon: const Icon(Icons.refresh_rounded, size: 16, color: Color(0xFF818CF8)),
+                            label: const Text('Scan', style: TextStyle(color: Color(0xFF818CF8))),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              _settingsSectionHeader('Audio & Equalizer'),
+              SliverToBoxAdapter(
+                child: ListTile(
+                  leading: const Icon(Icons.equalizer_rounded, color: Color(0xFF818CF8)),
+                  title: const Text('Equalizer & Bass Boost', style: TextStyle(color: Colors.white, fontSize: 14)),
+                  subtitle: Text(
+                    _service.eqEnabled
+                        ? 'Active: ${_service.eqPreset}${_service.bassBoost > 0 ? " + Bass ${(_service.bassBoost * 100).round()}%" : ""}'
+                        : 'Off (Tap to tune 5-band EQ)',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  trailing: Switch(
+                    value: _service.eqEnabled,
+                    activeColor: const Color(0xFF818CF8),
+                    onChanged: (v) async {
+                      await _service.setEqEnabled(v);
+                      setDlg(() {});
+                    },
+                  ),
+                  onTap: () => _openEqualizerSheet(ctx, setDlg),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: SwitchListTile(
+                  secondary: const Icon(Icons.compare_arrows_rounded, color: Color(0xFF818CF8)),
+                  title: const Text('Crossfade Transitions', style: TextStyle(color: Colors.white, fontSize: 14)),
+                  subtitle: Text(
+                    _service.crossfadeEnabled
+                        ? 'Smooth fade out (${_service.crossfadeSec}s before end)'
+                        : 'Gapless direct transitions',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  value: _service.crossfadeEnabled,
+                  activeColor: const Color(0xFF818CF8),
+                  onChanged: (v) {
+                    _service.setCrossfade(v);
+                    setDlg(() {});
+                  },
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: _settingsTile(
+                  Icons.speed_rounded,
+                  'Playback speed: ${_service.player.speed}x',
+                  () => _speedSheet(),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: _settingsTile(
+                  Icons.tune_rounded,
+                  'Audio buffer: ${_service.bufferMs}ms',
+                  () => _showBufferPicker(ctx, setDlg),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: _settingsTile(
+                  Icons.bedtime_outlined,
+                  _service.hasTimer ? 'Sleep timer: ${_service.timerMinutes}m remaining' : 'Sleep timer: Off',
+                  () => _timerSheet(),
+                ),
+              ),
+              _settingsSectionHeader('Library & Scanner'),
+              SliverToBoxAdapter(
+                child: _settingsTile(
+                  Icons.sort_rounded,
+                  'Default sort: ${_sortLabel(_service.sortMode)}',
+                  () => _showSortPicker(ctx, setDlg),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: SwitchListTile(
+                  secondary: const Icon(Icons.filter_alt_outlined, color: Color(0xFF818CF8)),
+                  title: const Text('Skip short clips (< 30s)', style: TextStyle(color: Colors.white, fontSize: 14)),
+                  subtitle: const Text(
+                    'Hide ringtones, notifications, and voice notes during scan',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  value: _service.skipShortAudio,
+                  activeColor: const Color(0xFF818CF8),
+                  onChanged: (v) {
+                    _service.setSkipShortAudio(v);
+                    _service.scanAllSongs(force: true);
+                    setDlg(() {});
+                  },
+                ),
+              ),
+              _settingsSectionHeader('Lyrics & Studio'),
+              SliverToBoxAdapter(
+                child: SwitchListTile(
+                  secondary: const Icon(Icons.cloud_download_outlined, color: Color(0xFF818CF8)),
+                  title: const Text('Auto-search online synced lyrics', style: TextStyle(color: Colors.white, fontSize: 14)),
+                  subtitle: const Text(
+                    'Queries lrclib.net / lyrics.ovh when offline .lrc is missing',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  value: _service.autoFetchLyrics,
+                  activeColor: const Color(0xFF818CF8),
+                  onChanged: (v) {
+                    _service.setAutoFetchLyrics(v);
+                    setDlg(() {});
+                  },
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: SwitchListTile(
+                  secondary: const Icon(Icons.save_alt_rounded, color: Color(0xFF818CF8)),
+                  title: const Text('Save fetched lyrics to MakawLyrics folder', style: TextStyle(color: Colors.white, fontSize: 14)),
+                  subtitle: const Text(
+                    'Caches downloaded .lrc files locally for offline use & sharing',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  value: _service.saveLrcToFolder,
+                  activeColor: const Color(0xFF818CF8),
+                  onChanged: (v) {
+                    _service.setSaveLrcToFolder(v);
+                    setDlg(() {});
+                  },
+                ),
+              ),
+              if (_service.currentSong != null)
+                SliverToBoxAdapter(
+                  child: _settingsTile(
+                    Icons.timer_outlined,
+                    'Open Lyrics Creator for current song',
+                    () {
+                      Navigator.pop(ctx);
+                      _openLyricsCreator();
+                    },
+                  ),
+                ),
+              SliverToBoxAdapter(
+                child: _settingsTile(
+                  Icons.folder_open_rounded,
+                  'Browse MakawLyrics (.lrc) folder',
+                  () {
+                    Navigator.pop(ctx);
+                    _openMakawLyricsFolder();
+                  },
+                ),
+              ),
+              _settingsSectionHeader('System & Info'),
+              SliverToBoxAdapter(
+                child: _settingsTile(
+                  Icons.notifications_none_rounded,
+                  'Media Notification: ${_service.notificationStatus}',
+                  () => _showAbout(ctx),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: _settingsTile(Icons.info_outline_rounded, 'About Makaw Music', () => _showAbout(ctx)),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 36)),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _settingsSectionHeader(String title) {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            color: Color(0xFF818CF8),
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.0,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openEqualizerSheet(BuildContext parentCtx, void Function(void Function()) parentSetDlg) {
+    showModalBottomSheet(
+      context: parentCtx,
+      backgroundColor: const Color(0xFF0F172A),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setEqState) {
+          final bands = _service.eqBandDb;
+          final freqs = _service.eqFreqsHz;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.equalizer_rounded, color: Color(0xFF818CF8)),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Equalizer & Tone',
+                        style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+                      ),
+                      const Spacer(),
+                      Switch(
+                        value: _service.eqEnabled,
+                        activeColor: const Color(0xFF818CF8),
+                        onChanged: (v) async {
+                          await _service.setEqEnabled(v);
+                          setEqState(() {});
+                          parentSetDlg(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: MusicPlayerService.eqPresets.keys.map((preset) {
+                      final active = _service.eqPreset == preset;
+                      return ChoiceChip(
+                        label: Text(preset),
+                        selected: active,
+                        selectedColor: const Color(0xFF818CF8),
+                        backgroundColor: const Color(0xFF1E293B),
+                        labelStyle: TextStyle(
+                          color: active ? Colors.black : Colors.white70,
+                          fontSize: 12,
+                          fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                        ),
+                        onSelected: (_) async {
+                          await _service.applyEqPreset(preset);
+                          setEqState(() {});
+                          parentSetDlg(() {});
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Bass Boost', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                      Text('${(_service.bassBoost * 100).round()}%', style: const TextStyle(color: Color(0xFF818CF8), fontSize: 12, fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                  Slider(
+                    value: _service.bassBoost,
+                    min: 0.0,
+                    max: 1.0,
+                    activeColor: const Color(0xFF818CF8),
+                    inactiveColor: Colors.white12,
+                    onChanged: (v) async {
+                      await _service.setBassBoost(v);
+                      setEqState(() {});
+                      parentSetDlg(() {});
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 185,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: List.generate(bands.length, (i) {
+                        final hz = i < freqs.length ? freqs[i] : 1000;
+                        final label = hz >= 1000 ? '${(hz / 1000).toStringAsFixed(hz % 1000 == 0 ? 0 : 1)}k' : '${hz}Hz';
+                        final db = bands[i].clamp(-12.0, 12.0);
+                        return Expanded(
+                          child: Column(
+                            children: [
+                              Text('${db >= 0 ? '+' : ''}${db.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white70, fontSize: 10)),
+                              Expanded(
+                                child: RotatedBox(
+                                  quarterTurns: -1,
+                                  child: Slider(
+                                    value: db,
+                                    min: -12.0,
+                                    max: 12.0,
+                                    activeColor: _service.eqEnabled ? const Color(0xFF818CF8) : Colors.white24,
+                                    inactiveColor: Colors.white12,
+                                    onChanged: (val) async {
+                                      await _service.setEqBandDb(i, val);
+                                      setEqState(() {});
+                                      parentSetDlg(() {});
+                                    },
+                                  ),
+                                ),
+                              ),
+                              Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10.5)),
+                            ],
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

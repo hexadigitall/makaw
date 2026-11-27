@@ -309,6 +309,17 @@ class DocumentToHtml {
 
   static Future<String> _doc(List<int> bytes) async {
     final text = utf8.decode(bytes, allowMalformed: true);
+    final trimmed = text.trimLeft().toLowerCase();
+    // Handle Word-HTML .doc documents (including Makaw AI .doc exports)
+    if (trimmed.startsWith('<!doctype') ||
+        trimmed.startsWith('<html') ||
+        (trimmed.contains('<html') && trimmed.contains('<body'))) {
+      final bodyMatch = RegExp(r'<body[^>]*>([\s\S]*?)</body>', caseSensitive: false).firstMatch(text);
+      if (bodyMatch != null) {
+        return _wrap(bodyMatch.group(1)!);
+      }
+      return text;
+    }
     final printable = text.replaceAll(RegExp(r'[^\x20-\x7E\n\r\t]'), ' ');
     final cleaned = printable.replaceAll(RegExp(r' {3,}'), '\n').trim();
     if (cleaned.length > 100) return '<pre style="white-space:pre-wrap">${_e(cleaned)}</pre>';

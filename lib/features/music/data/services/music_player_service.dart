@@ -13,12 +13,61 @@ import '../../domain/entities/entities.dart';
 export '../../domain/entities/entities.dart';
 
 class MusicPlayerService extends ChangeNotifier {
+  static MusicPlayerService? shared;
+
   MusicPlayerService() {
+    shared = this;
     _setupPlayer();
   }
 
   Future<void> init() async {
+    await _loadSettings();
     await _loadCachedSongs();
+  }
+
+  Future<void> _loadSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _sortMode = prefs.getString('music_sort_mode') ?? 'name';
+      _bufferMs = prefs.getInt('music_buffer_ms') ?? 2000;
+      _skipShortAudio = prefs.getBool('music_skip_short') ?? true;
+      _crossfadeEnabled = prefs.getBool('music_crossfade') ?? false;
+      _crossfadeSec = prefs.getInt('music_crossfade_sec') ?? 4;
+      _autoFetchLyrics = prefs.getBool('music_auto_lyrics') ?? true;
+      _saveLrcToFolder = prefs.getBool('music_save_lrc_folder') ?? true;
+      _eqEnabled = prefs.getBool('music_eq_enabled') ?? false;
+      _eqPreset = prefs.getString('music_eq_preset') ?? 'Flat';
+      _bassBoost = prefs.getDouble('music_bass_boost') ?? 0.0;
+      _gaplessEnabled = prefs.getBool('music_gapless') ?? true;
+      final savedBands = prefs.getString('music_eq_bands');
+      if (savedBands != null) {
+        _eqBandDb = (jsonDecode(savedBands) as List).map((e) => (e as num).toDouble()).toList();
+      }
+      final spd = prefs.getDouble('music_speed') ?? 1.0;
+      if (spd != 1.0) {
+        await player.setSpeed(spd.clamp(0.5, 2.0));
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> _saveSettingsPref() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('music_sort_mode', _sortMode);
+      await prefs.setInt('music_buffer_ms', _bufferMs);
+      await prefs.setBool('music_skip_short', _skipShortAudio);
+      await prefs.setBool('music_crossfade', _crossfadeEnabled);
+      await prefs.setInt('music_crossfade_sec', _crossfadeSec);
+      await prefs.setBool('music_auto_lyrics', _autoFetchLyrics);
+      await prefs.setBool('music_save_lrc_folder', _saveLrcToFolder);
+      await prefs.setBool('music_eq_enabled', _eqEnabled);
+      await prefs.setString('music_eq_preset', _eqPreset);
+      await prefs.setDouble('music_bass_boost', _bassBoost);
+      await prefs.setBool('music_gapless', _gaplessEnabled);
+      await prefs.setString('music_eq_bands', jsonEncode(_eqBandDb));
+      await prefs.setDouble('music_speed', player.speed);
+    } catch (_) {}
   }
 
   Future<void> _loadCachedSongs() async {
@@ -82,7 +131,167 @@ class MusicPlayerService extends ChangeNotifier {
 
   int _bufferMs = 2000;
   int get bufferMs => _bufferMs;
-  void setBufferMs(int ms) { _bufferMs = ms; notifyListeners(); }
+  void setBufferMs(int ms) {
+    _bufferMs = ms;
+    _saveSettingsPref();
+    notifyListeners();
+  }
+
+  Future<void> setPlaybackSpeed(double speed) async {
+    await player.setSpeed(speed.clamp(0.5, 2.0));
+    await _saveSettingsPref();
+    notifyListeners();
+  }
+
+  bool _skipShortAudio = true;
+  bool get skipShortAudio => _skipShortAudio;
+  void setSkipShortAudio(bool val) {
+    _skipShortAudio = val;
+    _saveSettingsPref();
+    notifyListeners();
+  }
+
+  bool _crossfadeEnabled = false;
+  bool get crossfadeEnabled => _crossfadeEnabled;
+  int _crossfadeSec = 4;
+  int get crossfadeSec => _crossfadeSec;
+  void setCrossfade(bool enabled, [int? sec]) {
+    _crossfadeEnabled = enabled;
+    if (sec != null) _crossfadeSec = sec.clamp(1, 10);
+    _saveSettingsPref();
+    notifyListeners();
+  }
+
+  bool _gaplessEnabled = true;
+  bool get gaplessEnabled => _gaplessEnabled;
+  void setGaplessEnabled(bool val) {
+    _gaplessEnabled = val;
+    _saveSettingsPref();
+    notifyListeners();
+  }
+
+  bool _autoFetchLyrics = true;
+  bool get autoFetchLyrics => _autoFetchLyrics;
+  void setAutoFetchLyrics(bool val) {
+    _autoFetchLyrics = val;
+    _saveSettingsPref();
+    notifyListeners();
+  }
+
+  bool _saveLrcToFolder = true;
+  bool get saveLrcToFolder => _saveLrcToFolder;
+  void setSaveLrcToFolder(bool val) {
+    _saveLrcToFolder = val;
+    _saveSettingsPref();
+    notifyListeners();
+  }
+
+  // Native Android Equalizer + BassBoost state
+  static const _audioFxChannel = MethodChannel('com.hexadigitall.makaw/audio_fx');
+  bool _eqEnabled = false;
+  bool get eqEnabled => _eqEnabled;
+  String _eqPreset = 'Flat';
+  String get eqPreset => _eqPreset;
+  double _bassBoost = 0.0;
+  double get bassBoost => _bassBoost;
+  int _eqBandCount = 5;
+  int get eqBandCount => _eqBandCount;
+  List<int> _eqFreqsHz = [60, 230, 910, 3600, 14000];
+  List<int> get eqFreqsHz => _eqFreqsHz;
+  int _eqMinMb = -1500;
+  int _eqMaxMb = 1500;
+  List<double> _eqBandDb = [0, 0, 0, 0, 0];
+  List<double> get eqBandDb => _eqBandDb;
+  bool _eqSupported = Platform.isAndroid;
+  bool get eqSupported => _eqSupported;
+
+  static const Map<String, List<double>> eqPresets = {
+    'Flat': [0, 0, 0, 0, 0],
+    'Bass Boost': [6, 4, 0, 1, 2],
+    'Rock': [5, 3, -1, 3, 5],
+    'Pop': [-1, 2, 4, 2, -1],
+    'Vocal': [-2, 1, 4, 3, 1],
+    'Jazz': [3, 2, -1, 2, 4],
+    'Classical': [4, 2, 0, 2, 5],
+    'Electronic': [6, 3, 0, 2, 5],
+  };
+
+  Future<void> _attachAudioFx(int sessionId) async {
+    if (!Platform.isAndroid || sessionId <= 0) return;
+    try {
+      final res = await _audioFxChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'attachSession',
+        {'sessionId': sessionId},
+      );
+      if (res != null && res['supported'] == true) {
+        _eqSupported = true;
+        _eqBandCount = (res['bands'] as num?)?.toInt() ?? 5;
+        _eqMinMb = (res['minLevel'] as num?)?.toInt() ?? -1500;
+        _eqMaxMb = (res['maxLevel'] as num?)?.toInt() ?? 1500;
+        final freqs = (res['freqsHz'] as List?)?.map((e) => (e as num).toInt()).toList();
+        if (freqs != null && freqs.isNotEmpty) _eqFreqsHz = freqs;
+        if (_eqBandDb.length != _eqBandCount) {
+          _eqBandDb = List<double>.filled(_eqBandCount, 0.0);
+        }
+        await _applyAudioFx();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _applyAudioFx() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _audioFxChannel.invokeMethod('setEnabled', {'enabled': _eqEnabled});
+      for (int i = 0; i < _eqBandDb.length && i < _eqBandCount; i++) {
+        final mb = (_eqBandDb[i] * 100).round().clamp(_eqMinMb, _eqMaxMb);
+        await _audioFxChannel.invokeMethod('setBandLevel', {'band': i, 'level': mb});
+      }
+      await _audioFxChannel.invokeMethod('setBassBoost', {
+        'strength': (_bassBoost.clamp(0.0, 1.0) * 1000).round(),
+      });
+    } catch (_) {}
+  }
+
+  Future<void> setEqEnabled(bool enabled) async {
+    _eqEnabled = enabled;
+    await _applyAudioFx();
+    await _saveSettingsPref();
+    notifyListeners();
+  }
+
+  Future<void> applyEqPreset(String name) async {
+    final curve = eqPresets[name];
+    if (curve == null) return;
+    _eqPreset = name;
+    _eqBandDb = List<double>.generate(
+      _eqBandCount,
+      (i) => i < curve.length ? curve[i] : 0.0,
+    );
+    if (!_eqEnabled && name != 'Flat') {
+      _eqEnabled = true;
+    }
+    await _applyAudioFx();
+    await _saveSettingsPref();
+    notifyListeners();
+  }
+
+  Future<void> setEqBandDb(int band, double db) async {
+    if (band < 0 || band >= _eqBandDb.length) return;
+    _eqPreset = 'Custom';
+    _eqEnabled = true;
+    _eqBandDb[band] = db.clamp(-12.0, 12.0);
+    await _applyAudioFx();
+    await _saveSettingsPref();
+    notifyListeners();
+  }
+
+  Future<void> setBassBoost(double norm) async {
+    _bassBoost = norm.clamp(0.0, 1.0);
+    if (_bassBoost > 0 && !_eqEnabled) _eqEnabled = true;
+    await _applyAudioFx();
+    await _saveSettingsPref();
+    notifyListeners();
+  }
 
   List<int> _favoriteIds = [];
   List<int> get favoriteIds => _favoriteIds;
@@ -137,8 +346,23 @@ class MusicPlayerService extends ChangeNotifier {
   void _setupPlayer() {
     player.positionStream.listen((p) {
       _position = p;
+      if (_crossfadeEnabled && _duration.inMilliseconds > _crossfadeSec * 1500) {
+        final remainingMs = _duration.inMilliseconds - p.inMilliseconds;
+        final fadeWindowMs = _crossfadeSec * 1000;
+        if (remainingMs > 0 && remainingMs <= fadeWindowMs && player.playing) {
+          final targetVol = (remainingMs / fadeWindowMs).clamp(0.15, 1.0);
+          player.setVolume(targetVol);
+        }
+      }
       notifyListeners();
     });
+    if (Platform.isAndroid) {
+      player.androidAudioSessionIdStream.listen((sessionId) {
+        if (sessionId != null && sessionId > 0) {
+          _attachAudioFx(sessionId);
+        }
+      });
+    }
     player.durationStream.listen((d) {
       _duration = d ?? Duration.zero;
       notifyListeners();
@@ -322,7 +546,9 @@ class MusicPlayerService extends ChangeNotifier {
         }
       }
 
-      _allSongs = deduped.values.toList();
+      _allSongs = deduped.values
+          .where((s) => !_skipShortAudio || s.duration == 0 || s.duration >= 30000)
+          .toList();
       _lastScanTime = DateTime.now();
       if (_allSongs.isEmpty) _scanError = 'No music files found. Tap Scan to try again.';
 
@@ -384,6 +610,7 @@ class MusicPlayerService extends ChangeNotifier {
   void _playSource(SongInfo song) {
     _duration = Duration(milliseconds: song.duration);
     _position = Duration.zero;
+    player.setVolume(1.0);
     player.setAudioSource(AudioSource.file(song.filePath));
     _isPlaying = true;
     player.play();
@@ -475,7 +702,12 @@ class MusicPlayerService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setSortMode(String mode) { _sortMode = mode; _applySort(); notifyListeners(); }
+  void setSortMode(String mode) {
+    _sortMode = mode;
+    _applySort();
+    _saveSettingsPref();
+    notifyListeners();
+  }
 
   void _applySort() {
     switch (_sortMode) {

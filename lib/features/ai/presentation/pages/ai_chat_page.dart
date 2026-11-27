@@ -15,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/platform/session_paths.dart';
+import '../../data/services/ai_pdf_exporter.dart';
 import '../widgets/ai_markdown_view.dart';
 
 // ── Models ───────────────────────────────────────────────────────────────────
@@ -161,6 +162,7 @@ class AiChatPage extends StatefulWidget {
   final String apiKey;
   final String? initialModel;
   final Future<String?> Function()? onOpenSettings;
+  final void Function(String filePath)? onOpenFile;
 
   /// Optional page context (opened from Browser AI mode).
   final String? pageTitle;
@@ -171,6 +173,7 @@ class AiChatPage extends StatefulWidget {
     required this.apiKey,
     this.initialModel,
     this.onOpenSettings,
+    this.onOpenFile,
     this.pageTitle,
     this.pageUrl,
   });
@@ -210,14 +213,30 @@ class _AiChatPageState extends State<AiChatPage> {
   bool _lastFailed = false;
   String _lastQuestion = '';
 
-  String _activeModel = 'gemini-3.8-flash';
+  String _activeModel = 'gemini-2.5-flash';
   static const List<String> _candidateModels = [
-    'gemini-3.8-flash',
-    'gemini-3.5-flash',
-    'gemini-3.0-flash',
     'gemini-2.5-flash',
-    'gemini-1.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.5-pro',
   ];
+
+  static String _normalizeModel(String? raw) {
+    final m = (raw ?? '').trim();
+    if (m.isEmpty ||
+        m.startsWith('gemini-3.') ||
+        m == 'gemini-1.5-flash' ||
+        m == 'gemini-1.5-pro') {
+      return 'gemini-2.5-flash';
+    }
+    return m;
+  }
+
+  static final Content _systemInstruction = Content.system(
+    'You are Makaw AI Assistant built on Gemini. Provide fast, accurate, actionable responses. '
+    'Format documents cleanly in Markdown with headings, tables, and bullet points. '
+    'When writing code, use labeled fenced code blocks (e.g. ```dart, ```python, ```html) with complete, runnable implementations.',
+  );
 
   // Sessions and History
   List<AiChatSession> _sessions = [];
@@ -244,9 +263,8 @@ class _AiChatPageState extends State<AiChatPage> {
   void initState() {
     super.initState();
     _key = AiChatPage.cleanApiKey(widget.apiKey);
-    if (widget.initialModel != null && widget.initialModel!.trim().isNotEmpty) {
-      _activeModel = widget.initialModel!.trim();
-    }
+    _activeModel = _normalizeModel(widget.initialModel);
+    _httpClient = http.Client();
     _initTts();
     _loadSessions().then((_) {
       _ensureSession();
@@ -273,13 +291,13 @@ class _AiChatPageState extends State<AiChatPage> {
   void didUpdateWidget(AiChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     final cleaned = AiChatPage.cleanApiKey(widget.apiKey);
-    final newModel = widget.initialModel?.trim();
+    final newModel = _normalizeModel(widget.initialModel);
     bool shouldReset = false;
     if (cleaned != _key) {
       _key = cleaned;
       shouldReset = true;
     }
-    if (newModel != null && newModel.isNotEmpty && newModel != _activeModel) {
+    if (newModel != _activeModel && (widget.initialModel ?? '').trim().isNotEmpty) {
       _activeModel = newModel;
       shouldReset = true;
     }
@@ -429,27 +447,34 @@ class _AiChatPageState extends State<AiChatPage> {
 
   // ── Gemini session ─────────────────────────────────────────────────────────
 
-  bool _ensureSession({String? model}) {
+  bool _ensureSession({String? model, bool resetHttpClient = false}) {
     if (_key.isEmpty) return false;
-    final m = model ?? _activeModel;
+    final m = _normalizeModel(model ?? _activeModel);
     _activeModel = m;
     try {
-      _httpClient?.close();
-      _httpClient = http.Client();
+      if (resetHttpClient || _httpClient == null) {
+        _httpClient?.close();
+        _httpClient = http.Client();
+      }
       _model = GenerativeModel(
         model: m,
         apiKey: _key,
         httpClient: _httpClient,
+        systemInstruction: _systemInstruction,
       );
-      // Rebuild chat history into session
+      // Window recent conversation turns to keep prompt payload fast and compact
+      final validMsgs = _currentSession.messages
+          .where((msg) => msg.text.isNotEmpty && !msg.isError)
+          .toList();
+      final windowed = validMsgs.length > 14
+          ? validMsgs.sublist(validMsgs.length - 14)
+          : validMsgs;
       final history = <Content>[];
-      for (final msg in _currentSession.messages) {
-        if (msg.text.isNotEmpty && !msg.isError) {
-          if (msg.role == 'user') {
-            history.add(Content.text(msg.text));
-          } else {
-            history.add(Content.model([TextPart(msg.text)]));
-          }
+      for (final msg in windowed) {
+        if (msg.role == 'user') {
+          history.add(Content.text(msg.text));
+        } else {
+          history.add(Content.model([TextPart(msg.text)]));
         }
       }
       _chat = _model!.startChat(history: history.isNotEmpty ? history : null);
@@ -487,12 +512,16 @@ class _AiChatPageState extends State<AiChatPage> {
           'Please tap the Settings icon (⚙) at the top right to verify and update your key.';
     }
     if (s.contains('resource_exhausted') || s.contains('429')) {
-      return 'Gemini API quota or rate limit exceeded.\n\n'
-          'Please wait a moment before trying again, or check your Google AI Studio plan.';
+      return 'Gemini rate limit reached across active models.\n\n'
+          'Tap Retry in a few seconds or switch models in the header (e.g. gemini-2.5-flash-lite).';
+    }
+    if (s.contains('unavailable') || s.contains('503') || s.contains('overloaded')) {
+      return 'Gemini servers reported temporary high demand across fallback models.\n\n'
+          'Please tap Retry in a moment.';
     }
     if (s.contains('not found') || s.contains('404')) {
-      return 'Gemini model "$_activeModel" was not found or is deprecated.\n\n'
-          'Please tap the Settings icon (⚙) to switch to gemini-3.8-flash.';
+      return 'Gemini model "$_activeModel" was not found.\n\n'
+          'Tap the model badge in the header or Settings (⚙) to select gemini-2.5-flash.';
     }
     return 'Error: $error\n\nPlease check your network connection and API key.';
   }
@@ -589,26 +618,45 @@ class _AiChatPageState extends State<AiChatPage> {
       );
       if (res != null && res.files.isNotEmpty) {
         final f = res.files.first;
-        String? content;
-        if (f.bytes != null) {
-          try {
-            content = utf8.decode(f.bytes!);
-          } catch (_) {}
-        } else if (f.path != null) {
+        Uint8List? bytes = f.bytes;
+        if (bytes == null && f.path != null) {
           final file = File(f.path!);
           if (await file.exists()) {
-            try {
-              content = await file.readAsString();
-            } catch (_) {}
+            bytes = await file.readAsBytes();
+          }
+        }
+        final ext = p.extension(f.name).toLowerCase();
+        String? content;
+        String? mime;
+        Uint8List? binaryPayload;
+
+        if (ext == '.pdf') {
+          mime = 'application/pdf';
+          binaryPayload = bytes;
+        } else if (['.png', '.jpg', '.jpeg', '.webp'].contains(ext)) {
+          mime = ext == '.png' ? 'image/png' : (ext == '.webp' ? 'image/webp' : 'image/jpeg');
+          binaryPayload = bytes;
+        } else if (bytes != null) {
+          try {
+            final decoded = utf8.decode(bytes);
+            content = decoded.length > 60000
+                ? '${decoded.substring(0, 60000)}\n... [truncated after 60KB]'
+                : decoded;
+          } catch (_) {
+            content = 'Binary file (${f.name}, ${bytes.length} bytes)';
           }
         }
         setState(() {
           _pendingAttachments.add(AiAttachment(
             id: UniqueKey().toString(),
             name: f.name,
-            type: AiAttachmentType.file,
+            type: (ext != '.pdf' && mime != null && mime.startsWith('image/'))
+                ? AiAttachmentType.image
+                : AiAttachmentType.file,
             path: f.path,
             textContent: content,
+            bytes: binaryPayload,
+            mimeType: mime,
             sizeInBytes: f.size,
           ));
         });
@@ -627,20 +675,52 @@ class _AiChatPageState extends State<AiChatPage> {
           final buffer = StringBuffer();
           buffer.writeln('Repository/Directory: ${p.basename(dirPath)}');
           buffer.writeln('Path: $dirPath\n');
-          buffer.writeln('Contents summary:');
+          buffer.writeln('File tree:');
+          final sampleFiles = <File>[];
           int count = 0;
           await for (final entity in dir.list(recursive: true, followLinks: false)) {
-            if (entity.path.contains('.git') || entity.path.contains('.dart_tool') || entity.path.contains('build')) {
+            final ep = entity.path;
+            if (ep.contains('.git') ||
+                ep.contains('.dart_tool') ||
+                ep.contains('${Platform.pathSeparator}build') ||
+                ep.contains('node_modules')) {
               continue;
             }
-            final rel = p.relative(entity.path, from: dirPath);
-            buffer.writeln('- $rel');
+            final rel = p.relative(ep, from: dirPath);
+            if (count < 120) {
+              buffer.writeln('- $rel');
+            }
             count++;
-            if (count >= 100) {
-              buffer.writeln('... (truncated total items)');
-              break;
+            if (entity is File && sampleFiles.length < 10) {
+              final lower = rel.toLowerCase();
+              if (lower.endsWith('readme.md') ||
+                  lower.endsWith('pubspec.yaml') ||
+                  lower.endsWith('package.json') ||
+                  lower.endsWith('.dart') ||
+                  lower.endsWith('.py') ||
+                  lower.endsWith('.ts') ||
+                  lower.endsWith('.js')) {
+                sampleFiles.add(entity);
+              }
             }
           }
+          if (count > 120) {
+            buffer.writeln('... (+${count - 120} more items)');
+          }
+
+          int inlinedBytes = 0;
+          for (final sf in sampleFiles) {
+            if (inlinedBytes >= 24000) break;
+            try {
+              final len = await sf.length();
+              if (len > 12000) continue;
+              final txt = await sf.readAsString();
+              final rel = p.relative(sf.path, from: dirPath);
+              buffer.writeln('\n--- $rel ---\n$txt');
+              inlinedBytes += txt.length;
+            } catch (_) {}
+          }
+
           setState(() {
             _pendingAttachments.add(AiAttachment(
               id: UniqueKey().toString(),
@@ -738,6 +818,32 @@ class _AiChatPageState extends State<AiChatPage> {
 
   // ── Send and Processing ───────────────────────────────────────────────────
 
+  Future<String> _fetchUrlContext(String url) async {
+    try {
+      final uri = Uri.tryParse(url);
+      if (uri == null || !uri.hasScheme) return url;
+      final client = _httpClient ?? http.Client();
+      final res = await client.get(
+        uri,
+        headers: {'User-Agent': 'Makaw/1.0 (AI Reader)'},
+      ).timeout(const Duration(seconds: 7));
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return 'URL: $url (HTTP ${res.statusCode})';
+      }
+      var body = res.body;
+      body = body
+          .replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), ' ')
+          .replaceAll(RegExp(r'<style[\s\S]*?</style>', caseSensitive: false), ' ')
+          .replaceAll(RegExp(r'<[^>]+>'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (body.length > 9000) body = '${body.substring(0, 9000)}...';
+      return 'URL: $url\nExtracted page text:\n$body';
+    } catch (_) {
+      return url;
+    }
+  }
+
   Future<void> _send(String text) async {
     final queryText = text.trim();
     if (queryText.isEmpty && _pendingAttachments.isEmpty) return;
@@ -781,16 +887,19 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToEnd();
     await _saveSessions();
 
-    // Prepare prompt bundle with context and attachments
+    // Prepare prompt bundle + binary parts (images / PDFs)
     final promptBuffer = StringBuffer();
     if ((widget.pageUrl ?? '').isNotEmpty) {
-      promptBuffer.writeln('Browser Context URL: ${widget.pageUrl}');
-      if ((widget.pageTitle ?? '').isNotEmpty) {
-        promptBuffer.writeln('Browser Context Title: ${widget.pageTitle}');
-      }
+      promptBuffer.writeln('Browser Context Title: ${widget.pageTitle ?? ""}');
+      promptBuffer.writeln(await _fetchUrlContext(widget.pageUrl!));
       promptBuffer.writeln();
     }
+    final binaryParts = <DataPart>[];
     for (final att in attached) {
+      if (att.bytes != null && att.mimeType != null) {
+        binaryParts.add(DataPart(att.mimeType!, att.bytes!));
+        promptBuffer.writeln('Attached binary/media: ${att.name} (${att.mimeType})');
+      }
       if (att.type == AiAttachmentType.file || att.type == AiAttachmentType.repo) {
         promptBuffer.writeln('### Attached ${att.name}:');
         if (att.textContent != null && att.textContent!.isNotEmpty) {
@@ -799,89 +908,81 @@ class _AiChatPageState extends State<AiChatPage> {
           promptBuffer.writeln('File path: ${att.path}');
         }
         promptBuffer.writeln();
-      } else if (att.type == AiAttachmentType.link) {
-        promptBuffer.writeln('Referenced Link: ${att.textContent}\n');
+      } else if (att.type == AiAttachmentType.link && att.textContent != null) {
+        promptBuffer.writeln('### Referenced Web Link:');
+        promptBuffer.writeln(await _fetchUrlContext(att.textContent!));
+        promptBuffer.writeln();
       }
     }
     promptBuffer.write(userMsg.text);
     final finalPrompt = promptBuffer.toString();
 
-    // Multimodal image check
-    AiAttachment? imgAtt;
-    for (final a in attached) {
-      if (a.type == AiAttachmentType.image && a.bytes != null) {
-        imgAtt = a;
-        break;
-      }
-    }
+    final orderedModels = <String>[
+      _activeModel,
+      ..._candidateModels.where((m) => m != _activeModel),
+    ];
 
     final buffer = StringBuffer();
     Object? lastError;
 
-    for (int attempt = 0; attempt < 3; attempt++) {
+    for (int idx = 0; idx < orderedModels.length; idx++) {
+      final candidate = orderedModels[idx];
+      if (idx > 0) {
+        final errStr = (lastError ?? '').toString().toLowerCase();
+        final isSocketDrop = errStr.contains('handshake') ||
+            errStr.contains('socket') ||
+            errStr.contains('connection terminated');
+        _ensureSession(model: candidate, resetHttpClient: isSocketDrop);
+        await Future.delayed(const Duration(milliseconds: 180));
+      } else if (_model == null || _chat == null) {
+        _ensureSession(model: candidate);
+      }
+
       try {
-        if (attempt > 0) {
-          _ensureSession();
-          await Future.delayed(Duration(milliseconds: 500 * attempt));
+        final content = binaryParts.isNotEmpty
+            ? Content.multi([TextPart(finalPrompt), ...binaryParts])
+            : Content.text(finalPrompt);
+
+        final stream = (binaryParts.isNotEmpty
+                ? _model!.generateContentStream([content])
+                : _chat!.sendMessageStream(content))
+            .timeout(const Duration(seconds: 24));
+
+        buffer.clear();
+        await for (final chunk in stream) {
+          final piece = chunk.text;
+          if (piece == null || piece.isEmpty) continue;
+          buffer.write(piece);
+          modelMsg.text = buffer.toString();
+          if (mounted) {
+            setState(() {});
+            _scrollToEnd();
+          }
         }
-
-        if (imgAtt != null && imgAtt.bytes != null) {
-          // Multimodal call
-          final content = Content.multi([
-            TextPart(finalPrompt),
-            DataPart(imgAtt.mimeType ?? 'image/jpeg', imgAtt.bytes!),
-          ]);
-          final resp = await _model!.generateContent([content]).timeout(const Duration(seconds: 45));
-          if (resp.text != null && resp.text!.isNotEmpty) {
-            buffer.write(resp.text);
-            modelMsg.text = buffer.toString();
-            if (mounted) setState(() {});
-            break;
-          }
-        } else {
-          // Streaming text call
-          final stream = _chat!
-              .sendMessageStream(Content.text(finalPrompt))
-              .timeout(const Duration(seconds: 45));
-
-          buffer.clear();
-          await for (final chunk in stream) {
-            final piece = chunk.text;
-            if (piece == null || piece.isEmpty) continue;
-            buffer.write(piece);
-            modelMsg.text = buffer.toString();
-            if (mounted) {
-              setState(() {});
-              _scrollToEnd();
-            }
-          }
-          if (buffer.isNotEmpty) {
-            lastError = null;
-            break;
-          }
+        if (buffer.isNotEmpty) {
+          lastError = null;
+          break;
         }
       } catch (e) {
         lastError = e;
         final errStr = e.toString().toLowerCase();
-        if (errStr.contains('not found') || errStr.contains('no longer available') || errStr.contains('404')) {
-          for (final candidate in _candidateModels) {
-            if (candidate != _activeModel) {
-              _ensureSession(model: candidate);
-              break;
-            }
-          }
-          continue;
+        // Do not burn retries on an invalid API key
+        if (errStr.contains('api_key_invalid') || errStr.contains('api key not valid')) {
+          break;
         }
-        if (attempt < 2) continue;
-        break;
+        // Fail fast onto next healthy Gemini model for 404, 429, 503, overload, or timeout
+        continue;
       }
     }
 
-    // Fallback standard generateContent
-    if (buffer.isEmpty && lastError != null && _model != null && imgAtt == null) {
+    // One fast direct generateContent fallback if streaming yielded nothing
+    if (buffer.isEmpty && lastError != null && _model != null && !lastError.toString().toLowerCase().contains('api_key_invalid')) {
       try {
-        _ensureSession();
-        final resp = await _model!.generateContent([Content.text(finalPrompt)]).timeout(const Duration(seconds: 45));
+        _ensureSession(model: 'gemini-2.5-flash-lite', resetHttpClient: true);
+        final content = binaryParts.isNotEmpty
+            ? Content.multi([TextPart(finalPrompt), ...binaryParts])
+            : Content.text(finalPrompt);
+        final resp = await _model!.generateContent([content]).timeout(const Duration(seconds: 24));
         if (resp.text != null && resp.text!.isNotEmpty) {
           buffer.write(resp.text);
           modelMsg.text = buffer.toString();
@@ -965,6 +1066,15 @@ class _AiChatPageState extends State<AiChatPage> {
                 ),
               ),
               ListTile(
+                leading: const Icon(Icons.picture_as_pdf_rounded, color: Colors.redAccent),
+                title: const Text('Export as PDF Document (.pdf)'),
+                subtitle: const Text('Portable multi-page PDF ready for Makaw PDF Reader & sharing'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _exportToFile(msg, 'pdf');
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.description_rounded, color: Colors.indigoAccent),
                 title: const Text('Export as Word Document (.doc)'),
                 subtitle: const Text('Preserves bold, italics, tables, and styling in Word / Docs'),
@@ -1016,6 +1126,14 @@ class _AiChatPageState extends State<AiChatPage> {
     );
   }
 
+  void _openSavedFile(String path) {
+    if (widget.onOpenFile != null) {
+      widget.onOpenFile!(path);
+    } else {
+      OpenFilex.open(path);
+    }
+  }
+
   Future<void> _exportToFile(AiChatMessage msg, String format) async {
     try {
       final downloadDir = await SessionPaths.downloadsDir();
@@ -1023,9 +1141,17 @@ class _AiChatPageState extends State<AiChatPage> {
       final filename = 'Makaw_AI_Response_$stamp.$format';
       final file = File(p.join(downloadDir, filename));
 
-      String content = '';
-      if (format == 'md') {
-        content = '''# Makaw AI Assistant Response
+      if (format == 'pdf') {
+        final pdfBytes = AiPdfExporter.buildPdfBytes(
+          title: 'Makaw AI Assistant Response',
+          model: _activeModel,
+          markdownText: msg.text,
+        );
+        await file.writeAsBytes(pdfBytes);
+      } else {
+        String content = '';
+        if (format == 'md') {
+          content = '''# Makaw AI Assistant Response
 Model: $_activeModel
 Date: ${DateTime.now().toLocal()}
 
@@ -1033,40 +1159,41 @@ Date: ${DateTime.now().toLocal()}
 
 ${msg.text}
 ''';
-      } else if (format == 'txt') {
-        content = AiMarkdownView.stripMarkdown(msg.text);
-      } else if (format == 'html') {
-        content = AiMarkdownView.markdownToHtml(
-          msg.text,
-          title: 'Makaw AI Response',
-          model: _activeModel,
-        );
-      } else if (format == 'doc') {
-        content = AiMarkdownView.markdownToDoc(
-          msg.text,
-          title: 'Makaw AI Response',
-          model: _activeModel,
-        );
-      } else if (format == 'json') {
-        content = const JsonEncoder.withIndent('  ').convert({
-          'generator': 'Makaw AI Assistant',
-          'model': _activeModel,
-          'timestamp': DateTime.now().toIso8601String(),
-          'response': msg.text,
-          'plainText': AiMarkdownView.stripMarkdown(msg.text),
-        });
+        } else if (format == 'txt') {
+          content = AiMarkdownView.stripMarkdown(msg.text);
+        } else if (format == 'html') {
+          content = AiMarkdownView.markdownToHtml(
+            msg.text,
+            title: 'Makaw AI Response',
+            model: _activeModel,
+          );
+        } else if (format == 'doc') {
+          content = AiMarkdownView.markdownToDoc(
+            msg.text,
+            title: 'Makaw AI Response',
+            model: _activeModel,
+          );
+        } else if (format == 'json') {
+          content = const JsonEncoder.withIndent('  ').convert({
+            'generator': 'Makaw AI Assistant',
+            'model': _activeModel,
+            'timestamp': DateTime.now().toIso8601String(),
+            'response': msg.text,
+            'plainText': AiMarkdownView.stripMarkdown(msg.text),
+          });
+        }
+        await file.writeAsString(content);
       }
-
-      await file.writeAsString(content);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Saved to ${file.path}'),
+          content: Text('Saved ${p.basename(file.path)}'),
+          duration: const Duration(seconds: 5),
           action: SnackBarAction(
-            label: 'Open',
+            label: 'Open in Makaw',
             textColor: _accent,
-            onPressed: () => OpenFilex.open(file.path),
+            onPressed: () => _openSavedFile(file.path),
           ),
         ),
       );
@@ -1092,7 +1219,7 @@ ${msg.text}
     final savedModel = prefs.getString('gemini_model');
     setState(() {
       if (savedKey != null) _key = AiChatPage.cleanApiKey(savedKey);
-      if (savedModel != null && savedModel.isNotEmpty) _activeModel = savedModel;
+      if (savedModel != null && savedModel.isNotEmpty) _activeModel = _normalizeModel(savedModel);
       _model = null;
       _chat = null;
     });
@@ -1100,149 +1227,6 @@ ${msg.text}
   }
 
   // ── Render Helpers & Markdown Parser ──────────────────────────────────────
-
-  Widget _buildCodeBlock(String code, String lang) {
-    final languageName = lang.trim().isNotEmpty ? lang.trim().toUpperCase() : 'CODE';
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF334155)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: const BoxDecoration(
-              color: Color(0xFF1E293B),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
-            ),
-            child: Row(
-              children: [
-                Text(
-                  languageName,
-                  style: const TextStyle(
-                    color: Color(0xFF94A3B8),
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const Spacer(),
-                InkWell(
-                  onTap: () => _copyToClipboard(code, 'Code snippet copied'),
-                  borderRadius: BorderRadius.circular(6),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.copy_rounded, size: 14, color: _accent),
-                        SizedBox(width: 4),
-                        Text('Copy Code', style: TextStyle(color: _accent, fontSize: 11, fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: () async {
-                    try {
-                      final ext = lang.trim().isNotEmpty ? lang.trim().toLowerCase() : 'txt';
-                      final dir = await SessionPaths.downloadsDir();
-                      final file = File(p.join(dir, 'snippet_${DateTime.now().millisecondsSinceEpoch}.$ext'));
-                      await file.writeAsString(code);
-                      _showToast('Snippet saved to ${file.path}');
-                    } catch (e) {
-                      _showToast('Failed to save snippet: $e');
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(6),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.download_rounded, size: 14, color: Color(0xFF94A3B8)),
-                        SizedBox(width: 4),
-                        Text('Save', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: SelectableText(
-              code,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12.5,
-                color: Color(0xFFE2E8F0),
-                height: 1.45,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _parseFormattedText(String text) {
-    final widgets = <Widget>[];
-    final codeBlockRegex = RegExp(r'```([a-zA-Z0-9_\-\+]*)\n([\s\S]*?)```');
-    int lastEnd = 0;
-
-    for (final match in codeBlockRegex.allMatches(text)) {
-      if (match.start > lastEnd) {
-        final preceding = text.substring(lastEnd, match.start).trim();
-        if (preceding.isNotEmpty) {
-          widgets.add(SelectableText(
-            preceding,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 14.5,
-              height: 1.5,
-            ),
-          ));
-        }
-      }
-      final lang = match.group(1) ?? '';
-      final code = match.group(2) ?? '';
-      widgets.add(_buildCodeBlock(code, lang));
-      lastEnd = match.end;
-    }
-
-    if (lastEnd < text.length) {
-      final remainder = text.substring(lastEnd).trim();
-      if (remainder.isNotEmpty) {
-        widgets.add(SelectableText(
-          remainder,
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-            fontSize: 14.5,
-            height: 1.5,
-          ),
-        ));
-      }
-    }
-
-    if (widgets.isEmpty) {
-      widgets.add(SelectableText(
-        text,
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onSurface,
-          fontSize: 14.5,
-          height: 1.5,
-        ),
-      ));
-    }
-    return widgets;
-  }
 
   Widget _buildBubble(AiChatMessage msg) {
     final isUser = msg.role == 'user';
@@ -1335,7 +1319,17 @@ ${msg.text}
                                 final dir = await SessionPaths.downloadsDir();
                                 final file = File(p.join(dir, 'snippet_${DateTime.now().millisecondsSinceEpoch}.$ext'));
                                 await file.writeAsString(code);
-                                _showToast('Snippet saved to ${file.path}');
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Saved ${p.basename(file.path)}'),
+                                    action: SnackBarAction(
+                                      label: 'Open in Makaw',
+                                      textColor: _accent,
+                                      onPressed: () => _openSavedFile(file.path),
+                                    ),
+                                  ),
+                                );
                               } catch (e) {
                                 _showToast('Failed to save snippet: $e');
                               }
@@ -1600,12 +1594,47 @@ ${msg.text}
                   const Icon(Icons.edit_outlined, size: 12, color: _accent),
                 ],
               ),
-              Text(
-                _activeModel,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                  fontWeight: FontWeight.normal,
+              PopupMenuButton<String>(
+                tooltip: 'Switch Gemini model',
+                onSelected: (m) async {
+                  setState(() {
+                    _activeModel = m;
+                    _model = null;
+                    _chat = null;
+                  });
+                  _ensureSession(model: m);
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('gemini_model', m);
+                },
+                itemBuilder: (_) => _candidateModels
+                    .map((m) => PopupMenuItem(
+                          value: m,
+                          child: Row(
+                            children: [
+                              Icon(
+                                m == _activeModel ? Icons.check_circle : Icons.auto_awesome,
+                                size: 16,
+                                color: m == _activeModel ? _accent : Colors.grey,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(m),
+                            ],
+                          ),
+                        ))
+                    .toList(),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _activeModel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const Icon(Icons.arrow_drop_down, size: 16, color: _accent),
+                  ],
                 ),
               ),
             ],

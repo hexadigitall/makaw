@@ -23,6 +23,15 @@ class PlatformPaths {
       Platform.environment['HOME'] ??
       '';
 
+  static String storageRoot() {
+    if (Platform.isAndroid) return '/storage/emulated/0';
+    if (isDesktop) {
+      final h = home();
+      if (h.isNotEmpty) return h;
+    }
+    return Platform.pathSeparator;
+  }
+
   /// Documents-style scan roots. Android uses the legacy emulated storage;
   /// desktop uses the OS-native user folders.
   static List<String> documentScanDirs() {

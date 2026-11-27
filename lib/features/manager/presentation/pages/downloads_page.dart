@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../browser/presentation/widgets/downloads_widget.dart' as feature;
+import '../../../documents/presentation/pages/folders_page.dart';
 
 class DownloadsPage extends StatelessWidget {
-  const DownloadsPage({super.key});
+  final void Function(String filePath)? onOpenFile;
+  const DownloadsPage({super.key, this.onOpenFile});
 
   /// Returns an Android DocumentsProvider content URI for the given absolute
   /// filesystem directory path, or null when it can't be represented.
@@ -64,11 +66,27 @@ class DownloadsPage extends StatelessWidget {
         onOpenDownload: (url, filename, savePath) async {
           try {
             if (savePath != null) {
-              await OpenFilex.open(savePath);
+              if (onOpenFile != null) {
+                onOpenFile!(savePath);
+              } else {
+                await OpenFilex.open(savePath);
+              }
             }
           } catch (_) {}
         },
         onOpenLocation: (url, filename, savePath) async {
+          if (savePath != null && onOpenFile != null) {
+            final dir = Directory(savePath).parent.path;
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => FoldersPage(
+                  initialPath: dir,
+                  openFile: onOpenFile!,
+                ),
+              ),
+            );
+            return;
+          }
           await _openLocation(savePath);
         },
       ),

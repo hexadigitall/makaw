@@ -85,6 +85,7 @@ class DownloadService extends ChangeNotifier {
   final Dio _dio;
   final String Function() _getDownloadDir;
   final void Function(String message) _showNotification;
+  final void Function(DownloadItem item)? onStarted;
   final void Function(DownloadItem item)? onComplete;
   Timer? _speedTimer;
   int _maxParallel = 3;
@@ -93,6 +94,7 @@ class DownloadService extends ChangeNotifier {
     required Dio dio,
     required String Function() getDownloadDir,
     required void Function(String message) showNotification,
+    this.onStarted,
     this.onComplete,
   }) : _dio = dio,
        _getDownloadDir = getDownloadDir,
@@ -232,6 +234,7 @@ class DownloadService extends ChangeNotifier {
     final dir = _getDownloadDir();
     final savePath = p.join(dir, item.filename);
     item.savePath = savePath;
+    onStarted?.call(item);
 
     int existingBytes = 0;
     final partialFile = File('$savePath.part');
@@ -271,7 +274,9 @@ class DownloadService extends ChangeNotifier {
         item.progress = 1.0;
         item.receivedBytes = item.totalBytes;
         item.completedAt = DateTime.now();
-        _showNotification('Downloaded: ${item.filename}');
+        if (onComplete == null) {
+          _showNotification('Downloaded: ${item.filename}');
+        }
         onComplete?.call(item);
         notifyListeners();
         _saveHistory();

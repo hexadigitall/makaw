@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -8,11 +9,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/platform/session_paths.dart';
 import '../../../../core/platform/platform_paths.dart';
 import '../../data/services/video_player_service.dart';
 import '../../data/services/media_thumbnail_service.dart';
+import '../../../music/data/services/music_player_service.dart';
 import '../../../../app/providers/service_providers.dart';
 import '../../../../core/storage/subtitle_service.dart';
 import '../../../../core/utils/natural_sort.dart';
@@ -134,6 +137,22 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   String _doubleTapSide = '';
   Timer? _doubleTapTimer;
   Timer? _hideTimer;
+  bool _isScrubbing = false;
+  double _scrubMs = 0;
+  DateTime _lastChannelAdjust = DateTime.fromMillisecondsSinceEpoch(0);
+  int _skipSeconds = 10;
+  bool _bgPlay = false;
+  bool _nightMode = false;
+  bool _mirrorVideo = false;
+  bool _loopVideo = false;
+  bool _shufflePlaylist = false;
+  bool _hwDecoder = true;
+  int _autoHideSeconds = 4;
+  int _sleepTimerMinutes = 0;
+  Timer? _sleepTimer;
+  Duration? _abPointA;
+  Duration? _abPointB;
+  bool _advancingNext = false;
 
   // Resume/watch-progress persistence
   final VideoPlayerService _resumeService =
@@ -144,7 +163,9 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
-    _initPlayer();
+    _loadVideoPrefs().then((_) {
+      if (mounted) _initPlayer();
+    });
     _loadSystemVolume();
     _loadSystemBrightness();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -152,6 +173,33 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
       systemNavigationBarColor: Color(0xFF0F0F1A),
       systemNavigationBarIconBrightness: Brightness.light,
     ));
+  }
+
+  Future<void> _loadVideoPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _bgPlay = prefs.getBool('video_bg_play') ?? false;
+      _nightMode = prefs.getBool('video_night_mode') ?? false;
+      _mirrorVideo = prefs.getBool('video_mirror') ?? false;
+      _loopVideo = prefs.getBool('video_loop') ?? false;
+      _shufflePlaylist = prefs.getBool('video_shuffle') ?? false;
+      _hwDecoder = prefs.getBool('video_hw_decoder') ?? true;
+      _skipSeconds = prefs.getInt('video_skip_seconds') ?? 10;
+      _autoHideSeconds = prefs.getInt('video_auto_hide_sec') ?? 4;
+      final savedDim = prefs.getString('video_dimension_mode');
+      if (savedDim != null && _modes.contains(savedDim)) {
+        _dimensionMode = savedDim;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveVideoPref(String key, Object value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (value is bool) await prefs.setBool(key, value);
+      if (value is int) await prefs.setInt(key, value);
+      if (value is String) await prefs.setString(key, value);
+    } catch (_) {}
   }
 
   Future<void> _loadSystemVolume() async {
@@ -175,13 +223,18 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   }
 
   void _initPlayer() {
+    // Pause background music cleanly so ExoPlayer gets clean AudioFocus without stuttering
+    if (MusicPlayerService.shared?.isPlaying == true) {
+      MusicPlayerService.shared?.player.pause();
+    }
+    final opts = VideoPlayerOptions(mixWithOthers: false, allowBackgroundPlayback: _bgPlay);
     final path = _currentFile();
     if (path != null && File(path).existsSync()) {
-      _controller = VideoPlayerController.file(File(path));
+      _controller = VideoPlayerController.file(File(path), videoPlayerOptions: opts);
     } else if (path != null && (path.startsWith('http://') || path.startsWith('https://'))) {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(path));
+      _controller = VideoPlayerController.networkUrl(Uri.parse(path), videoPlayerOptions: opts);
     } else if (widget.url != null) {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url!));
+      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url!), videoPlayerOptions: opts);
     }
     if (_controller == null) {
       setState(() => _initialized = true);
@@ -189,6 +242,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     }
     _controller!.initialize().then((_) {
       if (!mounted) return;
+      _controller!.setLooping(_loopVideo);
       _controller!.addListener(_onVideoEvent);
       _restoreResume();
       _controller!.play();
@@ -214,12 +268,42 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
 
   void _onVideoEvent() {
     if (!mounted || _controller == null) return;
-    final isPlayingNow = _controller!.value.isPlaying;
+    final val = _controller!.value;
+    final isPlayingNow = val.isPlaying;
     if (_isPlaying != isPlayingNow) {
       _isPlaying = isPlayingNow;
       _setKeepScreenOn(isPlayingNow);
       setState(() {});
     }
+
+    // AB Repeat loop
+    if (_abPointA != null && _abPointB != null && _abPointB! > _abPointA!) {
+      if (val.position >= _abPointB!) {
+        _controller!.seekTo(_abPointA!);
+      }
+    }
+
+    // Auto-advance playlist when video finishes (unless single-video loop is active)
+    if (!_loopVideo &&
+        !_advancingNext &&
+        val.isInitialized &&
+        val.duration > Duration.zero &&
+        !val.isPlaying &&
+        val.position >= val.duration - const Duration(milliseconds: 250)) {
+      final list = widget.playlist;
+      if (list != null && list.length > 1) {
+        _advancingNext = true;
+        final nextIdx = _shufflePlaylist
+            ? Random().nextInt(list.length)
+            : (_currentIndex + 1);
+        if (nextIdx < list.length) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _switchVideo(nextIdx);
+          });
+        }
+      }
+    }
+
     final now = DateTime.now();
     if (now.difference(_lastResumeSave).inSeconds >= 5) {
       _lastResumeSave = now;
@@ -284,7 +368,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
 
   void _startAutoHide() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 4), () {
+    _hideTimer = Timer(Duration(seconds: _autoHideSeconds), () {
       if (mounted && _isPlaying && _showControls) {
         setState(() => _showControls = false);
       }
@@ -307,6 +391,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   @override
   void dispose() {
     _setKeepScreenOn(false);
+    _sleepTimer?.cancel();
     _subtitleTimer?.cancel();
     _overlayTimer?.cancel();
     _doubleTapTimer?.cancel();
@@ -352,17 +437,18 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     final screenW = MediaQuery.of(context).size.width;
     final dx = details.globalPosition.dx;
     final isLeft = dx < screenW / 2;
-    final delta = isLeft ? -10 : 10;
+    final delta = isLeft ? -_skipSeconds : _skipSeconds;
     final pos = _controller!.value.position;
-    final newPos = Duration(seconds: (pos.inSeconds + delta).clamp(0, _controller!.value.duration.inSeconds));
-    _controller!.seekTo(newPos);
+    final maxMs = _controller!.value.duration.inMilliseconds;
+    final targetMs = (pos.inMilliseconds + delta * 1000).clamp(0, maxMs);
+    _controller!.seekTo(Duration(milliseconds: targetMs));
     setState(() {
       _doubleTapSide = isLeft ? 'left' : 'right';
       _seekPreviewDelta = delta;
       _showSeekPreview = true;
     });
     _doubleTapTimer?.cancel();
-    _doubleTapTimer = Timer(const Duration(milliseconds: 500), () {
+    _doubleTapTimer = Timer(const Duration(milliseconds: 550), () {
       if (mounted) setState(() => _showSeekPreview = false);
     });
   }
@@ -390,14 +476,22 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     final dy = _dragStartY - details.globalPosition.dy;
     final sensitivity = MediaQuery.of(context).size.height * 0.6;
     final delta = (dy / sensitivity).clamp(-1.0, 1.0);
+    final now = DateTime.now();
+    final canInvokeChannel = now.difference(_lastChannelAdjust).inMilliseconds >= 45;
 
     if (_dragSide == 'volume') {
       _volume = (_volume + delta).clamp(0.0, 1.0);
-      final vol = (_volume * _maxVolume).round();
-      _videoChannel.invokeMethod('setVolume', {'volume': vol});
+      if (canInvokeChannel) {
+        _lastChannelAdjust = now;
+        final vol = (_volume * _maxVolume).round();
+        _videoChannel.invokeMethod('setVolume', {'volume': vol});
+      }
     } else {
       _brightness = (_brightness + delta).clamp(0.01, 1.0);
-      _videoChannel.invokeMethod('setScreenBrightness', {'brightness': _brightness});
+      if (canInvokeChannel) {
+        _lastChannelAdjust = now;
+        _videoChannel.invokeMethod('setScreenBrightness', {'brightness': _brightness});
+      }
     }
     _dragStartY = details.globalPosition.dy;
     setState(() {});
@@ -474,13 +568,20 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
 
   String _fmt(Duration d) { final m = d.inMinutes.remainder(60).toString().padLeft(2, '0'); final s = d.inSeconds.remainder(60).toString().padLeft(2, '0'); return '${d.inHours > 0 ? '${d.inHours}:' : ''}$m:$s'; }
 
-  void _cycleDim() { final idx = _modes.indexOf(_dimensionMode); setState(() => _dimensionMode = _modes[(idx + 1) % _modes.length]); }
+  void _cycleDim() {
+    final idx = _modes.indexOf(_dimensionMode);
+    setState(() => _dimensionMode = _modes[(idx + 1) % _modes.length]);
+    _saveVideoPref('video_dimension_mode', _dimensionMode);
+  }
 
   void _switchVideo(int index) {
     _persistWatchProgress();
     _controller?.removeListener(_onVideoEvent);
     _controller?.pause();
     _controller?.dispose();
+    _abPointA = null;
+    _abPointB = null;
+    _advancingNext = false;
     setState(() { _currentIndex = index; _initialized = false; _isPlaying = false; });
     _initPlayer();
   }
@@ -491,8 +592,6 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     if (_controller == null || !_controller!.value.isInitialized) {
       return Scaffold(backgroundColor: Colors.black, body: const Center(child: Text('Failed to load video', style: TextStyle(color: Colors.white54))));
     }
-    final pos = _controller!.value.position;
-    final dur = _controller!.value.duration;
     final hasMulti = widget.playlist != null && widget.playlist!.length > 1;
     final curTitle = _currentFile()?.split('\\').last.split('/').last ?? widget.title;
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
@@ -537,6 +636,14 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
         ));
     }
 
+    final renderedVideo = _mirrorVideo
+        ? Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.diagonal3Values(-1.0, 1.0, 1.0),
+            child: videoWidget,
+          )
+        : videoWidget;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
@@ -554,11 +661,34 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
                 width: double.infinity, height: double.infinity,
                 child: RepaintBoundary(
                   key: _videoKey,
-                  child: videoWidget,
+                  child: renderedVideo,
                 ),
               ),
             ),
           ),
+          if (_nightMode)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(color: const Color(0x28FF8F00)),
+              ),
+            ),
+          if (_abPointA != null)
+            Positioned(
+              left: 16,
+              top: topPad + 54,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF818CF8).withValues(alpha: 0.6)),
+                ),
+                child: Text(
+                  'A ${_fmt(_abPointA!)}  →  ${_abPointB != null ? 'B ${_fmt(_abPointB!)}' : 'B ...'}',
+                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
           // Double-tap seek preview
           if (_showSeekPreview)
             Positioned(
@@ -596,15 +726,13 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
               left: 20, top: MediaQuery.of(context).size.height * 0.25,
               child: _buildBrightnessOverlay(),
             ),
-          if (_showControls && !_locked && !isLandscape)
-            _buildSeekOverlay(pos),
           if (_showControls && !_locked) ...[
             Positioned(
               top: 0, left: 0, right: 0,
               child: Container(
                 padding: EdgeInsets.only(top: topPad + 4),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87.withOpacity(0.7), Colors.transparent]),
+                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87.withValues(alpha: 0.7), Colors.transparent]),
                 ),
                 child: _buildTopBar(curTitle, isLandscape),
               ),
@@ -618,12 +746,15 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
             ),
             Positioned(
               bottom: 0, left: 0, right: 0,
-              child: Container(
-                padding: EdgeInsets.only(bottom: bottomPad + 4),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black87]),
+              child: ValueListenableBuilder<VideoPlayerValue>(
+                valueListenable: _controller!,
+                builder: (_, val, __) => Container(
+                  padding: EdgeInsets.only(bottom: bottomPad + 4),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black87]),
+                  ),
+                  child: _buildBottomControls(val.position, val.duration, hasMulti, isLandscape),
                 ),
-                child: _buildBottomControls(pos, dur, hasMulti, isLandscape),
               ),
             ),
           ],
@@ -682,38 +813,6 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     );
   }
 
-  Widget _buildSeekOverlay(Duration pos) {
-    return Positioned(
-      left: 0, right: 0, top: 0, bottom: 0,
-      child: Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _controller!.seekTo(Duration(seconds: (pos.inSeconds - 10).clamp(0, 999999))),
-              child: Container(
-                color: Colors.transparent,
-                child: const Center(
-                  child: Icon(Icons.replay_10, color: Colors.white38, size: 48),
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _controller!.seekTo(Duration(seconds: pos.inSeconds + 10)),
-              child: Container(
-                color: Colors.transparent,
-                child: const Center(
-                  child: Icon(Icons.forward_10, color: Colors.white38, size: 48),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildBottomControls(Duration pos, Duration dur, bool hasMulti, bool isLandscape) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -738,11 +837,39 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Row(
               children: [
-                Text(_fmt(pos), style: const TextStyle(color: Colors.white70, fontSize: 10)),
+                Text(
+                  _fmt(_isScrubbing ? Duration(milliseconds: _scrubMs.round()) : pos),
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                ),
                 Expanded(
                   child: SliderTheme(
-                    data: const SliderThemeData(trackHeight: 3, thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5), activeTrackColor: Color(0xFF818CF8), inactiveTrackColor: Colors.white24, thumbColor: Color(0xFF818CF8)),
-                    child: Slider(value: pos.inMilliseconds.toDouble().clamp(0, dur.inMilliseconds.toDouble()), max: dur.inMilliseconds.toDouble().clamp(1, double.infinity), onChanged: (v) => _controller!.seekTo(Duration(milliseconds: v.round()))),
+                    data: const SliderThemeData(
+                      trackHeight: 3,
+                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                      activeTrackColor: Color(0xFF818CF8),
+                      inactiveTrackColor: Colors.white24,
+                      thumbColor: Color(0xFF818CF8),
+                    ),
+                    child: Slider(
+                      value: (_isScrubbing ? _scrubMs : pos.inMilliseconds.toDouble())
+                          .clamp(0.0, dur.inMilliseconds.toDouble().clamp(1.0, double.infinity)),
+                      max: dur.inMilliseconds.toDouble().clamp(1.0, double.infinity),
+                      onChangeStart: (v) {
+                        _hideTimer?.cancel();
+                        setState(() {
+                          _isScrubbing = true;
+                          _scrubMs = v;
+                        });
+                      },
+                      onChanged: (v) {
+                        setState(() => _scrubMs = v);
+                      },
+                      onChangeEnd: (v) {
+                        _controller?.seekTo(Duration(milliseconds: v.round()));
+                        setState(() => _isScrubbing = false);
+                        _startAutoHide();
+                      },
+                    ),
                   ),
                 ),
                 Text(_fmt(dur), style: const TextStyle(color: Colors.white70, fontSize: 10)),
@@ -1657,34 +1784,194 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   }
 
   void _showVideoSettings() {
-    const card = Color(0xFF1A1A2E);
+    const card = Color(0xFF131B2E);
+    const accent = Color(0xFF818CF8);
     showModalBottomSheet(
-      context: context, backgroundColor: card, isScrollControlled: true,
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.65, maxChildSize: 0.9, minChildSize: 0.3,
-        builder: (_, sc) => ListView(
-          controller: sc,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text('Video Settings', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-            const Divider(color: Color(0xFF2D3748), height: 1),
-            _settingsTile(Icons.play_circle_outline, 'Background play', () { Navigator.pop(ctx); _toast('Background play coming soon'); }),
-            _settingsTile(Icons.tune, 'Equalizer', () { Navigator.pop(ctx); _toast('Equalizer coming soon'); }),
-            _settingsTile(Icons.dark_mode, 'Night Mode', () { Navigator.pop(ctx); _toast('Night mode coming soon'); }),
-            _settingsTile(Icons.timer, 'Timer', () { Navigator.pop(ctx); _toast('Sleep timer coming soon'); }),
-            _settingsTile(Icons.repeat_one, 'AB Repeat', () { Navigator.pop(ctx); _toast('AB Repeat coming soon'); }),
-            _settingsTile(Icons.flip, 'Mirror', () { Navigator.pop(ctx); _toast('Mirror mode coming soon'); }),
-            _settingsTile(Icons.settings_ethernet, 'Decoder', () { Navigator.pop(ctx); _toast('Decoder selection coming soon'); }),
-            _settingsTile(Icons.loop, 'Loop', () { Navigator.pop(ctx); _toast('Loop mode coming soon'); }),
-            _settingsTile(Icons.shuffle, 'Shuffle', () { Navigator.pop(ctx); _toast('Shuffle mode coming soon'); }),
-            _settingsTile(Icons.info, 'Properties', () { Navigator.pop(ctx); _showVideoInfo(); }),
-            _settingsTile(Icons.share, 'Share', () { Navigator.pop(ctx); _shareVideo(); }),
-            _settingsTile(Icons.delete, 'Delete', () { Navigator.pop(ctx); _deleteVideo(); }),
-            _settingsTile(Icons.feedback, 'Feedback', () { Navigator.pop(ctx); _toast('Feedback coming soon'); }),
-            const SizedBox(height: 16),
-          ],
+      context: context,
+      backgroundColor: card,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => DraggableScrollableSheet(
+          initialChildSize: 0.78,
+          maxChildSize: 0.94,
+          minChildSize: 0.4,
+          expand: false,
+          builder: (_, sc) => ListView(
+            controller: sc,
+            children: [
+              const SizedBox(height: 10),
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 14, 16, 10),
+                child: Text('Video Settings', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
+              ),
+              const Divider(color: Color(0xFF2D3748), height: 1),
+              SwitchListTile(
+                secondary: const Icon(Icons.play_circle_outline, color: accent),
+                title: const Text('Background play', style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: const Text('Keep audio playing when switching apps (applies on next video load)', style: TextStyle(color: Colors.white54, fontSize: 11.5)),
+                value: _bgPlay,
+                activeColor: accent,
+                onChanged: (v) {
+                  setState(() => _bgPlay = v);
+                  _saveVideoPref('video_bg_play', v);
+                  setDlg(() {});
+                },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.nightlight_round, color: accent),
+                title: const Text('Night Mode (Blue-light filter)', style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: const Text('Warm amber overlay reduces eye strain in dark rooms', style: TextStyle(color: Colors.white54, fontSize: 11.5)),
+                value: _nightMode,
+                activeColor: accent,
+                onChanged: (v) {
+                  setState(() => _nightMode = v);
+                  _saveVideoPref('video_night_mode', v);
+                  setDlg(() {});
+                },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.flip, color: accent),
+                title: const Text('Mirror flip horizontally', style: TextStyle(color: Colors.white, fontSize: 14)),
+                value: _mirrorVideo,
+                activeColor: accent,
+                onChanged: (v) {
+                  setState(() => _mirrorVideo = v);
+                  _saveVideoPref('video_mirror', v);
+                  setDlg(() {});
+                },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.loop, color: accent),
+                title: const Text('Loop current video', style: TextStyle(color: Colors.white, fontSize: 14)),
+                value: _loopVideo,
+                activeColor: accent,
+                onChanged: (v) {
+                  setState(() => _loopVideo = v);
+                  _controller?.setLooping(v);
+                  _saveVideoPref('video_loop', v);
+                  setDlg(() {});
+                },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.shuffle, color: accent),
+                title: const Text('Shuffle playlist', style: TextStyle(color: Colors.white, fontSize: 14)),
+                value: _shufflePlaylist,
+                activeColor: accent,
+                onChanged: (v) {
+                  setState(() => _shufflePlaylist = v);
+                  _saveVideoPref('video_shuffle', v);
+                  setDlg(() {});
+                },
+              ),
+              _settingsTile(
+                Icons.repeat_one,
+                _abPointA == null
+                    ? 'AB Repeat: Off'
+                    : _abPointB == null
+                        ? 'AB Repeat: A=${_fmt(_abPointA!)} (Tap to set B)'
+                        : 'AB Repeat: ${_fmt(_abPointA!)} – ${_fmt(_abPointB!)}',
+                () {
+                  final pos = _controller?.value.position ?? Duration.zero;
+                  setState(() {
+                    if (_abPointA == null) {
+                      _abPointA = pos;
+                      _abPointB = null;
+                      _toast('Loop Point A set at ${_fmt(pos)}');
+                    } else if (_abPointB == null) {
+                      if (pos > _abPointA!) {
+                        _abPointB = pos;
+                        _controller?.seekTo(_abPointA!);
+                        _toast('AB Repeat active');
+                      } else {
+                        _toast('Point B must be after Point A');
+                      }
+                    } else {
+                      _abPointA = null;
+                      _abPointB = null;
+                      _toast('AB Repeat cleared');
+                    }
+                  });
+                  setDlg(() {});
+                },
+              ),
+              _settingsTile(
+                Icons.fast_forward_outlined,
+                'Double-tap skip interval: ${_skipSeconds}s',
+                () {
+                  final opts = [5, 10, 15, 30];
+                  final next = opts[(opts.indexOf(_skipSeconds) + 1) % opts.length];
+                  setState(() => _skipSeconds = next);
+                  _saveVideoPref('video_skip_seconds', next);
+                  setDlg(() {});
+                },
+              ),
+              _settingsTile(
+                Icons.timer_outlined,
+                _sleepTimerMinutes > 0 ? 'Sleep timer: ${_sleepTimerMinutes}m' : 'Sleep timer: Off',
+                () {
+                  final opts = [0, 10, 15, 30, 60, 90];
+                  final next = opts[(opts.indexOf(_sleepTimerMinutes) + 1) % opts.length];
+                  _sleepTimer?.cancel();
+                  setState(() => _sleepTimerMinutes = next);
+                  if (next > 0) {
+                    _sleepTimer = Timer(Duration(minutes: next), () {
+                      if (mounted) {
+                        _controller?.pause();
+                        setState(() => _sleepTimerMinutes = 0);
+                        _toast('Sleep timer paused playback');
+                      }
+                    });
+                  }
+                  setDlg(() {});
+                },
+              ),
+              _settingsTile(
+                Icons.visibility_outlined,
+                'Auto-hide controls: ${_autoHideSeconds}s',
+                () {
+                  final opts = [2, 4, 6, 10];
+                  final next = opts[(opts.indexOf(_autoHideSeconds) + 1) % opts.length];
+                  setState(() => _autoHideSeconds = next);
+                  _saveVideoPref('video_auto_hide_sec', next);
+                  _startAutoHide();
+                  setDlg(() {});
+                },
+              ),
+              _settingsTile(
+                Icons.aspect_ratio_rounded,
+                'Aspect ratio: ${_modeLabels[_modes.indexOf(_dimensionMode)]}',
+                () {
+                  _cycleDim();
+                  setDlg(() {});
+                },
+              ),
+              _settingsTile(
+                Icons.memory_rounded,
+                'Video decoder: ${_hwDecoder ? 'Hardware (MediaCodec)' : 'Compatibility Mode'}',
+                () {
+                  setState(() => _hwDecoder = !_hwDecoder);
+                  _saveVideoPref('video_hw_decoder', _hwDecoder);
+                  _toast('Decoder preference updated');
+                  setDlg(() {});
+                },
+              ),
+              const Divider(color: Color(0xFF2D3748), height: 16),
+              _settingsTile(Icons.info_outline, 'Video properties', () { Navigator.pop(ctx); _showVideoInfo(); }),
+              _settingsTile(Icons.share_outlined, 'Share video', () { Navigator.pop(ctx); _shareVideo(); }),
+              _settingsTile(Icons.delete_outline, 'Delete video', () { Navigator.pop(ctx); _deleteVideo(); }),
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );

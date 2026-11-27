@@ -2,7 +2,7 @@
 **Project:** Makaw (Hybrid Browser, Creative Studio & Media Platform)  
 **Standard:** 14 Nov 2026 PRD Specifications (Mobile + Windows Desktop)  
 **Status:** In Active Execution  
-**Last Updated:** November 20, 2026  
+**Last Updated:** November 26, 2026  
 
 ---
 
@@ -142,7 +142,7 @@
 
 ---
 
-### Phase 8: Media Experience, Home Hygiene, AI Rich Text & Music UI Overhaul
+### Phase 8: Media Experience, Home Hygiene, AI Rich Text & Music UI Overhaul (Sprint 7)
 - [x] **8.1 Direct Video Tool Access & Playback Wake Lock**
   - [x] Prominent Video Tool entry card, AppBar action, and section button inside `MediaLibraryPage`.
   - [x] Android `FLAG_KEEP_SCREEN_ON` MethodChannel (`setKeepScreenOn`) keeping screen awake during active video playback.
@@ -155,3 +155,34 @@
   - [x] Native AI markdown rendering plus `.md`, `.txt`, `.html`, `.doc`, and `.json` formatted exports.
 - [x] **8.4 Music Tool Aesthetic Redesign**
   - [x] Live animated spectrum visualizer (`MusicVisualizerBars`), floating glass mini-player with bottom progress bar, Studio header card, pill capsule tabs, and thematic gradient cards.
+
+---
+
+### Phase 9: AI Context/PDF, File Explorer Archives, Lyrics Studio & Player Settings (Sprint 8)
+- [x] **9.1 AI Assistant Upgrades**
+  - [x] Migrate model defaults/fallbacks to Gemini 2.5 family with legacy saved-model normalization and in-chat model picker.
+  - [x] Add browser-page and repository context, binary PDF/image attachments, and code-snippet actions.
+  - [x] Add pure-Dart multipage PDF export with sanitized ASCII-safe rendering ([ai_pdf_exporter.dart](file:///D:/projects/makaw/lib/features/ai/data/services/ai_pdf_exporter.dart)).
+- [x] **9.2 File Explorer & Archive Engine**
+  - [x] Add isolate-based recursive search with category filters, natural sorting, and `FileExclusionFilter` enforcement.
+  - [x] Add multi-select, create folder, rename, permanent delete, share, and properties actions.
+  - [x] Add ZIP/TAR.GZ creation and ZIP/TAR/GZ/BZ2/XZ/RAR inspection/extraction with background isolates ([archive_service.dart](file:///D:/projects/makaw/lib/features/documents/data/services/archive_service.dart)).
+  - [x] Harden archive extraction with `p.isWithin` destination checks, Windows `tar.exe` listing validation, and sanitized archive output names.
+- [x] **9.3 Lyrics Studio**
+  - [x] Add universal LRC storage/resolution across sidecar files, `Download/MakawLyrics`, SQLite cache, LRCLIB, and lyrics.ovh.
+  - [x] Add karaoke synced lyrics view with auto-scroll, tap-to-seek, timing offset, and fullscreen mode.
+  - [x] Add live tap-to-stamp Lyrics Creator Studio with clipboard/file import and `.lrc`/sidecar/SQLite export.
+- [x] **9.4 Music & Video Player Settings**
+  - [x] Persist music sort/buffer/skip/crossfade/speed/lyrics/EQ settings and wire native Android equalizer/bass boost.
+  - [x] Persist video background play, night mode, mirror, loop, shuffle, skip interval, aspect ratio, and decoder preference.
+  - [x] Add A-B repeat, sleep timer, playlist auto-advance, smoother scrubbing, and live Home player/video cards.
+  - [x] Replace redundant mobile Home footer nav with contextual active workspace bar (`_buildHomeWorkspaceBar`) and interactive Home album-art player card.
+- [x] **9.5 Documents, Downloads & Verification**
+  - [x] Render Word-HTML `.doc` bodies cleanly, add Markdown raw/source toggle, and route more code/subtitle extensions to `TextViewerPage`.
+  - [x] Add styled download start/complete/failed notifications with Open, folder, and Downloads actions.
+  - [x] Add Sprint 8 regression tests for LRC, archives, path traversal, PDF, and Word-HTML `.doc` ([sprint8_upgrades_test.dart](file:///D:/projects/makaw/test/features/media/sprint8_upgrades_test.dart)).
+  - [x] Local verification: `flutter test --no-pub` **135/135 passed**; `flutter analyze --no-pub` **0 errors, 0 warnings**.
+- [ ] **9.6 Sprint 8 Sign-Off**
+  - [ ] Commit/push Sprint 8 working tree and verify Android + Windows GitHub Actions runs.
+  - [ ] Install fresh Sprint 8 APK on TECNO CG8h and Redmi 14C; verify lyrics, archives, players, and mobile navigation on device.
+  - [ ] Verify Windows desktop UI, keyboard shortcuts, and right-click menus on the fresh build.

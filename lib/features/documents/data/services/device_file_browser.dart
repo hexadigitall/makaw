@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../../core/platform/file_exclusion_filter.dart';
 import '../../../../core/platform/platform_paths.dart';
+import '../../../../core/utils/natural_sort.dart';
 
 /// A single entry in a directory listing produced by [DeviceFileBrowser].
 class DeviceEntry {
@@ -138,11 +142,112 @@ class DeviceFileBrowser {
         }
       } catch (_) {}
     }
-    dirs.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    files.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    dirs.sort((a, b) => naturalCompare(a.name, b.name));
+    files.sort((a, b) => naturalCompare(a.name, b.name));
     out.addAll(dirs);
     out.addAll(files);
     return out;
+  }
+
+  /// Fast background-isolate recursive file & folder search starting from [rootPath].
+  /// Excludes OS metadata & sensitive files via [FileExclusionFilter] and skips
+  /// virtual Android/system mount trees to stay sub-second on mobile devices.
+  static Future<List<DeviceEntry>> searchRecursive({
+    required String rootPath,
+    required String query,
+    String category = 'all',
+    int maxResults = 250,
+  }) async {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty && category == 'all') return const [];
+
+    return Isolate.run(() {
+      final results = <DeviceEntry>[];
+      final root = Directory(rootPath == '/' ? PlatformPaths.storageRoot() : rootPath);
+      if (!root.existsSync()) return results;
+
+      const docExts = {'pdf', 'epub', 'doc', 'docx', 'odt', 'rtf', 'txt', 'md', 'xls', 'xlsx', 'csv'};
+      const mediaExts = {'mp4', 'mkv', 'webm', 'avi', 'mov', '3gp', 'm4v', 'mp3', 'flac', 'wav', 'aac', 'm4a', 'ogg', 'opus', 'jpg', 'jpeg', 'png', 'webp', 'gif'};
+      const archiveExts = {'zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'xz'};
+      const codeExts = {'dart', 'py', 'js', 'ts', 'java', 'kt', 'html', 'css', 'json', 'yaml', 'yml', 'xml', 'sh', 'sql', 'lrc', 'srt'};
+
+      bool matchesCategory(DeviceEntry e) {
+        switch (category) {
+          case 'folders': return e.isDirectory;
+          case 'docs': return !e.isDirectory && docExts.contains(e.ext);
+          case 'media': return !e.isDirectory && mediaExts.contains(e.ext);
+          case 'archives': return !e.isDirectory && archiveExts.contains(e.ext);
+          case 'code': return !e.isDirectory && codeExts.contains(e.ext);
+          default: return true;
+        }
+      }
+
+      final queue = <Directory>[root];
+      final visited = <String>{};
+
+      while (queue.isNotEmpty && results.length < maxResults) {
+        final current = queue.removeAt(0);
+        final canon = current.path;
+        if (!visited.add(canon)) continue;
+        // Skip Android/data private sandboxes & hidden dot dirs unless searching them explicitly
+        final lowerDir = canon.toLowerCase();
+        if (lowerDir.contains('/android/data') && !rootPath.toLowerCase().contains('/android/data')) continue;
+        if (lowerDir.contains('/android/obb') && !rootPath.toLowerCase().contains('/android/obb')) continue;
+
+        List<FileSystemEntity> children;
+        try {
+          children = current.listSync(followLinks: false);
+        } catch (_) {
+          continue;
+        }
+
+        for (final entity in children) {
+          if (results.length >= maxResults) break;
+          final name = _nameOf(entity.path);
+          if (name.startsWith('.')) continue;
+          if (FileExclusionFilter.shouldExclude(entity.path)) continue;
+
+          try {
+            if (entity is Directory) {
+              if (FileExclusionFilter.isSystemDirectory(name)) continue;
+              final entry = DeviceEntry(
+                path: entity.path,
+                name: name,
+                isDirectory: true,
+                modified: entity.statSync().modified,
+              );
+              if ((q.isEmpty || name.toLowerCase().contains(q)) && matchesCategory(entry)) {
+                results.add(entry);
+              }
+              queue.add(entity);
+            } else if (entity is File) {
+              final dot = name.lastIndexOf('.');
+              final ext = dot >= 0 ? name.substring(dot + 1).toLowerCase() : '';
+              final matchesName = q.isEmpty || name.toLowerCase().contains(q);
+              if (!matchesName) continue;
+              final stat = entity.statSync();
+              final entry = DeviceEntry(
+                path: entity.path,
+                name: name,
+                isDirectory: false,
+                size: stat.size,
+                modified: stat.modified,
+                ext: ext,
+              );
+              if (matchesCategory(entry)) {
+                results.add(entry);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      results.sort((a, b) {
+        if (a.isDirectory != b.isDirectory) return a.isDirectory ? -1 : 1;
+        return naturalCompare(a.name, b.name);
+      });
+      return results;
+    });
   }
 
   static String _nameOf(String path) {

@@ -2,7 +2,7 @@
 **Project:** Makaw Multiplatform  
 **Repository:** `D:\projects\makaw`  
 **Tracking Standard:** Build-Ready PRD v1.0  
-**Last Updated:** November 20, 2026  
+**Last Updated:** November 26, 2026  
 
 ---
 
@@ -29,7 +29,9 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 4** | Studio Workspace Modernization & Windows Terminal (M2) | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Android Run 44709694251 Passed |
 | **Sprint 5** | Desktop-Native Polish (Shortcuts, Menus, In-Place Navigation) | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Windows Run 44713455869 Passed |
 | **Sprint 6** | End-to-End Testing, Device Sign-Off & v1.0.3 Release | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Android & Windows CI Passed |
-| **Sprint 7** | Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign | 2026-11-24 | 2026-11-26 | **IN PROGRESS** | **TECNO CG8h Installed** (Awaiting Redmi 14C USB attach) | Android Run 45526057854 Passed |
+| **Sprint 7** | Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign | 2026-11-24 | 2026-11-26 | **COMPLETED** | **TECNO CG8h Installed** | Android Run 45526057854 Passed |
+| **Sprint 8** | Video Scrub/Browser Jitter Fix, File Explorer Search & Archives, Download Banners, Lyrics Creator & Sync Studio, Music/Video Settings & EQ, Home Card & AI Upgrades | 2026-11-26 | 2026-11-27 | **IN PROGRESS** | Pending Fresh CI APK Install (TECNO CG8h & Redmi 14C connected) | Pending CI Run |
+| **Sprint 8** | AI Context/PDF Export, File Explorer Archives, Lyrics Studio & Player Settings | 2026-11-26 | 2026-11-26 | **IN PROGRESS** (code complete; local verification passed) | **PENDING** (fresh APK/Windows build required) | Pending commit/push |
 
 ---
 
@@ -205,4 +207,49 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
   - Streamed ADB Install: `Success` (`app-arm64-v8a-release.apk`)
   - Launch Verification: Active process `com.hexadigitall.makaw` (PID `6137`)
 - **Physical Device 2 (Redmi 14C, `JF9HQ8XOT4LVYPKV`):**
-  - Pending USB attachment (`adb devices` currently lists only `H854CG8012345678`)
+  - Attached on USB (`adb devices` active)
+
+---
+
+### Sprint 8: Video Stutter Fix, Explorer Search/Archives, Lyrics Creator, Complete Settings, Home Upgrade & AI Overhaul
+- **Status:** **IN PROGRESS** (Verified locally 135/135 tests + 0 analyze errors/warnings; committing & launching CI build)
+
+#### Task Progress Checklist
+- [x] Video playback stutter & skip fix (`DirectVideoPlayer` debounce + `MediaSession` & JS poll elimination in [main.dart](file:///D:/projects/makaw/lib/main.dart) and [video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart))
+- [x] Fast recursive File Explorer search + Zip/RAR/Tar.gz archiving & extraction ([archive_service.dart](file:///D:/projects/makaw/lib/features/documents/data/services/archive_service.dart), [device_file_browser.dart](file:///D:/projects/makaw/lib/features/documents/data/services/device_file_browser.dart), [folders_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/folders_page.dart))
+- [x] Redesigned Download Started / Download Completed floating banners and internal opener wiring ([download_service.dart](file:///D:/projects/makaw/lib/features/browser/presentation/providers/download_service.dart), [downloads_page.dart](file:///D:/projects/makaw/lib/features/manager/presentation/pages/downloads_page.dart))
+- [x] Universal `.lrc` Lyrics Resolver, Karaoke Synced View, Interactive Tap-to-Stamp Lyrics Creator Studio, and Copy/Paste Lyrics Manager ([lrc_storage_service.dart](file:///D:/projects/makaw/lib/core/storage/lrc_storage_service.dart), [lyrics_creator_page.dart](file:///D:/projects/makaw/lib/features/music/presentation/pages/lyrics_creator_page.dart), [synced_lyrics_view.dart](file:///D:/projects/makaw/lib/features/music/presentation/widgets/synced_lyrics_view.dart), [lyrics_page.dart](file:///D:/projects/makaw/lib/features/manager/presentation/pages/lyrics_page.dart))
+- [x] Complete persisted Music & Video Settings + native Android 5-band Equalizer & Bass Boost (`com.hexadigitall.makaw/audio_fx` in [MainActivity.kt](file:///D:/projects/makaw/android/app/src/main/kotlin/com/hexadigitall/makaw/MainActivity.kt), [music_player_service.dart](file:///D:/projects/makaw/lib/features/music/data/services/music_player_service.dart), [music_player_page.dart](file:///D:/projects/makaw/lib/features/music/presentation/pages/music_player_page.dart))
+- [x] Makaw Home album-art player cards & replacement of redundant Home footer with contextual workspace pill ([makaw_home_portal_page.dart](file:///D:/projects/makaw/lib/features/portal/presentation/pages/makaw_home_portal_page.dart))
+- [x] AI Assistant speed/failover upgrade (Gemini 2.5 family + persistent HTTP client + link/repo/PDF context + pure-Dart PDF exporter + Makaw internal file opening) ([ai_chat_page.dart](file:///D:/projects/makaw/lib/features/ai/presentation/pages/ai_chat_page.dart), [ai_pdf_exporter.dart](file:///D:/projects/makaw/lib/features/ai/data/services/ai_pdf_exporter.dart), [document_to_html.dart](file:///D:/projects/makaw/lib/features/viewer/data/services/document_to_html.dart), [text_viewer_page.dart](file:///D:/projects/makaw/lib/features/viewer/presentation/pages/text_viewer_page.dart))
+- [x] Regression test suite (`sprint8_upgrades_test.dart`, `ai_chat_sanitizer_and_error_test.dart`)
+
+#### Verification & Device Log
+- **Local Test Suite:** `flutter test --no-pub` — **135/135 passed**
+- **Static Analysis:** `flutter analyze --no-pub` — **0 errors, 0 warnings**
+- **Android CI & Both-Device Install:** Pending commit/push & `build-android.yml` run
+
+---
+
+### Sprint 8: AI Context/PDF Export, File Explorer Archives, Lyrics Studio & Player Settings
+- **Status:** **IN PROGRESS** — code complete and locally verified; commit, CI, and device sign-off still pending.
+- **Commits:** Uncommitted working tree (no Sprint 8 commit hash yet).
+
+#### Task Progress Checklist
+- [x] AI Assistant model migration to Gemini 2.5 defaults, model picker, browser/repository context, binary attachments, and pure-Dart multipage PDF export ([ai_chat_page.dart](file:///D:/projects/makaw/lib/features/ai/presentation/pages/ai_chat_page.dart), [ai_pdf_exporter.dart](file:///D:/projects/makaw/lib/features/ai/data/services/ai_pdf_exporter.dart)).
+- [x] File Explorer isolate-based recursive search, categories, natural sort, multi-select, create/rename/delete/share/properties, and ZIP/TAR.GZ creation plus ZIP/TAR/GZ/BZ2/XZ/RAR inspection and extraction ([folders_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/folders_page.dart), [archive_service.dart](file:///D:/projects/makaw/lib/features/documents/data/services/archive_service.dart), [device_file_browser.dart](file:///D:/projects/makaw/lib/features/documents/data/services/device_file_browser.dart)).
+- [x] Archive path-traversal hardening: `p.isWithin` destination guard, Windows `tar.exe` listing validation before extraction, and sanitized archive output names.
+- [x] Universal LRC layer with sidecar/`MakawLyrics`/SQLite/LRCLIB/lyrics.ovh resolution, karaoke synced view, and tap-to-stamp Lyrics Creator Studio ([lrc_storage_service.dart](file:///D:/projects/makaw/lib/core/storage/lrc_storage_service.dart), [synced_lyrics_view.dart](file:///D:/projects/makaw/lib/features/music/presentation/widgets/synced_lyrics_view.dart), [lyrics_creator_page.dart](file:///D:/projects/makaw/lib/features/music/presentation/pages/lyrics_creator_page.dart)).
+- [x] Music persistence, EQ/bass native Android channel, crossfade/skip/lyrics toggles, and richer Home mini-player ([music_player_service.dart](file:///D:/projects/makaw/lib/features/music/data/services/music_player_service.dart), [music_player_page.dart](file:///D:/projects/makaw/lib/features/music/presentation/pages/music_player_page.dart), [MainActivity.kt](file:///D:/projects/makaw/android/app/src/main/kotlin/com/hexadigitall/makaw/MainActivity.kt)).
+- [x] Video player persistence and playback upgrades: background play, night mode, mirror, A-B repeat, sleep timer, skip interval, playlist advance, smoother scrubbing, and Home video card ([video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart), [main.dart](file:///D:/projects/makaw/lib/main.dart)).
+- [x] Documents/downloads polish: Word-HTML `.doc` rendering, Markdown viewer with raw toggle, expanded text/code/subtitle routing, and styled download notifications with Open/Location actions.
+- [x] Restored mobile five-system bottom navigation (Home | Media | Browser | Files | Studio) alongside the browser workspace bar ([main.dart](file:///D:/projects/makaw/lib/main.dart)).
+- [x] New regression suite ([sprint8_upgrades_test.dart](file:///D:/projects/makaw/test/features/media/sprint8_upgrades_test.dart)) covering LRC parse/format, ZIP/TAR.GZ round-trips, path-traversal rejection, multipage PDF output, and Word-HTML `.doc` conversion.
+
+#### Verification & Device Log
+- **Local Tests:** `flutter test --no-pub` — **135/135 passed**; Sprint 8 suite **7/7 passed**.
+- **Static Analysis:** `flutter analyze --no-pub` — **0 errors, 0 warnings** (927 informational style hints only).
+- **Security Verification:** Path-traversal archive entry is skipped and covered by an automated test.
+- **GitHub Actions:** Pending Sprint 8 commit/push; Sprint 7 Android run `45526057854` remains the last verified CI artifact.
+- **Android Device Verification:** Pending fresh Sprint 8 APK install on TECNO CG8h and Redmi 14C.
+- **Windows Desktop Verification:** Pending fresh Sprint 8 Windows build and keyboard/right-click smoke pass.
