@@ -1,0 +1,9 @@
+[{"event":"daemon.connected","params":{"version":"0.6.1","pid":17296}}]
+[{"event":"app.start","params":{"appId":"07925e33-88dd-457d-8ca4-b5e47156cc2a","deviceId":"H854CG8012345678","directory":"D:\\projects\\makaw","supportsRestart":true,"launchMode":"run","mode":"debug"}}]
+Launching lib\main.dart on TECNO CG8h in debug mode...
+[{"event":"app.progress","params":{"appId":"07925e33-88dd-457d-8ca4-b5e47156cc2a","id":"0","progressId":null,"message":"Running Gradle task 'assembleDebug'...","finished":false}}]
+[{"event":"app.progress","params":{"appId":"07925e33-88dd-457d-8ca4-b5e47156cc2a","id":"0","progressId":null,"finished":true}}]
+Retrying Gradle Build: #1, wait time: 100ms
+[{"event":"app.progress","params":{"appId":"07925e33-88dd-457d-8ca4-b5e47156cc2a","id":"1","progressId":null,"message":"Running Gradle task 'assembleDebug'...","finished":false}}]
+[{"event":"app.progress","params":{"appId":"07925e33-88dd-457d-8ca4-b5e47156cc2a","id":"1","progressId":null,"finished":true}}]
+[{"event":"app.stop","params":{"appId":"07925e33-88dd-457d-8ca4-b5e47156cc2a"}}]

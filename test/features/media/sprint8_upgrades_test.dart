@@ -182,7 +182,7 @@ void main() {
 
   group('FoldersPage highlight and natural back navigation', () {
     testWidgets('opens target folder with highlighted file and steps back cleanly', (tester) async {
-      final tempDir = await Directory.systemTemp.createTemp('makaw_folders_hi_');
+      final tempDir = Directory.systemTemp.createTempSync('makaw_folders_hi_');
       try {
         final targetFile = File('${tempDir.path}${Platform.pathSeparator}report_final.txt')
           ..writeAsStringSync('hello');
@@ -197,7 +197,9 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
 
         expect(find.text('report_final.txt'), findsOneWidget);
         await tester.tap(find.text('report_final.txt'));

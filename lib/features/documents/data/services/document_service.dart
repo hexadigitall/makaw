@@ -4,10 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../domain/entities/document_file_info.dart';
+import '../../domain/document_format_registry.dart';
 import '../../../../core/platform/platform_paths.dart';
 import '../../../../core/platform/file_exclusion_filter.dart';
 import '../../../../core/storage/file_recents_service.dart';
+import 'document_state_service.dart';
 export '../../domain/entities/document_file_info.dart';
+export '../../domain/document_format_registry.dart';
 
 class DocumentService extends ChangeNotifier {
   List<DocumentFileInfo> _allDocuments = [];
@@ -16,23 +19,20 @@ class DocumentService extends ChangeNotifier {
   Map<String, List<DocumentFileInfo>> _byCategory = {};
   Map<String, List<DocumentFileInfo>> get byCategory => _byCategory;
 
+  Map<DocumentFamily, List<DocumentFileInfo>> _byFamily = {};
+  Map<DocumentFamily, List<DocumentFileInfo>> get byFamily => _byFamily;
+
   Map<String, List<DocumentFileInfo>> _folders = {};
   Map<String, List<DocumentFileInfo>> get folders => _folders;
 
   List<int> _favoriteIds = [];
   List<int> get favoriteIds => _favoriteIds;
 
+  List<String> _customScanDirs = [];
+  List<String> get customScanDirs => List.unmodifiable(_customScanDirs);
+
   bool _isScanning = false;
   bool get isScanning => _isScanning;
-
-  static const Map<String, String> _extCategory = {
-    'pdf': 'pdf', 'epub': 'epub',
-    'doc': 'doc', 'docx': 'doc', 'odt': 'doc', 'rtf': 'doc', 'pages': 'doc',
-    'txt': 'text', 'md': 'text', 'csv': 'text', 'log': 'text', 'ini': 'text', 'cfg': 'text',
-    'html': 'html', 'htm': 'html', 'xhtml': 'html',
-    'xls': 'xls', 'xlsx': 'xls',
-    'json': 'code', 'xml': 'code', 'yaml': 'code', 'yml': 'code',
-  };
 
   static const List<String> _androidScanDirs = [
     '/storage/emulated/0/Documents',
@@ -41,12 +41,15 @@ class DocumentService extends ChangeNotifier {
     '/storage/emulated/0/eBooks',
     '/storage/emulated/0/PDF',
     '/storage/emulated/0/Notes',
+    '/storage/emulated/0/Comics',
+    '/storage/emulated/0/Makaw',
+    '/storage/emulated/0/WhatsApp/Media/WhatsApp Documents',
   ];
 
-  String getCategoryForExt(String ext) {
-    final key = ext.replaceAll('.', '').toLowerCase();
-    return _extCategory[key] ?? 'other';
-  }
+  String getCategoryForExt(String ext) => DocumentFormatRegistry.categoryFor(ext);
+
+  DocumentFamily getFamilyForDoc(DocumentFileInfo doc) =>
+      DocumentFormatRegistry.familyFor(doc.fileName);
 
   Future<bool> _checkPermission() async {
     if (!Platform.isAndroid) return true;
@@ -60,11 +63,36 @@ class DocumentService extends ChangeNotifier {
     }
   }
 
-  /// Platform-aware document scan roots (Android legacy paths on mobile,
-  /// OS-native user folders on desktop).
-  static List<String> _scanDirsForPlatform() {
-    if (PlatformPaths.isDesktop) return PlatformPaths.documentScanDirs();
-    return _androidScanDirs;
+  /// Platform-aware document scan roots (Android curated dirs + user custom dirs
+  /// on mobile, OS-native user folders + custom dirs on desktop).
+  List<String> _scanDirsForPlatform() {
+    final base = PlatformPaths.isDesktop
+        ? PlatformPaths.documentScanDirs()
+        : _androidScanDirs;
+    final combined = <String>{...base, ..._customScanDirs};
+    return combined.toList();
+  }
+
+  Future<void> addCustomScanDir(String dirPath) async {
+    if (dirPath.trim().isEmpty) return;
+    if (_customScanDirs.contains(dirPath)) return;
+    _customScanDirs = [..._customScanDirs, dirPath];
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('document_custom_dirs', _customScanDirs);
+    } catch (_) {}
+    notifyListeners();
+    await scanAllDocuments();
+  }
+
+  Future<void> removeCustomScanDir(String dirPath) async {
+    _customScanDirs = _customScanDirs.where((d) => d != dirPath).toList();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('document_custom_dirs', _customScanDirs);
+    } catch (_) {}
+    notifyListeners();
+    await scanAllDocuments();
   }
 
   /// Scans all document directories in a background isolate to avoid blocking UI.
@@ -72,6 +100,7 @@ class DocumentService extends ChangeNotifier {
     _isScanning = true;
     notifyListeners();
     try {
+      await _loadCustomDirs();
       final hasPermission = await _checkPermission();
       if (!hasPermission) {
         _isScanning = false;
@@ -94,32 +123,35 @@ class DocumentService extends ChangeNotifier {
     notifyListeners();
   }
 
-  static const Map<String, String> _staticExtCategory = {
-    'pdf': 'pdf', 'epub': 'epub',
-    'doc': 'doc', 'docx': 'doc',
-    'txt': 'text', 'md': 'text', 'csv': 'text', 'log': 'text', 'ini': 'text', 'cfg': 'text',
-    'html': 'html', 'htm': 'html', 'xhtml': 'html',
-    'xls': 'xls', 'xlsx': 'xls',
-    'json': 'code', 'xml': 'code', 'yaml': 'code', 'yml': 'code',
+  Future<void> _loadCustomDirs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _customScanDirs = prefs.getStringList('document_custom_dirs') ?? [];
+    } catch (_) {}
+  }
+
+  static const Set<String> _staticSkipDirs = {
+    'Android', 'data', 'obb', 'cache', 'tmp', 'app',
+    'media', 'Music', 'music', 'Alarms', 'Notifications', 'Ringtones',
+    'DCIM', 'Pictures', 'Screenshots', 'node_modules', '.git', 'build',
+    '.dart_tool', '.venv', 'venv', 'target', 'dist', 'pub_cache', '.gradle',
+    'makaw_projects',
   };
 
-  static const List<String> _staticAllExts = [
-    '.pdf', '.epub', '.doc', '.docx',
-    '.txt', '.md', '.csv', '.log', '.ini', '.cfg',
-    '.html', '.htm', '.xhtml',
-    '.xls', '.xlsx',
-    '.json', '.xml', '.yaml', '.yml',
-  ];
-
-  static const Set<String> _staticSkipDirs = {'Android', 'data', 'obb', 'cache', 'tmp', 'app',
-    'media', 'Music', 'music', 'Alarms', 'Notifications', 'Ringtones',
-    'DCIM', 'Pictures', 'Screenshots'};
+  /// Seeds in-memory documents in unit/widget tests without scanning disk.
+  @visibleForTesting
+  void seedDocumentsForTest(List<DocumentFileInfo> docs) {
+    _allDocuments = List<DocumentFileInfo>.from(docs);
+    _organize();
+    notifyListeners();
+  }
 
   /// Top-level function for compute() — runs in a background isolate.
   static List<Map<String, dynamic>> _scanInBackground(List<String> scanDirs) {
     final found = <Map<String, dynamic>>[];
     final seenPaths = <String>{};
     for (final dirPath in scanDirs) {
+      if (found.length >= 4000) break;
       _scanDirStatic(dirPath, found, seenPaths, 0);
     }
     // Sort newest first
@@ -132,30 +164,33 @@ class DocumentService extends ChangeNotifier {
   }
 
   static void _scanDirStatic(String path, List<Map<String, dynamic>> found, Set<String> seenPaths, int depth) {
-    if (depth > 5) return;
+    if (depth > 4 || found.length >= 4000) return;
     try {
       final dir = Directory(path);
       if (!dir.existsSync()) return;
       final entities = dir.listSync(recursive: false, followLinks: false);
       for (final entity in entities) {
         if (entity is Directory) {
-          final name = entity.uri.pathSegments.isNotEmpty ? entity.uri.pathSegments.last : '';
+          final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).lastOrNull ?? '';
           if (_staticSkipDirs.contains(name) || FileExclusionFilter.isSystemDirectory(name)) continue;
           _scanDirStatic(entity.path, found, seenPaths, depth + 1);
         } else if (entity is File) {
           try {
             if (FileExclusionFilter.shouldExclude(entity.path)) continue;
-            final ext = entity.path.toLowerCase().split('.').last;
-            if (_staticAllExts.any((e) => e.substring(1) == ext) && seenPaths.add(entity.path)) {
+            final ext = DocumentFormatRegistry.normalizeExtension(entity.path);
+            if (DocumentFormatRegistry.isSupportedExtension(ext) && seenPaths.add(entity.path)) {
               final stat = entity.statSync();
+              if (stat.size == 0) continue;
               final folderPath = entity.parent.path;
               found.add({
                 'filePath': entity.path,
-                'fileName': entity.uri.pathSegments.isNotEmpty ? entity.uri.pathSegments.last : entity.path.split('/').last,
+                'fileName': entity.uri.pathSegments.isNotEmpty
+                    ? entity.uri.pathSegments.last
+                    : entity.path.split('/').last,
                 'folder': folderPath,
                 'dateTime': stat.modified.toIso8601String(),
                 'fileSize': stat.size,
-                'category': _staticExtCategory[ext] ?? 'other',
+                'category': DocumentFormatRegistry.categoryFor(ext),
               });
             }
           } catch (_) {}
@@ -166,9 +201,12 @@ class DocumentService extends ChangeNotifier {
 
   void _organize() {
     _byCategory = {};
+    _byFamily = {};
     _folders = {};
     for (final doc in _allDocuments) {
       _byCategory.putIfAbsent(doc.category, () => []).add(doc);
+      final family = DocumentFormatRegistry.familyFor(doc.fileName);
+      _byFamily.putIfAbsent(family, () => []).add(doc);
       // Use full folder path as key to avoid name collisions
       _folders.putIfAbsent(doc.folder, () => []).add(doc);
     }
@@ -209,6 +247,11 @@ class DocumentService extends ChangeNotifier {
   // ── Reading position tracking ────────────────────────────────────────────
 
   Future<void> saveReadingPosition(String filePath, int page, {double? progress}) async {
+    await DocumentStateService.saveProgress(
+      filePath,
+      currentPage: page + 1,
+      scrollProgress: progress,
+    );
     final prefs = await SharedPreferences.getInstance();
     final key = 'doc_pos_${filePath.hashCode}';
     await prefs.setString(key, jsonEncode({'page': page, 'progress': progress, 'ts': DateTime.now().toIso8601String()}));

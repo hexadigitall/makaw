@@ -16,16 +16,20 @@ class _ImageViewerWidgetState extends ConsumerState<ImageViewerWidget> {
   String _page = 'photos';
   String? _selectedFolder;
   ImageFileInfo? _viewerImage;
+  bool _selectMode = false;
+  final Set<int> _selectedIds = {};
   final _kDark = const Color(0xFF0F0F1A);
   final _kAccent = const Color(0xFF818CF8);
   final _kMuted = const Color(0xFF666680);
   final _kCard = const Color(0xFF1A1A2E);
 
-  ImageViewerService get _service => ref.read(imageViewerServiceProvider) ?? ImageViewerService();
+  ImageViewerService? _boundService;
+  ImageViewerService get _service => _boundService ?? ref.read(imageViewerServiceProvider) ?? ImageViewerService();
 
   @override
   void initState() {
     super.initState();
+    _boundService = ref.read(imageViewerServiceProvider) ?? ImageViewerService();
     _service.addListener(_onServiceChanged);
     if (_service.allImages.isEmpty && !_service.isScanning) {
       // scan disabled — see main.dart
@@ -91,16 +95,14 @@ class _ImageViewerWidgetState extends ConsumerState<ImageViewerWidget> {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             onSelected: (v) {
-              if (v == 'select') {}
-              else if (v == 'settings') {}
+              if (v == 'select') setState(() => _selectMode = !_selectMode);
               else if (v == 'trash') setState(() => _page = 'trash');
               else if (v == 'favorites') setState(() => _page = 'favorites');
             },
-            itemBuilder: (_) => [
-              //const PopupMenuItem(value: 'select', child: ListTile(leading: Icon(Icons.checklist), title: Text('Select items'))),
-              //const PopupMenuItem(value: 'settings', child: ListTile(leading: Icon(Icons.settings), title: Text('Settings'))),
-              const PopupMenuItem(value: 'trash', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Trash'))),
-              const PopupMenuItem(value: 'favorites', child: ListTile(leading: Icon(Icons.star_border), title: Text('Favourites'))),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'select', child: ListTile(leading: Icon(Icons.checklist), title: Text('Select items'))),
+              PopupMenuItem(value: 'trash', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Trash'))),
+              PopupMenuItem(value: 'favorites', child: ListTile(leading: Icon(Icons.star_border), title: Text('Favourites'))),
             ],
           ),
         if (isFav || isTrash)
@@ -112,13 +114,76 @@ class _ImageViewerWidgetState extends ConsumerState<ImageViewerWidget> {
     );
   }
 
+  Widget _buildImageSelectBar(List<ImageFileInfo> scope) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: const Color(0xFF1E293B),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 20),
+            onPressed: () => setState(() {
+              _selectMode = false;
+              _selectedIds.clear();
+            }),
+          ),
+          Text('${_selectedIds.length} selected', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.select_all_rounded, color: Colors.white70, size: 20),
+            tooltip: 'Select All',
+            onPressed: () => setState(() => _selectedIds.addAll(scope.map((e) => e.id))),
+          ),
+          IconButton(
+            icon: const Icon(Icons.share_rounded, color: Color(0xFF38BDF8), size: 20),
+            tooltip: 'Share Selected',
+            onPressed: _selectedIds.isEmpty
+                ? null
+                : () {
+                    final files = _service.allImages
+                        .where((e) => _selectedIds.contains(e.id))
+                        .map((e) => XFile(e.filePath))
+                        .toList();
+                    if (files.isNotEmpty) Share.shareXFiles(files);
+                  },
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+            tooltip: 'Move to Trash',
+            onPressed: _selectedIds.isEmpty
+                ? null
+                : () {
+                    final targets = _service.allImages.where((e) => _selectedIds.contains(e.id)).toList();
+                    for (final img in targets) {
+                      _service.moveToTrash(img);
+                    }
+                    setState(() {
+                      _selectedIds.clear();
+                      _selectMode = false;
+                    });
+                  },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBody() {
     if (_page == 'viewer' && _viewerImage != null) return _buildViewer();
     if (_page == 'favorites') return _buildFavoritesPage();
     if (_page == 'trash') return _buildTrashPage();
-    if (_selectedFolder != null) return _buildFolderContents();
+    final scope = _selectedFolder != null ? (_service.folders[_selectedFolder] ?? <ImageFileInfo>[]) : _service.allImages;
+    if (_selectedFolder != null) {
+      return Column(
+        children: [
+          if (_selectMode) _buildImageSelectBar(scope),
+          Expanded(child: _buildFolderContents()),
+        ],
+      );
+    }
     return Column(
       children: [
+        if (_selectMode) _buildImageSelectBar(scope),
         // Tabs
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -226,16 +291,60 @@ class _ImageViewerWidgetState extends ConsumerState<ImageViewerWidget> {
   }
 
   Widget _imageThumb(ImageFileInfo img) {
+    final selected = _selectedIds.contains(img.id);
     return GestureDetector(
-      onTap: () => setState(() { _viewerImage = img; _page = 'viewer'; }),
+      onLongPress: () => setState(() {
+        _selectMode = true;
+        _selectedIds.add(img.id);
+      }),
+      onTap: () {
+        if (_selectMode) {
+          setState(() {
+            if (selected) {
+              _selectedIds.remove(img.id);
+              if (_selectedIds.isEmpty) _selectMode = false;
+            } else {
+              _selectedIds.add(img.id);
+            }
+          });
+          return;
+        }
+        setState(() {
+          _viewerImage = img;
+          _page = 'viewer';
+        });
+      },
       child: Container(
         decoration: BoxDecoration(
           color: _kCard,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: selected ? _kAccent : Colors.transparent,
+            width: selected ? 2.2 : 0,
+          ),
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: Image(image: ResizeImage(FileImage(File(img.filePath)), width: 300, height: 300), fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Color(0xFF666680))),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image(
+                image: ResizeImage(FileImage(File(img.filePath)), width: 300, height: 300),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Color(0xFF666680)),
+              ),
+            ),
+            if (_selectMode)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Icon(
+                  selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                  color: selected ? _kAccent : Colors.white70,
+                  size: 20,
+                ),
+              ),
+          ],
         ),
       ),
     );

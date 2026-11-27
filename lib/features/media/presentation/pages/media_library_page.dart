@@ -1,7 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
+import '../../../../core/platform/platform_paths.dart';
 import '../../../../core/widgets/responsive.dart';
 import '../../../../core/widgets/adaptive_container.dart';
+import '../../../documents/data/services/archive_service.dart';
 import '../../../music/data/services/music_player_service.dart';
 import '../../data/services/video_player_service.dart';
 import '../../data/services/image_viewer_service.dart';
@@ -48,6 +52,25 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
   late MediaCategory _selectedCategory = widget.initialCategory;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  bool _selectMode = false;
+  final Set<String> _selectedPaths = {};
+
+  void _toggleSelectPath(String path) {
+    setState(() {
+      if (_selectedPaths.contains(path)) {
+        _selectedPaths.remove(path);
+        if (_selectedPaths.isEmpty) _selectMode = false;
+      } else {
+        _selectMode = true;
+        _selectedPaths.add(path);
+      }
+    });
+  }
+
+  void _exitSelectMode() => setState(() {
+    _selectMode = false;
+    _selectedPaths.clear();
+  });
 
   static const _bg = Color(0xFF0F172A);
   static const _surface = Color(0xFF1E293B);
@@ -156,22 +179,130 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
         ],
       ),
       body: SafeArea(
-        child: AdaptiveContainer(
-          child: Column(
-            children: [
-              _buildTopControls(),
-              Expanded(child: _buildContent(isDesktop)),
-              if (widget.musicService.currentSong != null ||
-                  widget.videoService.activeVideoPath != null ||
-                  widget.videoService.lastInProgress != null)
-                _buildMiniPlayer()
-              else
-                const SizedBox(height: 16),
-            ],
+        child: PopScope(
+          canPop: !_selectMode,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop && _selectMode) _exitSelectMode();
+          },
+          child: AdaptiveContainer(
+            child: Column(
+              children: [
+                if (_selectMode) _buildSelectionActionBar() else _buildTopControls(),
+                Expanded(child: _buildContent(isDesktop)),
+                if (widget.musicService.currentSong != null ||
+                    widget.videoService.activeVideoPath != null ||
+                    widget.videoService.lastInProgress != null)
+                  _buildMiniPlayer()
+                else
+                  const SizedBox(height: 16),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildSelectionActionBar() {
+    final allSongsSelected = _filteredSongs.where((s) => _selectedPaths.contains(s.filePath)).toList();
+    final allVideosSelected = _filteredVideos.where((v) => _selectedPaths.contains(v.filePath)).toList();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      color: const Color(0xFF141826),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: Colors.white),
+            onPressed: _exitSelectMode,
+          ),
+          Text('${_selectedPaths.length} selected', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          if (allSongsSelected.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.play_arrow_rounded, color: Color(0xFF38BDF8)),
+              tooltip: 'Play Selected Songs',
+              onPressed: () {
+                widget.onPlaySong(allSongsSelected.first, allSongsSelected);
+                _exitSelectMode();
+              },
+            ),
+          if (allVideosSelected.isNotEmpty && allSongsSelected.isEmpty)
+            IconButton(
+              icon: const Icon(Icons.play_arrow_rounded, color: Color(0xFF38BDF8)),
+              tooltip: 'Play First Selected',
+              onPressed: () {
+                widget.onPlayVideo(allVideosSelected.first);
+                _exitSelectMode();
+              },
+            ),
+          IconButton(
+            icon: const Icon(Icons.folder_zip_outlined, color: Color(0xFFFB923C)),
+            tooltip: 'Archive Selected as ZIP',
+            onPressed: _selectedPaths.isEmpty ? null : _zipSelectedMedia,
+          ),
+          IconButton(
+            icon: const Icon(Icons.share_rounded, color: Color(0xFF818CF8)),
+            tooltip: 'Share Selected',
+            onPressed: _selectedPaths.isEmpty
+                ? null
+                : () => Share.shareXFiles(_selectedPaths.map((e) => XFile(e)).toList()),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+            tooltip: 'Delete Selected',
+            onPressed: _selectedPaths.isEmpty ? null : _confirmDeleteSelected,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _zipSelectedMedia() async {
+    final paths = _selectedPaths.toList();
+    final outDir = PlatformPaths.defaultDownloadsHint();
+    final outZip = p.join(outDir, 'makaw_media_${DateTime.now().millisecondsSinceEpoch}.zip');
+    final res = await ArchiveService.createZip(sourcePaths: paths, outputZipPath: outZip);
+    if (!mounted) return;
+    _exitSelectMode();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(res.success ? 'ZIP saved: ${p.basename(outZip)}' : res.message),
+        backgroundColor: const Color(0xFF1E293B),
+      ),
+    );
+  }
+
+  Future<void> _confirmDeleteSelected() async {
+    final count = _selectedPaths.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2238),
+        title: Text('Delete $count file${count == 1 ? '' : 's'}?', style: const TextStyle(color: Colors.white)),
+        content: const Text('This permanently removes the selected media files from storage.', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    for (final path in _selectedPaths) {
+      try {
+        final f = File(path);
+        if (f.existsSync()) f.deleteSync();
+      } catch (_) {}
+    }
+    _exitSelectMode();
+    await Future.wait([
+      widget.musicService.scanAllSongs(force: true),
+      widget.videoService.scanAllVideos(force: true),
+      widget.imageService.scanAllImages(),
+    ]);
   }
 
   Widget _buildMiniPlayer() {
@@ -671,19 +802,25 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     final isCurrent = widget.musicService.currentSong?.id == song.id;
     final isPlaying = isCurrent && widget.musicService.isPlaying;
     final isNew = _isNewMedia(song.filePath);
+    final selected = _selectedPaths.contains(song.filePath);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: isCurrent ? _accent.withValues(alpha: 0.12) : _surface,
+        color: selected
+            ? const Color(0xFF38BDF8).withValues(alpha: 0.16)
+            : (isCurrent ? _accent.withValues(alpha: 0.12) : _surface),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isCurrent ? _accent.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.04),
-          width: isCurrent ? 1.5 : 1,
+          color: selected
+              ? const Color(0xFF38BDF8)
+              : (isCurrent ? _accent.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.04)),
+          width: (selected || isCurrent) ? 1.5 : 1,
         ),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        onLongPress: () => _toggleSelectPath(song.filePath),
         leading: Stack(
           alignment: Alignment.center,
           children: [
@@ -779,16 +916,21 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(color: isCurrent ? _accent.withValues(alpha: 0.8) : Colors.white54, fontSize: 12),
         ),
-        trailing: IconButton(
-          icon: Icon(
-            isPlaying ? Icons.pause_circle_filled_rounded : (isCurrent ? Icons.play_circle_fill_rounded : Icons.play_arrow_rounded),
-            color: _accent,
-            size: 26,
-          ),
-          onPressed: () => widget.onPlaySong(song, queue),
-          tooltip: isPlaying ? 'Pause' : 'Play',
-        ),
-        onTap: () => widget.onPlaySong(song, queue),
+        trailing: _selectMode
+            ? Icon(
+                selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                color: selected ? const Color(0xFF38BDF8) : Colors.white54,
+              )
+            : IconButton(
+                icon: Icon(
+                  isPlaying ? Icons.pause_circle_filled_rounded : (isCurrent ? Icons.play_circle_fill_rounded : Icons.play_arrow_rounded),
+                  color: _accent,
+                  size: 26,
+                ),
+                onPressed: () => widget.onPlaySong(song, queue),
+                tooltip: isPlaying ? 'Pause' : 'Play',
+              ),
+        onTap: () => _selectMode ? _toggleSelectPath(song.filePath) : widget.onPlaySong(song, queue),
       ),
     );
   }
@@ -878,18 +1020,24 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     final isCurrent = widget.videoService.activeVideoPath == video.filePath;
     final isPlaying = isCurrent && widget.videoService.isVideoPlaying;
     final isNew = widget.videoService.isNewFile(video.filePath) || _isNewMedia(video.filePath);
+    final selected = _selectedPaths.contains(video.filePath);
 
     return InkWell(
-      onTap: () => widget.onPlayVideo(video),
+      onLongPress: () => _toggleSelectPath(video.filePath),
+      onTap: () => _selectMode ? _toggleSelectPath(video.filePath) : widget.onPlayVideo(video),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         width: width,
         decoration: BoxDecoration(
-          color: isCurrent ? _accent.withValues(alpha: 0.12) : _surface,
+          color: selected
+              ? const Color(0xFF38BDF8).withValues(alpha: 0.16)
+              : (isCurrent ? _accent.withValues(alpha: 0.12) : _surface),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isCurrent ? _accent.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.06),
-            width: isCurrent ? 2 : 1,
+            color: selected
+                ? const Color(0xFF38BDF8)
+                : (isCurrent ? _accent.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.06)),
+            width: (selected || isCurrent) ? 2 : 1,
           ),
         ),
         child: Column(
@@ -904,6 +1052,16 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
                     isVideo: true,
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
                   ),
+                  if (_selectMode)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Icon(
+                        selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                        color: selected ? const Color(0xFF38BDF8) : Colors.white70,
+                        size: 20,
+                      ),
+                    ),
                   if (isCurrent)
                     Container(
                       decoration: const BoxDecoration(
@@ -990,26 +1148,48 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
   }
 
   Widget _buildPhotoCard(ImageFileInfo image) {
+    final selected = _selectedPaths.contains(image.filePath);
     return InkWell(
-      onTap: () => widget.onOpenImage(image),
+      onLongPress: () => _toggleSelectPath(image.filePath),
+      onTap: () => _selectMode ? _toggleSelectPath(image.filePath) : widget.onOpenImage(image),
       borderRadius: BorderRadius.circular(8),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 100,
-          height: 100,
+      child: Container(
+        width: 100,
+        height: 100,
+        decoration: BoxDecoration(
           color: _surfaceHigh,
-          child: Image(
-            image: ResizeImage(
-              FileImage(File(image.filePath)),
-              width: 300,
-              height: 300,
-            ),
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const Center(
-              child: Icon(Icons.image_rounded, color: Colors.white24, size: 32),
-            ),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? const Color(0xFF38BDF8) : Colors.transparent,
+            width: selected ? 2.2 : 0,
           ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image(
+              image: ResizeImage(
+                FileImage(File(image.filePath)),
+                width: 300,
+                height: 300,
+              ),
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const Center(
+                child: Icon(Icons.image_rounded, color: Colors.white24, size: 32),
+              ),
+            ),
+            if (_selectMode)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Icon(
+                  selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                  color: selected ? const Color(0xFF38BDF8) : Colors.white70,
+                  size: 20,
+                ),
+              ),
+          ],
         ),
       ),
     );

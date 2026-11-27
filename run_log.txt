@@ -1,0 +1,21 @@
+[{"event":"daemon.connected","params":{"version":"0.6.1","pid":18856}}]
+[{"event":"app.start","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531","deviceId":"windows","directory":"D:\\projects\\makaw","supportsRestart":true,"launchMode":"run","mode":"debug"}}]
+Launching lib\main.dart on Windows in debug mode...
+[{"event":"app.progress","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531","id":"0","progressId":null,"message":"Building Windows application...","finished":false}}]
+[{"event":"app.progress","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531","id":"0","progressId":null,"finished":true}}]
+✓ Built build\windows\x64\runner\Debug\makaw.exe
+[{"event":"app.debugPort","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531","port":56904,"wsUri":"ws://127.0.0.1:56904/KwanM8aHszM=/ws","baseUri":"file:///D:/hom-temp/makawe7fdfe6e/makaw/"}}]
+[{"event":"app.devTools","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531","uri":"http://127.0.0.1:56904/KwanM8aHszM=/devtools/?uri=ws://127.0.0.1:56904/KwanM8aHszM=/ws"}}]
+[{"event":"app.dtd","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531","uri":"ws://127.0.0.1:56903/NTRRmBFfPWU="}}]
+[{"event":"app.progress","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531","id":"1","progressId":"devFS.update","message":"Syncing files to device Windows...","finished":false}}]
+[{"event":"app.progress","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531","id":"1","progressId":"devFS.update","finished":true}}]
+[{"event":"app.started","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531"}}]
+Loading ffmpeg-kit.
+Loaded ffmpeg-kit-full-gpl-x86_64-6.0-20260712.
+PLATFORM ERROR: MissingPluginException(No implementation found for method setNavigationBarColor on channel com.hexadigitall.makaw/system)
+STACK: #0      MethodChannel._invokeMethod (package:flutter/src/services/platform_channel.dart:364:7)
+<asynchronous suspension>
+
+MAKAW-WV CREATED tab=1 active=1 pending=null url=
+Lost connection to device.
+[{"event":"app.stop","params":{"appId":"2c18e83d-a954-4000-bbdf-f7dd6652f531"}}]

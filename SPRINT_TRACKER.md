@@ -31,7 +31,7 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 6** | End-to-End Testing, Device Sign-Off & v1.0.3 Release | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Android & Windows CI Passed |
 | **Sprint 7** | Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign | 2026-11-24 | 2026-11-26 | **COMPLETED** | **TECNO CG8h Installed** | Android Run 45526057854 Passed |
 | **Sprint 8** | Video Scrub/Browser Jitter Fix, File Explorer Search & Archives, Download Banners, Lyrics Creator & Sync Studio, Music/Video Settings & EQ, Home Card & AI Upgrades | 2026-11-26 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45930971191 Passed |
-| **Sprint 8** | AI Context/PDF Export, File Explorer Archives, Lyrics Studio & Player Settings | 2026-11-26 | 2026-11-26 | **IN PROGRESS** (code complete; local verification passed) | **PENDING** (fresh APK/Windows build required) | Pending commit/push |
+| **Sprint 9** | Documents Workspace Overhaul (145+ Formats, Thumbnails, Comics, Slides, Sheets, PIM/Vector), Video Player Redesign, Auto-Hide Start Over & Global Multi-Select | 2026-11-27 | 2026-11-27 | **DEPLOYING** (141/141 tests + clean analyze passed) | **PENDING CI INSTALL** | Triggering Android CI |
 
 ---
 
@@ -235,25 +235,13 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 
 ---
 
-### Sprint 8: AI Context/PDF Export, File Explorer Archives, Lyrics Studio & Player Settings
-- **Status:** **IN PROGRESS** — code complete and locally verified; commit, CI, and device sign-off still pending.
-- **Commits:** Uncommitted working tree (no Sprint 8 commit hash yet).
-
-#### Task Progress Checklist
-- [x] AI Assistant model migration to Gemini 2.5 defaults, model picker, browser/repository context, binary attachments, and pure-Dart multipage PDF export ([ai_chat_page.dart](file:///D:/projects/makaw/lib/features/ai/presentation/pages/ai_chat_page.dart), [ai_pdf_exporter.dart](file:///D:/projects/makaw/lib/features/ai/data/services/ai_pdf_exporter.dart)).
-- [x] File Explorer isolate-based recursive search, categories, natural sort, multi-select, create/rename/delete/share/properties, and ZIP/TAR.GZ creation plus ZIP/TAR/GZ/BZ2/XZ/RAR inspection and extraction ([folders_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/folders_page.dart), [archive_service.dart](file:///D:/projects/makaw/lib/features/documents/data/services/archive_service.dart), [device_file_browser.dart](file:///D:/projects/makaw/lib/features/documents/data/services/device_file_browser.dart)).
-- [x] Archive path-traversal hardening: `p.isWithin` destination guard, Windows `tar.exe` listing validation before extraction, and sanitized archive output names.
-- [x] Universal LRC layer with sidecar/`MakawLyrics`/SQLite/LRCLIB/lyrics.ovh resolution, karaoke synced view, and tap-to-stamp Lyrics Creator Studio ([lrc_storage_service.dart](file:///D:/projects/makaw/lib/core/storage/lrc_storage_service.dart), [synced_lyrics_view.dart](file:///D:/projects/makaw/lib/features/music/presentation/widgets/synced_lyrics_view.dart), [lyrics_creator_page.dart](file:///D:/projects/makaw/lib/features/music/presentation/pages/lyrics_creator_page.dart)).
-- [x] Music persistence, EQ/bass native Android channel, crossfade/skip/lyrics toggles, and richer Home mini-player ([music_player_service.dart](file:///D:/projects/makaw/lib/features/music/data/services/music_player_service.dart), [music_player_page.dart](file:///D:/projects/makaw/lib/features/music/presentation/pages/music_player_page.dart), [MainActivity.kt](file:///D:/projects/makaw/android/app/src/main/kotlin/com/hexadigitall/makaw/MainActivity.kt)).
-- [x] Video player persistence and playback upgrades: background play, night mode, mirror, A-B repeat, sleep timer, skip interval, playlist advance, smoother scrubbing, and Home video card ([video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart), [main.dart](file:///D:/projects/makaw/lib/main.dart)).
-- [x] Documents/downloads polish: Word-HTML `.doc` rendering, Markdown viewer with raw toggle, expanded text/code/subtitle routing, and styled download notifications with Open/Location actions.
-- [x] Restored mobile five-system bottom navigation (Home | Media | Browser | Files | Studio) alongside the browser workspace bar ([main.dart](file:///D:/projects/makaw/lib/main.dart)).
-- [x] New regression suite ([sprint8_upgrades_test.dart](file:///D:/projects/makaw/test/features/media/sprint8_upgrades_test.dart)) covering LRC parse/format, ZIP/TAR.GZ round-trips, path-traversal rejection, multipage PDF output, and Word-HTML `.doc` conversion.
-
-#### Verification & Device Log
-- **Local Tests:** `flutter test --no-pub` — **135/135 passed**; Sprint 8 suite **7/7 passed**.
-- **Static Analysis:** `flutter analyze --no-pub` — **0 errors, 0 warnings** (927 informational style hints only).
-- **Security Verification:** Path-traversal archive entry is skipped and covered by an automated test.
-- **GitHub Actions:** Pending Sprint 8 commit/push; Sprint 7 Android run `45526057854` remains the last verified CI artifact.
-- **Android Device Verification:** Pending fresh Sprint 8 APK install on TECNO CG8h and Redmi 14C.
-- **Windows Desktop Verification:** Pending fresh Sprint 8 Windows build and keyboard/right-click smoke pass.
+### Sprint 9: Documents Workspace Overhaul, Video Player UX & Global Multi-Select
+- **Status:** **LOCAL VERIFIED — TRIGGERING CI & DEVICE DEPLOY**
+- **Sprint 8.1 Checkpoint:** `503a2dd`
+- **Local Tests:** `flutter test --no-pub --reporter compact` — **141/141 passed** across all 19 test files.
+- **Static Analysis:** `flutter analyze --no-pub` — **0 errors, 0 warnings** (`ANALYZE_CLEAN`).
+- **Delivered Scope:**
+  - Direct Home Recent/Continue file open, SQLite reading state resume, ancestor-chain Folder Explorer & natural step-by-step tool Back navigation ([main.dart](file:///D:/projects/makaw/lib/main.dart), [folders_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/folders_page.dart)).
+  - ~145-format `DocumentFormatRegistry`, SQLite `document_state` / `document_collections` (`MakawManagerDb` v2), `DocumentThumbnailService`, and redesigned Mobile + Desktop 3-pane `DocumentWidget` library ([document_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/document_page.dart)).
+  - Specialized viewers: `ComicViewerPage`, `SlideViewerPage`, `PimViewerPage`, `VectorCadViewerPage`, multi-sheet `SpreadsheetViewerPage`, MHTML/FB2/ENEX/ABW `DocumentToHtml`, and `.fountain`/`.fdx` + Reader Themes in `TextViewerPage`.
+  - Redesigned `DirectVideoPlayer` controls/aspect geometry, 4-second auto-dismissing `"Resumed from ... · Start Over"` pill, and hold-to-multi-select + batch action bars across `VideoPlayerWidget`, `MediaLibraryPage`, `DocumentWidget`, and `ImageViewerWidget`.

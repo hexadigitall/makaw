@@ -48,6 +48,12 @@ import 'features/viewer/presentation/pages/epub_viewer_page.dart';
 import 'features/viewer/presentation/pages/text_viewer_page.dart';
 import 'features/viewer/presentation/pages/spreadsheet_viewer_page.dart';
 import 'features/viewer/presentation/pages/html_viewer_page.dart';
+import 'features/viewer/presentation/pages/comic_viewer_page.dart';
+import 'features/viewer/presentation/pages/slide_viewer_page.dart';
+import 'features/viewer/presentation/pages/pim_viewer_page.dart';
+import 'features/viewer/presentation/pages/vector_cad_viewer_page.dart';
+import 'features/documents/data/services/document_state_service.dart';
+import 'features/documents/domain/document_format_registry.dart';
 import 'core/services/text_action_service.dart';
 import 'features/music/presentation/pages/music_player_page.dart';
 import 'features/music/presentation/widgets/music_visualizer_bars.dart';
@@ -1747,6 +1753,8 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
       LyricService.init(mgr);
       SubtitleService.init(mgr);
       FileRecentsService.init(mgr);
+      DocumentStateService.init(mgr);
+      unawaited(DocumentStateService.warmCache());
     unawaited(_loadHomeRecentFiles());
       await _migrateLegacyShortcuts();
     } catch (_) {}
@@ -4578,6 +4586,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       child: DocumentWidget(
         initialTab: initTab,
         openFile: (path) => _openFile(path),
+        onRevealInExplorer: (path) => _openFileExplorerAt(p.dirname(path), highlightFile: path),
       ),
     );
   }
@@ -5678,10 +5687,8 @@ TappableIcon(
   (IconData, Color, String) _recentFileMeta(String path, bool isDir, DateTime? lastOpened) {
     final ago = lastOpened != null ? _homeAgo(lastOpened.toIso8601String()) : 'recent';
     if (isDir) return (Icons.folder_outlined, const Color(0xFF34D399), 'Folder · $ago');
-    final ext = path.split('.').last.toLowerCase();
+    final ext = DocumentFormatRegistry.normalizeExtension(path);
     final label = ext.isNotEmpty && ext.length <= 8 ? ext.toUpperCase() : 'FILE';
-    if (ext == 'pdf') return (Icons.picture_as_pdf_rounded, const Color(0xFFF87171), '$label · $ago');
-    if (ext == 'epub') return (Icons.menu_book_rounded, const Color(0xFFA78BFA), '$label · $ago');
     if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp'].contains(ext)) {
       return (Icons.movie_outlined, const Color(0xFF818CF8), '$label · $ago');
     }
@@ -5691,17 +5698,21 @@ TappableIcon(
     if (['zip', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z'].contains(ext)) {
       return (Icons.folder_zip_outlined, const Color(0xFFFB923C), '$label Archive · $ago');
     }
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].contains(ext)) {
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(ext)) {
       return (Icons.image_outlined, const Color(0xFF22D3EE), '$label · $ago');
     }
-    if (['xls', 'xlsx', 'csv'].contains(ext)) {
-      return (Icons.table_chart_outlined, const Color(0xFF10B981), '$label · $ago');
-    }
-    if (['doc', 'docx', 'odt', 'rtf', 'pages'].contains(ext)) {
-      return (Icons.article_outlined, const Color(0xFF38BDF8), '$label · $ago');
-    }
-    if (['dart', 'py', 'js', 'ts', 'json', 'html', 'htm', 'md', 'lrc', 'srt'].contains(ext)) {
-      return (Icons.code_rounded, const Color(0xFF2DD4BF), '$label · $ago');
+    if (DocumentFormatRegistry.isSupportedExtension(ext)) {
+      final spec = DocumentFormatRegistry.specFor(ext);
+      final icon = switch (spec.family) {
+        DocumentFamily.booksComics => ext == 'pdf' ? Icons.picture_as_pdf_rounded : Icons.menu_book_rounded,
+        DocumentFamily.docsNotes => Icons.article_outlined,
+        DocumentFamily.sheetsData => Icons.table_chart_outlined,
+        DocumentFamily.slides => Icons.slideshow_rounded,
+        DocumentFamily.markupTech => Icons.code_rounded,
+        DocumentFamily.mailPim => Icons.mail_outline_rounded,
+        DocumentFamily.vectorCad => Icons.architecture_rounded,
+      };
+      return (icon, Color(spec.accentHex), '$label · $ago');
     }
     return (Icons.description_outlined, const Color(0xFF34D399), '$label · $ago');
   }
@@ -6380,7 +6391,7 @@ TappableIcon(
   }
 
   void _openFile(String filePath, {bool fromHome = false}) {
-    final ext = filePath.split('.').last.toLowerCase();
+    final ext = DocumentFormatRegistry.normalizeExtension(filePath);
 
     // Record the open so it surfaces in the Documents ecosystem's recent
     // activity (best-effort, non-throwing).
@@ -6407,72 +6418,122 @@ TappableIcon(
       );
       return;
     }
-    if (ext == 'pdf') {
-      if (seedParent) {
-        _pendingDocumentInitialTab = 'pdf';
-        _seedParentToolUnderViewer('documents');
-      }
-      Navigator.of(context).push(_fastToolRoute(MakawPdfViewerPage(
-        filePath: filePath,
-        title: title,
-        onClose: goBack,
-      )));
-    } else if (ext == 'epub') {
-      if (seedParent) {
-        _pendingDocumentInitialTab = 'epub';
-        _seedParentToolUnderViewer('documents');
-      }
-      Navigator.of(context).push(_fastToolRoute(EpubReaderWidget(
-        filePath: filePath,
-        title: title,
-        onClose: goBack,
-      )));
-    } else if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'opus'].contains(ext)) {
+    if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'opus'].contains(ext)) {
       _playAudioFileFromIntent(filePath, fromHome: fromHome);
-    } else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].contains(ext)) {
+      return;
+    }
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(ext)) {
       if (seedParent) {
         _pendingMediaCategory = MediaCategory.photos;
         _seedParentToolUnderViewer('media');
       }
       Navigator.of(context).push(_fastToolRoute(_buildImageViewer(filePath, goBack)));
-    } else if ([
-      'txt', 'md', 'markdown', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'log', 'csv',
+      return;
+    }
+    if (['zip', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z'].contains(ext)) {
+      _openFileExplorerAt(Directory(filePath).parent.path, highlightFile: filePath, autoOpen: true);
+      return;
+    }
+
+    if (DocumentFormatRegistry.isSupportedExtension(ext)) {
+      final spec = DocumentFormatRegistry.specFor(ext);
+      if (seedParent) {
+        _pendingDocumentInitialTab = spec.family.id;
+        _seedParentToolUnderViewer('documents');
+      }
+      switch (spec.viewerKind) {
+        case DocumentViewerKind.pdf:
+          Navigator.of(context).push(_fastToolRoute(MakawPdfViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.epub:
+          Navigator.of(context).push(_fastToolRoute(EpubReaderWidget(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.comic:
+          Navigator.of(context).push(_fastToolRoute(ComicViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.presentation:
+          Navigator.of(context).push(_fastToolRoute(SlideViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.pim:
+          Navigator.of(context).push(_fastToolRoute(PimViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.vectorCad:
+          Navigator.of(context).push(_fastToolRoute(VectorCadViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.spreadsheet:
+          Navigator.of(context).push(_fastToolRoute(SpreadsheetViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.html:
+          Navigator.of(context).push(_fastToolRoute(HtmlViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.richDoc:
+          Navigator.of(context).push(_fastToolRoute(DocumentViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.textMarkup:
+          Navigator.of(context).push(_fastToolRoute(TextViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+        case DocumentViewerKind.recoveryCard:
+          Navigator.of(context).push(_fastToolRoute(DocumentViewerPage(
+            filePath: filePath,
+            title: title,
+            onClose: goBack,
+          )));
+          return;
+      }
+    }
+
+    if ([
       'dart', 'py', 'js', 'jsx', 'ts', 'tsx', 'java', 'kt', 'kts', 'swift',
       'c', 'cpp', 'cc', 'h', 'hpp', 'cs', 'go', 'rs', 'rb', 'php',
       'sh', 'bash', 'ps1', 'bat', 'cmd', 'sql', 'css', 'scss', 'toml', 'env',
       'lrc', 'srt', 'vtt', 'ass', 'ssa', 'sub',
     ].contains(ext)) {
       if (seedParent) {
-        if (['txt', 'md', 'markdown', 'csv'].contains(ext)) {
-          _pendingDocumentInitialTab = 'txt';
-          _seedParentToolUnderViewer('documents');
-        } else {
-          _pendingExplorerPath = Directory(filePath).parent.path;
-          _pendingExplorerHighlightPath = filePath;
-          _seedParentToolUnderViewer('files');
-        }
+        _pendingExplorerPath = Directory(filePath).parent.path;
+        _pendingExplorerHighlightPath = filePath;
+        _seedParentToolUnderViewer('files');
       }
       Navigator.of(context).push(_fastToolRoute(TextViewerPage(filePath: filePath, title: title, onClose: goBack)));
-    } else if (['zip', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z'].contains(ext)) {
-      _openFileExplorerAt(Directory(filePath).parent.path, highlightFile: filePath, autoOpen: true);
-    } else if (['html', 'htm', 'xhtml'].contains(ext)) {
-      if (seedParent) {
-        _pendingDocumentInitialTab = 'html';
-        _seedParentToolUnderViewer('documents');
-      }
-      Navigator.of(context).push(_fastToolRoute(HtmlViewerPage(filePath: filePath, title: title, onClose: goBack)));
-    } else if (['doc', 'docx', 'odt', 'rtf', 'pages'].contains(ext)) {
-      if (seedParent) {
-        _pendingDocumentInitialTab = 'doc';
-        _seedParentToolUnderViewer('documents');
-      }
-      Navigator.of(context).push(_fastToolRoute(DocumentViewerPage(filePath: filePath, title: title, onClose: goBack)));
-    } else if (['xls', 'xlsx'].contains(ext)) {
-      if (seedParent) {
-        _pendingDocumentInitialTab = 'xls';
-        _seedParentToolUnderViewer('documents');
-      }
-      Navigator.of(context).push(_fastToolRoute(SpreadsheetViewerPage(filePath: filePath, title: title, onClose: goBack)));
     } else {
       OpenFilex.open(filePath);
     }

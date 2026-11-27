@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/services/document_to_html.dart';
+import '../../../documents/data/services/document_state_service.dart';
 import '../../../../core/services/text_action_service.dart';
 
 class DocumentViewerPage extends StatefulWidget {
@@ -67,6 +68,13 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
 
   Future<void> _saveScroll(int y) async {
     try {
+      final progress = y > 20 ? ((y / 4000).clamp(0.05, 0.99)) : 0.05;
+      await DocumentStateService.saveProgress(
+        widget.filePath,
+        title: widget.title,
+        scrollOffset: y.toDouble(),
+        scrollProgress: progress,
+      );
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('doc_scroll_${widget.filePath.hashCode}', jsonEncode({'y': y}));
     } catch (_) {}

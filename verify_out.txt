@@ -1,0 +1,8 @@
+The Dart VM service is listening on http://127.0.0.1:62618/A22sDq0s4ek=/
+Loading ffmpeg-kit.
+Loaded ffmpeg-kit-full-gpl-x86_64-6.0-20260712.
+PLATFORM ERROR: MissingPluginException(No implementation found for method setNavigationBarColor on channel com.hexadigitall.makaw/system)
+STACK: #0      MethodChannel._invokeMethod (package:flutter/src/services/platform_channel.dart:364:7)
+<asynchronous suspension>
+
+MAKAW-WV CREATED tab=1 active=1 pending=null url=

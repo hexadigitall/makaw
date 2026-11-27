@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'pdf_organizer_page.dart';
 import 'pdf_merger_page.dart';
+import '../../../documents/data/services/document_state_service.dart';
 import '../../../../core/services/text_action_service.dart';
 
 class _SearchResult {
@@ -147,6 +148,15 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
 
   Future<void> _savePosition() async {
     try {
+      await DocumentStateService.saveProgress(
+        widget.filePath,
+        title: widget.title,
+        currentPage: _currentPage + 1,
+        totalPages: _totalPages > 0 ? _totalPages : 1,
+        scrollProgress: _totalPages > 0 ? ((_currentPage + 1) / _totalPages).clamp(0.0, 1.0) : 0.0,
+        zoomScale: _zoom,
+        bookmarks: _bookmarks,
+      );
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('pdf_pos_${widget.filePath.hashCode}', jsonEncode({
         'page': _currentPage,

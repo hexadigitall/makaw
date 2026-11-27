@@ -1,0 +1,521 @@
+Picked up JAVA_TOOL_OPTIONS: -Djava.net.preferIPv4Stack=true
+Warning: Flutter support for your project's Gradle version (8.11.1) will soon be dropped. Please upgrade your Gradle version to a version of at least 8.14.0 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's gradle version is typically defined in the gradle wrapper file. By default, this can be found at D:\projects\makaw\android/gradle/wrapper/gradle-wrapper.properties. 
+For more information, see https://docs.gradle.org/current/userguide/gradle_wrapper.html.
+
+Warning: Flutter support for your project's Android Gradle Plugin version (Android Gradle Plugin version 8.9.1) will soon be dropped. Please upgrade your Android Gradle Plugin version to a version of at least Android Gradle Plugin version 8.11.1 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's AGP version is typically defined in the plugins block of the `settings.gradle` file (D:\projects\makaw\android/settings.gradle), by a plugin with the id of com.android.application. 
+If you don't see a plugins block, your project was likely created with an older template version. In this case it is most likely defined in the top-level build.gradle file (D:\projects\makaw\android/build.gradle) by the following line in the dependencies block of the buildscript: "classpath 'com.android.tools.build:gradle:<version>'".
+
+Warning: Flutter support for your project's Kotlin version (2.1.0) will soon be dropped. Please upgrade your Kotlin version to a version of at least 2.2.20 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's KGP version is typically defined in the plugins block of the `settings.gradle` file (D:\projects\makaw\android/settings.gradle), by a plugin with the id of org.jetbrains.kotlin.android. 
+If you don't see a plugins block, your project was likely created with an older template version, in which case it is most likely defined in the top-level build.gradle file (D:\projects\makaw\android/build.gradle) by the ext.kotlin_version property.
+
+WARNING: Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP): ffmpeg_kit_flutter_new, flutter_tts, flutter_video_thumbnail, mobile_scanner, package_info_plus, share_plus
+Future versions of Flutter will fail to build if your app uses plugins that apply KGP.
+
+Please check the changelogs of these plugins and upgrade to a version that supports Built-in Kotlin.
+If no such version exists, report the issue to the plugin. If necessary, here is a guide on filing 
+an issue against a plugin: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers#report-incompatible-kotlin-gradle-plugin-usage-to-plugin-authors
+
+If you are a plugin author, please migrate your plugin to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:checkDebugAarMetadata'.
+> Could not resolve all files for configuration ':app:debugRuntimeClasspath'.
+   > Could not resolve all dependencies for configuration ':app:debugRuntimeClasspath'.
+      > Could not find io.flutter:arm64_v8a_debug:1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030.
+        Searched in the following locations:
+          - https://maven.aliyun.com/repository/central/io/flutter/arm64_v8a_debug/1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030/arm64_v8a_debug-1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030.pom
+          - https://maven.aliyun.com/repository/google/io/flutter/arm64_v8a_debug/1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030/arm64_v8a_debug-1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030.pom
+        Required by:
+            project :app
+   > Could not resolve io.flutter:flutter_embedding_debug:1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030.
+     Required by:
+         project :app > project :audio_session
+         project :app > project :cloud_firestore
+         project :app > project :ffmpeg_kit_flutter_new
+         project :app > project :file_picker
+         project :app > project :firebase_core
+         project :app > project :flutter_inappwebview_android
+         project :app > project :flutter_plugin_android_lifecycle
+         project :app > project :flutter_pty
+         project :app > project :flutter_secure_storage
+         project :app > project :flutter_tts
+         project :app > project :flutter_video_thumbnail
+         project :app > project :geolocator_android
+         project :app > project :google_sign_in_android
+         project :app > project :jni
+         project :app > project :jni_flutter
+         project :app > project :just_audio
+         project :app > project :mobile_scanner
+         project :app > project :open_filex
+         project :app > project :package_info_plus
+         project :app > project :pdfrx
+         project :app > project :permission_handler_android
+         project :app > project :share_plus
+         project :app > project :shared_preferences_android
+         project :app > project :sqflite_android
+         project :app > project :url_launcher_android
+         project :app > project :video_player_android
+      > Could not resolve io.flutter:flutter_embedding_debug:1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/io/flutter/flutter_embedding_debug/1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030/flutter_embedding_debug-1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/io/flutter/flutter_embedding_debug/1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030/flutter_embedding_debug-1.0.0-a10d8ac38de835021c8d2f920dbf50a920ccc030.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.media:media:1.7.0.
+     Required by:
+         project :app > project :audio_session
+      > Could not resolve androidx.media:media:1.7.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/media/media/1.7.0/media-1.7.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/media/media/1.7.0/media-1.7.0.pom'.
+               > No such host is known (maven.aliyun.com)
+      > Could not resolve androidx.media:media:1.7.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/media/media/1.7.0/media-1.7.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/media/media/1.7.0/media-1.7.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve com.google.firebase:firebase-bom:32.8.0.
+     Required by:
+         project :app > project :cloud_firestore
+         project :app > project :firebase_core
+      > Could not resolve com.google.firebase:firebase-bom:32.8.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/com/google/firebase/firebase-bom/32.8.0/firebase-bom-32.8.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/com/google/firebase/firebase-bom/32.8.0/firebase-bom-32.8.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve all dependencies for configuration ':app:debugRuntimeClasspath'.
+      > Could not find com.google.firebase:firebase-firestore:.
+        Required by:
+            project :app > project :cloud_firestore
+   > Could not resolve androidx.annotation:annotation:1.10.0.
+     Required by:
+         project :app > project :ffmpeg_kit_flutter_new
+      > Could not resolve androidx.annotation:annotation:1.10.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/annotation/annotation/1.10.0/annotation-1.10.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/annotation/annotation/1.10.0/annotation-1.10.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve com.antonkarpenko:ffmpeg-kit-full-gpl:2.2.1.
+     Required by:
+         project :app > project :ffmpeg_kit_flutter_new
+      > Could not resolve com.antonkarpenko:ffmpeg-kit-full-gpl:2.2.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/com/antonkarpenko/ffmpeg-kit-full-gpl/2.2.1/ffmpeg-kit-full-gpl-2.2.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/com/antonkarpenko/ffmpeg-kit-full-gpl/2.2.1/ffmpeg-kit-full-gpl-2.2.1.pom'.
+               > maven.aliyun.com
+      > Could not resolve com.antonkarpenko:ffmpeg-kit-full-gpl:2.2.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/com/antonkarpenko/ffmpeg-kit-full-gpl/2.2.1/ffmpeg-kit-full-gpl-2.2.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/com/antonkarpenko/ffmpeg-kit-full-gpl/2.2.1/ffmpeg-kit-full-gpl-2.2.1.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.lifecycle:lifecycle-runtime:2.6.2.
+     Required by:
+         project :app > project :file_picker
+      > Could not resolve androidx.lifecycle:lifecycle-runtime:2.6.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/lifecycle/lifecycle-runtime/2.6.2/lifecycle-runtime-2.6.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/lifecycle/lifecycle-runtime/2.6.2/lifecycle-runtime-2.6.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.lifecycle:lifecycle-runtime:2.6.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/lifecycle/lifecycle-runtime/2.6.2/lifecycle-runtime-2.6.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/lifecycle/lifecycle-runtime/2.6.2/lifecycle-runtime-2.6.2.pom'.
+               > maven.aliyun.com
+   > Could not resolve all dependencies for configuration ':app:debugRuntimeClasspath'.
+      > Could not find com.google.firebase:firebase-common:.
+        Required by:
+            project :app > project :firebase_core
+   > Could not resolve androidx.webkit:webkit:1.12.0.
+     Required by:
+         project :app > project :flutter_inappwebview_android
+      > Could not resolve androidx.webkit:webkit:1.12.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/webkit/webkit/1.12.0/webkit-1.12.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/webkit/webkit/1.12.0/webkit-1.12.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.webkit:webkit:1.12.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/webkit/webkit/1.12.0/webkit-1.12.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/webkit/webkit/1.12.0/webkit-1.12.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.appcompat:appcompat:1.6.1.
+     Required by:
+         project :app > project :flutter_inappwebview_android
+         project :app > project :open_filex
+      > Could not resolve androidx.appcompat:appcompat:1.6.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/appcompat/appcompat/1.6.1/appcompat-1.6.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/appcompat/appcompat/1.6.1/appcompat-1.6.1.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.swiperefreshlayout:swiperefreshlayout:1.1.0.
+     Required by:
+         project :app > project :flutter_inappwebview_android
+      > Could not resolve androidx.swiperefreshlayout:swiperefreshlayout:1.1.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/swiperefreshlayout/swiperefreshlayout/1.1.0/swiperefreshlayout-1.1.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/swiperefreshlayout/swiperefreshlayout/1.1.0/swiperefreshlayout-1.1.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.swiperefreshlayout:swiperefreshlayout:1.1.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/swiperefreshlayout/swiperefreshlayout/1.1.0/swiperefreshlayout-1.1.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/swiperefreshlayout/swiperefreshlayout/1.1.0/swiperefreshlayout-1.1.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.security:security-crypto:1.1.0-alpha06.
+     Required by:
+         project :app > project :flutter_secure_storage
+      > Could not resolve androidx.security:security-crypto:1.1.0-alpha06.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/security/security-crypto/1.1.0-alpha06/security-crypto-1.1.0-alpha06.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/security/security-crypto/1.1.0-alpha06/security-crypto-1.1.0-alpha06.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.security:security-crypto:1.1.0-alpha06.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/security/security-crypto/1.1.0-alpha06/security-crypto-1.1.0-alpha06.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/security/security-crypto/1.1.0-alpha06/security-crypto-1.1.0-alpha06.pom'.
+               > maven.aliyun.com
+   > Could not resolve com.google.android.gms:play-services-location:21.2.0.
+     Required by:
+         project :app > project :geolocator_android
+      > Could not resolve com.google.android.gms:play-services-location:21.2.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/com/google/android/gms/play-services-location/21.2.0/play-services-location-21.2.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/com/google/android/gms/play-services-location/21.2.0/play-services-location-21.2.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve com.google.android.gms:play-services-auth:21.0.0.
+     Required by:
+         project :app > project :google_sign_in_android
+      > Could not resolve com.google.android.gms:play-services-auth:21.0.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/com/google/android/gms/play-services-auth/21.0.0/play-services-auth-21.0.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/com/google/android/gms/play-services-auth/21.0.0/play-services-auth-21.0.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve com.google.mlkit:barcode-scanning:17.3.0.
+     Required by:
+         project :app > project :mobile_scanner
+      > Could not resolve com.google.mlkit:barcode-scanning:17.3.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/com/google/mlkit/barcode-scanning/17.3.0/barcode-scanning-17.3.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/com/google/mlkit/barcode-scanning/17.3.0/barcode-scanning-17.3.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve com.google.mlkit:barcode-scanning:17.3.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/com/google/mlkit/barcode-scanning/17.3.0/barcode-scanning-17.3.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/com/google/mlkit/barcode-scanning/17.3.0/barcode-scanning-17.3.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.camera:camera-camera2:1.6.1.
+     Required by:
+         project :app > project :mobile_scanner
+         project :app > project :mobile_scanner > androidx.camera:camera-lifecycle:1.6.1
+      > Could not resolve androidx.camera:camera-camera2:1.6.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/camera/camera-camera2/1.6.1/camera-camera2-1.6.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/camera/camera-camera2/1.6.1/camera-camera2-1.6.1.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.camera:camera-camera2:1.6.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/camera/camera-camera2/1.6.1/camera-camera2-1.6.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/camera/camera-camera2/1.6.1/camera-camera2-1.6.1.pom'.
+               > maven.aliyun.com
+   > Could not resolve org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0.
+     Required by:
+         project :app > project :mobile_scanner
+      > Could not resolve org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/org/jetbrains/kotlinx/kotlinx-coroutines-android/1.11.0/kotlinx-coroutines-android-1.11.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/org/jetbrains/kotlinx/kotlinx-coroutines-android/1.11.0/kotlinx-coroutines-android-1.11.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/org/jetbrains/kotlinx/kotlinx-coroutines-android/1.11.0/kotlinx-coroutines-android-1.11.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/org/jetbrains/kotlinx/kotlinx-coroutines-android/1.11.0/kotlinx-coroutines-android-1.11.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.core:core-ktx:1.17.0.
+     Required by:
+         project :app > project :share_plus
+      > Could not resolve androidx.core:core-ktx:1.17.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/core/core-ktx/1.17.0/core-ktx-1.17.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/core/core-ktx/1.17.0/core-ktx-1.17.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.core:core-ktx:1.17.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/core/core-ktx/1.17.0/core-ktx-1.17.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/core/core-ktx/1.17.0/core-ktx-1.17.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.camera:camera-core:1.6.1.
+     Required by:
+         project :app > project :mobile_scanner > androidx.camera:camera-lifecycle:1.6.1
+      > Could not resolve androidx.camera:camera-core:1.6.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/camera/camera-core/1.6.1/camera-core-1.6.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/camera/camera-core/1.6.1/camera-core-1.6.1.pom'.
+               > No such host is known (maven.aliyun.com)
+   > Could not resolve androidx.lifecycle:lifecycle-common:2.6.2.
+     Required by:
+         project :app > project :mobile_scanner > androidx.camera:camera-lifecycle:1.6.1
+      > Could not resolve androidx.lifecycle:lifecycle-common:2.6.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/lifecycle/lifecycle-common/2.6.2/lifecycle-common-2.6.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/lifecycle/lifecycle-common/2.6.2/lifecycle-common-2.6.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.lifecycle:lifecycle-common:2.6.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/lifecycle/lifecycle-common/2.6.2/lifecycle-common-2.6.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/lifecycle/lifecycle-common/2.6.2/lifecycle-common-2.6.2.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.datastore:datastore-android:1.1.7.
+     Required by:
+         project :app > project :shared_preferences_android > androidx.datastore:datastore:1.1.7
+      > Could not resolve androidx.datastore:datastore-android:1.1.7.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/datastore/datastore-android/1.1.7/datastore-android-1.1.7.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/datastore/datastore-android/1.1.7/datastore-android-1.1.7.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.datastore:datastore-android:1.1.7.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/datastore/datastore-android/1.1.7/datastore-android-1.1.7.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/datastore/datastore-android/1.1.7/datastore-android-1.1.7.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.datastore:datastore-preferences-android:1.1.7.
+     Required by:
+         project :app > project :shared_preferences_android > androidx.datastore:datastore-preferences:1.1.7
+      > Could not resolve androidx.datastore:datastore-preferences-android:1.1.7.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/datastore/datastore-preferences-android/1.1.7/datastore-preferences-android-1.1.7.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/datastore/datastore-preferences-android/1.1.7/datastore-preferences-android-1.1.7.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.datastore:datastore-preferences-android:1.1.7.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/datastore/datastore-preferences-android/1.1.7/datastore-preferences-android-1.1.7.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/datastore/datastore-preferences-android/1.1.7/datastore-preferences-android-1.1.7.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.activity:activity-ktx:1.5.1.
+     Required by:
+         project :app > project :shared_preferences_android > androidx.preference:preference:1.2.1
+      > Could not resolve androidx.activity:activity-ktx:1.5.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/activity/activity-ktx/1.5.1/activity-ktx-1.5.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/activity/activity-ktx/1.5.1/activity-ktx-1.5.1.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.activity:activity-ktx:1.5.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/activity/activity-ktx/1.5.1/activity-ktx-1.5.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/activity/activity-ktx/1.5.1/activity-ktx-1.5.1.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.fragment:fragment-ktx:1.3.6.
+     Required by:
+         project :app > project :shared_preferences_android > androidx.preference:preference:1.2.1
+      > Could not resolve androidx.fragment:fragment-ktx:1.3.6.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/fragment/fragment-ktx/1.3.6/fragment-ktx-1.3.6.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/fragment/fragment-ktx/1.3.6/fragment-ktx-1.3.6.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.fragment:fragment-ktx:1.3.6.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/fragment/fragment-ktx/1.3.6/fragment-ktx-1.3.6.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/fragment/fragment-ktx/1.3.6/fragment-ktx-1.3.6.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.recyclerview:recyclerview:1.0.0.
+     Required by:
+         project :app > project :shared_preferences_android > androidx.preference:preference:1.2.1
+      > Could not resolve androidx.recyclerview:recyclerview:1.0.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/recyclerview/recyclerview/1.0.0/recyclerview-1.0.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/recyclerview/recyclerview/1.0.0/recyclerview-1.0.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.recyclerview:recyclerview:1.0.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/recyclerview/recyclerview/1.0.0/recyclerview-1.0.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/recyclerview/recyclerview/1.0.0/recyclerview-1.0.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.slidingpanelayout:slidingpanelayout:1.2.0.
+     Required by:
+         project :app > project :shared_preferences_android > androidx.preference:preference:1.2.1
+      > Could not resolve androidx.slidingpanelayout:slidingpanelayout:1.2.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/slidingpanelayout/slidingpanelayout/1.2.0/slidingpanelayout-1.2.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/slidingpanelayout/slidingpanelayout/1.2.0/slidingpanelayout-1.2.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.slidingpanelayout:slidingpanelayout:1.2.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/slidingpanelayout/slidingpanelayout/1.2.0/slidingpanelayout-1.2.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/slidingpanelayout/slidingpanelayout/1.2.0/slidingpanelayout-1.2.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.collection:collection:1.4.2.
+     Required by:
+         project :app > project :shared_preferences_android > androidx.preference:preference:1.2.1
+      > Could not resolve androidx.collection:collection:1.4.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/collection/collection/1.4.2/collection-1.4.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/collection/collection/1.4.2/collection-1.4.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.collection:collection:1.4.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/collection/collection/1.4.2/collection-1.4.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/collection/collection/1.4.2/collection-1.4.2.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.concurrent:concurrent-futures:1.1.0.
+     Required by:
+         project :app > project :file_picker > androidx.core:core:1.17.0
+         project :app > project :flutter_inappwebview_android > androidx.browser:browser:1.9.0
+      > Could not resolve androidx.concurrent:concurrent-futures:1.1.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/concurrent/concurrent-futures/1.1.0/concurrent-futures-1.1.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/concurrent/concurrent-futures/1.1.0/concurrent-futures-1.1.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.concurrent:concurrent-futures:1.1.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/concurrent/concurrent-futures/1.1.0/concurrent-futures-1.1.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/concurrent/concurrent-futures/1.1.0/concurrent-futures-1.1.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.core:core-viewtree:1.0.0.
+     Required by:
+         project :app > project :file_picker > androidx.core:core:1.17.0
+      > Could not resolve androidx.core:core-viewtree:1.0.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/core/core-viewtree/1.0.0/core-viewtree-1.0.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/core/core-viewtree/1.0.0/core-viewtree-1.0.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.core:core-viewtree:1.0.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/core/core-viewtree/1.0.0/core-viewtree-1.0.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/core/core-viewtree/1.0.0/core-viewtree-1.0.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.interpolator:interpolator:1.0.0.
+     Required by:
+         project :app > project :file_picker > androidx.core:core:1.17.0
+         project :app > project :flutter_inappwebview_android > androidx.browser:browser:1.9.0
+      > Could not resolve androidx.interpolator:interpolator:1.0.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/interpolator/interpolator/1.0.0/interpolator-1.0.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/interpolator/interpolator/1.0.0/interpolator-1.0.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.interpolator:interpolator:1.0.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/interpolator/interpolator/1.0.0/interpolator-1.0.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/interpolator/interpolator/1.0.0/interpolator-1.0.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.tracing:tracing:1.2.0.
+     Required by:
+         project :app > project :file_picker > androidx.core:core:1.17.0
+         project :app > project :mobile_scanner > androidx.camera:camera-lifecycle:1.6.1 > androidx.tracing:tracing-ktx:1.2.0
+      > Could not resolve androidx.tracing:tracing:1.2.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/tracing/tracing/1.2.0/tracing-1.2.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/tracing/tracing/1.2.0/tracing-1.2.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.tracing:tracing:1.2.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/tracing/tracing/1.2.0/tracing-1.2.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/tracing/tracing/1.2.0/tracing-1.2.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.versionedparcelable:versionedparcelable:1.1.1.
+     Required by:
+         project :app > project :file_picker > androidx.core:core:1.17.0
+      > Could not resolve androidx.versionedparcelable:versionedparcelable:1.1.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/versionedparcelable/versionedparcelable/1.1.1/versionedparcelable-1.1.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/versionedparcelable/versionedparcelable/1.1.1/versionedparcelable-1.1.1.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.versionedparcelable:versionedparcelable:1.1.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/versionedparcelable/versionedparcelable/1.1.1/versionedparcelable-1.1.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/versionedparcelable/versionedparcelable/1.1.1/versionedparcelable-1.1.1.pom'.
+               > maven.aliyun.com
+   > Could not resolve org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1.
+     Required by:
+         project :app > project :file_picker > androidx.core:core:1.17.0
+      > Could not resolve org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/org/jetbrains/kotlinx/kotlinx-coroutines-core/1.8.1/kotlinx-coroutines-core-1.8.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/org/jetbrains/kotlinx/kotlinx-coroutines-core/1.8.1/kotlinx-coroutines-core-1.8.1.pom'.
+               > maven.aliyun.com
+      > Could not resolve org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/org/jetbrains/kotlinx/kotlinx-coroutines-core/1.8.1/kotlinx-coroutines-core-1.8.1.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/org/jetbrains/kotlinx/kotlinx-coroutines-core/1.8.1/kotlinx-coroutines-core-1.8.1.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.activity:activity:1.9.0.
+     Required by:
+         project :app > project :flutter_inappwebview_android > androidx.browser:browser:1.9.0
+      > Could not resolve androidx.activity:activity:1.9.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/activity/activity/1.9.0/activity-1.9.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/activity/activity/1.9.0/activity-1.9.0.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.activity:activity:1.9.0.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/activity/activity/1.9.0/activity-1.9.0.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/activity/activity/1.9.0/activity-1.9.0.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.exifinterface:exifinterface:1.3.6.
+     Required by:
+         project :app > project :just_audio > androidx.media3:media3-exoplayer:1.9.2
+      > Could not resolve androidx.exifinterface:exifinterface:1.3.6.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/exifinterface/exifinterface/1.3.6/exifinterface-1.3.6.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/exifinterface/exifinterface/1.3.6/exifinterface-1.3.6.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.exifinterface:exifinterface:1.3.6.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/exifinterface/exifinterface/1.3.6/exifinterface-1.3.6.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/exifinterface/exifinterface/1.3.6/exifinterface-1.3.6.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.media3:media3-common:1.9.2.
+     Required by:
+         project :app > project :just_audio > androidx.media3:media3-exoplayer:1.9.2
+      > Could not resolve androidx.media3:media3-common:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/media3/media3-common/1.9.2/media3-common-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/media3/media3-common/1.9.2/media3-common-1.9.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.media3:media3-common:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/media3/media3-common/1.9.2/media3-common-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/media3/media3-common/1.9.2/media3-common-1.9.2.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.media3:media3-container:1.9.2.
+     Required by:
+         project :app > project :just_audio > androidx.media3:media3-exoplayer:1.9.2
+      > Could not resolve androidx.media3:media3-container:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/media3/media3-container/1.9.2/media3-container-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/media3/media3-container/1.9.2/media3-container-1.9.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.media3:media3-container:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/media3/media3-container/1.9.2/media3-container-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/media3/media3-container/1.9.2/media3-container-1.9.2.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.media3:media3-datasource:1.9.2.
+     Required by:
+         project :app > project :just_audio > androidx.media3:media3-exoplayer:1.9.2
+      > Could not resolve androidx.media3:media3-datasource:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/media3/media3-datasource/1.9.2/media3-datasource-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/media3/media3-datasource/1.9.2/media3-datasource-1.9.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.media3:media3-datasource:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/media3/media3-datasource/1.9.2/media3-datasource-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/media3/media3-datasource/1.9.2/media3-datasource-1.9.2.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.media3:media3-decoder:1.9.2.
+     Required by:
+         project :app > project :just_audio > androidx.media3:media3-exoplayer:1.9.2
+      > Could not resolve androidx.media3:media3-decoder:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/media3/media3-decoder/1.9.2/media3-decoder-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/media3/media3-decoder/1.9.2/media3-decoder-1.9.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.media3:media3-decoder:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/media3/media3-decoder/1.9.2/media3-decoder-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/media3/media3-decoder/1.9.2/media3-decoder-1.9.2.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.media3:media3-extractor:1.9.2.
+     Required by:
+         project :app > project :just_audio > androidx.media3:media3-exoplayer:1.9.2
+      > Could not resolve androidx.media3:media3-extractor:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/media3/media3-extractor/1.9.2/media3-extractor-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/media3/media3-extractor/1.9.2/media3-extractor-1.9.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.media3:media3-extractor:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/media3/media3-extractor/1.9.2/media3-extractor-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/media3/media3-extractor/1.9.2/media3-extractor-1.9.2.pom'.
+               > maven.aliyun.com
+   > Could not resolve androidx.media3:media3-database:1.9.2.
+     Required by:
+         project :app > project :just_audio > androidx.media3:media3-exoplayer:1.9.2
+      > Could not resolve androidx.media3:media3-database:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/central/androidx/media3/media3-database/1.9.2/media3-database-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/central/androidx/media3/media3-database/1.9.2/media3-database-1.9.2.pom'.
+               > maven.aliyun.com
+      > Could not resolve androidx.media3:media3-database:1.9.2.
+         > Could not get resource 'https://maven.aliyun.com/repository/google/androidx/media3/media3-database/1.9.2/media3-database-1.9.2.pom'.
+            > Could not GET 'https://maven.aliyun.com/repository/google/androidx/media3/media3-database/1.9.2/media3-database-1.9.2.pom'.
+               > maven.aliyun.com
+> There are 25 more failures with identical causes.
+
+* Try:
+> The project declares repositories, effectively ignoring the repositories you have declared in the settings.
+   To determine how project repositories are declared, configure your build to fail on project repositories.
+   For more information, please refer to https://docs.gradle.org/8.11.1/userguide/declaring_repositories.html#sub:fail_build_on_project_repositories in the Gradle documentation.
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 26m 44s
+[!] Gradle threw an error while downloading artifacts from the network.
+Picked up JAVA_TOOL_OPTIONS: -Djava.net.preferIPv4Stack=true
+Warning: Flutter support for your project's Gradle version (8.11.1) will soon be dropped. Please upgrade your Gradle version to a version of at least 8.14.0 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's gradle version is typically defined in the gradle wrapper file. By default, this can be found at D:\projects\makaw\android/gradle/wrapper/gradle-wrapper.properties. 
+For more information, see https://docs.gradle.org/current/userguide/gradle_wrapper.html.
+
+Warning: Flutter support for your project's Android Gradle Plugin version (Android Gradle Plugin version 8.9.1) will soon be dropped. Please upgrade your Android Gradle Plugin version to a version of at least Android Gradle Plugin version 8.11.1 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's AGP version is typically defined in the plugins block of the `settings.gradle` file (D:\projects\makaw\android/settings.gradle), by a plugin with the id of com.android.application. 
+If you don't see a plugins block, your project was likely created with an older template version. In this case it is most likely defined in the top-level build.gradle file (D:\projects\makaw\android/build.gradle) by the following line in the dependencies block of the buildscript: "classpath 'com.android.tools.build:gradle:<version>'".
+
+Warning: Flutter support for your project's Kotlin version (2.1.0) will soon be dropped. Please upgrade your Kotlin version to a version of at least 2.2.20 soon.
+Alternatively, use the flag "--android-skip-build-dependency-validation" to bypass this check.
+
+Potential fix: Your project's KGP version is typically defined in the plugins block of the `settings.gradle` file (D:\projects\makaw\android/settings.gradle), by a plugin with the id of org.jetbrains.kotlin.android. 
+If you don't see a plugins block, your project was likely created with an older template version, in which case it is most likely defined in the top-level build.gradle file (D:\projects\makaw\android/build.gradle) by the ext.kotlin_version property.
+
+WARNING: Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP): ffmpeg_kit_flutter_new, flutter_tts, flutter_video_thumbnail, mobile_scanner, package_info_plus, share_plus
+Future versions of Flutter will fail to build if your app uses plugins that apply KGP.
+
+Please check the changelogs of these plugins and upgrade to a version that supports Built-in Kotlin.
+If no such version exists, report the issue to the plugin. If necessary, here is a guide on filing 
+an issue against a plugin: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers#report-incompatible-kotlin-gradle-plugin-usage-to-plugin-authors
+
+If you are a plugin author, please migrate your plugin to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors
+Error: Gradle task assembleDebug failed with exit code 1

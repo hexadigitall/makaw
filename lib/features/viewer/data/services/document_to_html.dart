@@ -16,12 +16,45 @@ class DocumentToHtml {
 
   static Future<String> _body(List<int> bytes, String ext) async {
     switch (ext) {
-      case 'docx': return _docx(bytes);
-      case 'odt': return _odt(bytes);
-      case 'rtf': return _rtf(utf8.decode(bytes, allowMalformed: true));
-      case 'doc': return _doc(bytes);
-      case 'pages': return _pages(bytes);
-      default: return '<pre>${_e(utf8.decode(bytes, allowMalformed: true))}</pre>';
+      case 'docx':
+      case 'docm':
+      case 'dotx':
+      case 'dotm':
+        return _docx(bytes);
+      case 'odt':
+      case 'ott':
+      case 'sxw':
+      case 'stw':
+        return _odt(bytes);
+      case 'fodt':
+        return _odtContentXml(utf8.decode(bytes, allowMalformed: true));
+      case 'rtf':
+        return _rtf(utf8.decode(bytes, allowMalformed: true));
+      case 'doc':
+      case 'dot':
+      case 'wps':
+      case 'wpd':
+      case 'wri':
+      case 'pub':
+      case 'hwp':
+        return _doc(bytes);
+      case 'hwpx':
+        return _genericZipXmlText(bytes, label: 'HWPX Document');
+      case 'fb2':
+        return _fb2(utf8.decode(bytes, allowMalformed: true));
+      case 'enex':
+        return _enex(utf8.decode(bytes, allowMalformed: true));
+      case 'abw':
+      case 'zabw':
+        return _abw(bytes, isZipped: ext == 'zabw');
+      case 'idml':
+      case 'scriv':
+      case 'celtx':
+        return _genericZipXmlText(bytes, label: '${ext.toUpperCase()} Manuscript');
+      case 'pages':
+        return _pages(bytes);
+      default:
+        return '<pre>${_e(utf8.decode(bytes, allowMalformed: true))}</pre>';
     }
   }
 
@@ -327,7 +360,116 @@ class DocumentToHtml {
   }
 
   static Future<String> _pages(List<int> bytes) async {
+    try {
+      final arch = ZipDecoder().decodeBytes(bytes);
+      final quickImg = arch.files
+          .where((f) => f.isFile && RegExp(r'QuickLook/Thumbnail\.(jpe?g|png)$', caseSensitive: false).hasMatch(f.name))
+          .firstOrNull;
+      if (quickImg != null) {
+        final b64 = base64Encode(quickImg.content as List<int>);
+        return '<div style="text-align:center;padding:12px"><p style="color:#94A3B8;margin-bottom:10px">Apple Pages QuickLook Preview</p><img src="data:image/jpeg;base64,$b64" style="margin:0 auto;border-radius:8px;max-width:100%"/></div>';
+      }
+    } catch (_) {}
     return '<p style="color:#94A3B8;padding:20px">[Apple Pages file — export as DOCX or PDF for full rendering.]</p>';
+  }
+
+  static Future<String> _odtContentXml(String xmlStr) async {
+    try {
+      final doc = XmlDocument.parse(xmlStr);
+      final buf = StringBuffer();
+      for (final node in doc.findAllElements('p')) {
+        final t = node.innerText.trim();
+        if (t.isNotEmpty) buf.write('<p>${_e(t)}</p>\n');
+      }
+      if (buf.isNotEmpty) return buf.toString();
+    } catch (_) {}
+    return '<pre>${_e(xmlStr)}</pre>';
+  }
+
+  static Future<String> _fb2(String xmlStr) async {
+    try {
+      final doc = XmlDocument.parse(xmlStr);
+      final buf = StringBuffer();
+      final binaries = <String, String>{};
+      for (final b in doc.findAllElements('binary')) {
+        final id = b.getAttribute('id') ?? '';
+        final ct = b.getAttribute('content-type') ?? 'image/jpeg';
+        if (id.isNotEmpty) binaries[id] = 'data:$ct;base64,${b.innerText.replaceAll(RegExp(r'\s+'), '')}';
+      }
+      final title = doc.findAllElements('book-title').firstOrNull?.innerText.trim();
+      if (title != null && title.isNotEmpty) buf.write('<h1>${_e(title)}</h1>\n');
+      for (final coverImg in doc.findAllElements('coverpage').expand((c) => c.findAllElements('image'))) {
+        final href = (coverImg.getAttribute('l:href') ?? coverImg.getAttribute('xlink:href') ?? '').replaceFirst('#', '');
+        if (binaries.containsKey(href)) {
+          buf.write('<img src="${binaries[href]}" alt="cover" style="max-height:360px;margin:12px auto"/>\n');
+        }
+      }
+      for (final sec in doc.findAllElements('section')) {
+        for (final ch in sec.childElements) {
+          if (ch.name.local == 'title') {
+            buf.write('<h2>${_e(ch.innerText.trim())}</h2>\n');
+          } else if (ch.name.local == 'p') {
+            final t = ch.innerText.trim();
+            if (t.isNotEmpty) buf.write('<p>${_e(t)}</p>\n');
+          }
+        }
+      }
+      if (buf.isNotEmpty) return buf.toString();
+    } catch (_) {}
+    return '<pre>${_e(xmlStr)}</pre>';
+  }
+
+  static Future<String> _enex(String xmlStr) async {
+    try {
+      final doc = XmlDocument.parse(xmlStr);
+      final buf = StringBuffer();
+      for (final note in doc.findAllElements('note')) {
+        final t = note.findElements('title').firstOrNull?.innerText ?? 'Evernote Note';
+        final created = note.findElements('created').firstOrNull?.innerText ?? '';
+        final content = note.findElements('content').firstOrNull?.innerText ?? '';
+        buf.write('<h2>${_e(t)}</h2>');
+        if (created.isNotEmpty) buf.write('<p style="color:#94A3B8;font-size:12px">$created</p>');
+        final inner = RegExp(r'<en-note[^>]*>([\s\S]*?)</en-note>', caseSensitive: false).firstMatch(content)?.group(1) ?? _e(content);
+        buf.write('<div style="margin-bottom:24px">$inner</div><hr style="border-color:#334155"/>');
+      }
+      if (buf.isNotEmpty) return buf.toString();
+    } catch (_) {}
+    return '<pre>${_e(xmlStr)}</pre>';
+  }
+
+  static Future<String> _abw(List<int> bytes, {required bool isZipped}) async {
+    try {
+      final raw = isZipped
+          ? utf8.decode(GZipDecoder().decodeBytes(bytes), allowMalformed: true)
+          : utf8.decode(bytes, allowMalformed: true);
+      final doc = XmlDocument.parse(raw);
+      final buf = StringBuffer();
+      for (final pEl in doc.findAllElements('p')) {
+        final t = pEl.innerText.trim();
+        if (t.isNotEmpty) buf.write('<p>${_e(t)}</p>\n');
+      }
+      if (buf.isNotEmpty) return buf.toString();
+    } catch (_) {}
+    return '<pre>${_e(utf8.decode(bytes, allowMalformed: true))}</pre>';
+  }
+
+  static Future<String> _genericZipXmlText(List<int> bytes, {required String label}) async {
+    try {
+      final arch = ZipDecoder().decodeBytes(bytes);
+      final buf = StringBuffer('<h2>${_e(label)}</h2>');
+      for (final f in arch.files.where((f) => f.isFile && f.name.toLowerCase().endsWith('.xml')).take(30)) {
+        try {
+          final raw = utf8.decode(f.content as List<int>, allowMalformed: true);
+          final doc = XmlDocument.parse(raw);
+          for (final t in doc.descendants.whereType<XmlText>()) {
+            final clean = t.value.trim();
+            if (clean.length > 2) buf.write('<p>${_e(clean)}</p>\n');
+          }
+        } catch (_) {}
+      }
+      if (buf.length > label.length + 10) return buf.toString();
+    } catch (_) {}
+    return _doc(bytes);
   }
 
   // ── HTML wrapper ────────────────────────────────────────────────

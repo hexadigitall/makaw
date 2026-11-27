@@ -14,7 +14,7 @@ class MakawManagerDb {
 
   static Database? _db;
 
-  static const int version = 1;
+  static const int version = 2;
 
   static Database get db {
     if (_db == null) throw StateError('MakawManagerDb not initialized. Call init() first.');
@@ -39,6 +39,8 @@ class MakawManagerDb {
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 1) {
           await _createSchema(db);
+        } else if (oldVersion < 2) {
+          await _createDocumentTables(db);
         }
       },
     );
@@ -162,6 +164,50 @@ class MakawManagerDb {
       )
     ''');
     await db.execute('CREATE INDEX idx_subtitles_media ON subtitles(media_id)');
+
+    await _createDocumentTables(db);
+  }
+
+  static Future<void> _createDocumentTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS document_state (
+        file_path TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        format TEXT NOT NULL DEFAULT 'other',
+        current_page INTEGER NOT NULL DEFAULT 1,
+        total_pages INTEGER NOT NULL DEFAULT 1,
+        scroll_progress REAL NOT NULL DEFAULT 0.0,
+        scroll_offset REAL NOT NULL DEFAULT 0.0,
+        zoom_scale REAL NOT NULL DEFAULT 1.0,
+        theme TEXT NOT NULL DEFAULT 'dark',
+        font_size REAL NOT NULL DEFAULT 16.0,
+        bookmarks TEXT NOT NULL DEFAULT '',
+        reading_status TEXT NOT NULL DEFAULT 'unread',
+        pinned INTEGER NOT NULL DEFAULT 0,
+        last_read TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_doc_state_last ON document_state(last_read DESC)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_doc_state_status ON document_state(reading_status)');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS document_collections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        color_hex INTEGER NOT NULL DEFAULT 4286680312,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS document_collection_items (
+        collection_id INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (collection_id, file_path),
+        FOREIGN KEY (collection_id) REFERENCES document_collections(id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   /// Convenience helper to close the DB (used in tests / teardown only).

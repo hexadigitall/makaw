@@ -187,3 +187,24 @@
   - [x] Commit/push Sprint 8 (`cc82d69`) and verify Android GitHub Actions Run `45930971191` (`10m48s`).
   - [x] Install fresh Sprint 8 APK (`app-arm64-v8a-release.apk`) on TECNO CG8h (`H854CG8012345678`, PID `21302`) and Redmi 14C (`JF9HQ8XOT4LVYPKV`, PID `5578`).
   - [ ] Verify Windows desktop UI build and right-click menus on the fresh commit.
+
+---
+
+### Phase 10: Documents Workspace Overhaul, Video Player UX & Global Multi-Select (Sprint 9)
+- [x] **10.1 Sprint 8.1 Navigation & Resume Fixes**
+  - [x] Direct file opening & reading/scroll resume from Home Continue/Recent across PDF, TXT/MD, DOCX/RTF, HTML, Spreadsheets, and Music.
+  - [x] Natural step-by-step tool Back navigation from Home-launched files (`Viewer -> Owning Tool -> Makaw Home`), plus full ancestor folder stack & archive scroll-to-highlight in `FoldersPage`.
+- [x] **10.2 Documents Format Registry, SQLite State & Thumbnails (Phases A–B)**
+  - [x] Pure-Dart `DocumentFormatRegistry` mapping ~145 document extensions into 7 Semantic Families and 4 Engine Tiers with `%PDF-` / ZIP magic-byte sniffing ([document_format_registry.dart](file:///D:/projects/makaw/lib/features/documents/domain/document_format_registry.dart)).
+  - [x] Expand `DocumentService` indexer across all 7 families + custom folders, and unify SQLite `document_state` + `document_collections` in `MakawManagerDb` v2 ([document_state_service.dart](file:///D:/projects/makaw/lib/features/documents/data/services/document_state_service.dart), [makaw_manager_db.dart](file:///D:/projects/makaw/lib/core/storage/makaw_manager_db.dart)).
+  - [x] Async cover & page-1 thumbnail extractor (`DocumentThumbnailService`) for EPUB, CBZ/CBT, Office ZIP, and Apple QuickLook packages.
+  - [x] Redesigned `DocumentWidget` library with Continue Reading carousel, 7 family tabs, dynamic extension chips, Grid/List toggle, sort controls, PDF Merge/Organize tools, and Windows Desktop 3-pane workspace ([document_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/document_page.dart)).
+- [x] **10.3 Specialized Viewers (Phases C–D)**
+  - [x] Native Comic/Manga Archive Reader (`ComicViewerPage`) with LTR, Manga RTL, and Webtoon vertical strip modes.
+  - [x] Interactive Slide Deck Viewer (`SlideViewerPage`) for PPTX/ODP/FODP/KEY with slide filmstrip & speaker notes.
+  - [x] Mail/Calendar/Contact PIM Viewer (`PimViewerPage`) for EML/MBOX/ICS/VCF/MSG and Vector/CAD Viewer (`VectorCadViewerPage`) for SVG/DXF/XPS/VSDX/ODG/AI.
+  - [x] Upgraded multi-sheet `SpreadsheetViewerPage` (XLSX/XLSM/ODS/CSV/TSV/DIF/SLK/GNUMERIC), MHTML/FB2/ENEX/ABW support in `DocumentToHtml` & `HtmlViewerPage`, and Screenplay `.fountain`/`.fdx` + Reader Themes in `TextViewerPage`.
+- [x] **10.4 Video Player Redesign, Auto-Hide Start Over & Global Multi-Select**
+  - [x] Redesign `DirectVideoPlayer` overlay layout, dimensions/aspect ratio geometry, playlist sheet, centered `-10s / Play / +10s` transport, and deterministic 4-second auto-dismissing `"Resumed from MM:SS · Start Over"` pill ([video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart)).
+  - [x] Implement consistent hold-to-select + tap-to-add multi-select & batch action bars across `VideoPlayerWidget`, `MediaLibraryPage`, `DocumentWidget`, and `ImageViewerWidget`.
+  - [ ] Phase E future enhancements: OLE2 binary CFBF parser (`DOC/XLS/PPT/MSG`) & SQLite FTS5 document full-text search.
