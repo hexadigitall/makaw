@@ -1390,81 +1390,116 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
   }
 
   Widget _buildTtsHud() {
-    final speaking = TextActionService.isSpeaking;
-    final paused = TextActionService.isPaused;
-    final hasSelection = _selectionText.isNotEmpty;
-    return Positioned(
-      left: 12,
-      right: 12,
-      bottom: MediaQuery.of(context).padding.bottom + 16,
-      child: Material(
-        elevation: 12,
-        borderRadius: BorderRadius.circular(16),
-        color: const Color(0xFF1E293B),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
-              child: Row(
+    return ValueListenableBuilder<int>(
+      valueListenable: TextActionService.speechVersion,
+      builder: (_, __, ___) {
+        final speaking = TextActionService.isSpeaking;
+        final paused = TextActionService.isPaused;
+        final hasSelection = _selectionText.isNotEmpty;
+        final idx = TextActionService.currentChunkIndex;
+        final total = TextActionService.totalChunks;
+        final speed = TextActionService.speechMultiplier;
+        final curLine = TextActionService.currentChunkText;
+        final preview = curLine.isNotEmpty ? curLine : _hudText;
+        const speeds = [0.8, 1.0, 1.25, 1.5, 1.8];
+        final speedLabel = '${speed.toStringAsFixed(speed == speed.roundToDouble() ? 1 : 2).replaceFirst(RegExp(r'0$'), '')}x';
+
+        return Positioned(
+          left: 12,
+          right: 12,
+          bottom: MediaQuery.of(context).padding.bottom + (_showChrome ? 92 : 16),
+          child: Material(
+            elevation: 12,
+            borderRadius: BorderRadius.circular(18),
+            color: const Color(0xF5141928),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: _kAccent.withValues(alpha: 0.4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.record_voice_over_rounded, color: Color(0xFFF472B6), size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _hudSource.isEmpty ? 'Reading' : _hudSource,
-                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.headphones_rounded, color: Color(0xFFF472B6), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            total > 0
+                                ? '${_hudSource.isEmpty ? "Listening" : _hudSource} · ${idx + 1}/$total'
+                                : (_hudSource.isEmpty ? 'Reading' : _hudSource),
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () {
+                            final curIdx = speeds.indexWhere((s) => (s - speed).abs() < 0.05);
+                            TextActionService.setSpeechMultiplier(speeds[(curIdx + 1) % speeds.length]);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(color: _kCard, borderRadius: BorderRadius.circular(10)),
+                            child: Text(speedLabel, style: const TextStyle(color: _kAccent, fontSize: 11, fontWeight: FontWeight.w700)),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+                          onPressed: _dismissTtsHud,
+                          splashRadius: 16,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white54, size: 18),
-                    onPressed: _dismissTtsHud,
-                    splashRadius: 16,
-                    visualDensity: VisualDensity.compact,
+                  if (preview.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 4, 14, 2),
+                      child: Text(
+                        preview,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5, height: 1.3),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _hudBtn(Icons.skip_previous_rounded, 'Prev', idx > 0 ? TextActionService.skipPrevious : null),
+                        _hudBtn(
+                          paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                          paused ? 'Resume' : (speaking ? 'Pause' : 'Play'),
+                          () async {
+                            if (TextActionService.isPaused) {
+                              await TextActionService.resumeSpeaking();
+                            } else if (TextActionService.isSpeaking) {
+                              await TextActionService.pauseSpeaking();
+                            } else {
+                              final text = _hudText.isNotEmpty ? _hudText : await _pageText(_currentPage);
+                              final src = _hudSource.isNotEmpty ? _hudSource : 'Page ${_currentPage + 1}';
+                              await _playHudTarget(text, src);
+                            }
+                          },
+                        ),
+                        _hudBtn(Icons.skip_next_rounded, 'Next', idx + 1 < total ? TextActionService.skipNext : null),
+                        _hudBtn(Icons.menu_book_rounded, 'Page', _playPageInHud),
+                        if (hasSelection) _hudBtn(Icons.highlight_rounded, 'Selection', _playSelectionInHud),
+                        _hudBtn(Icons.stop_rounded, 'Stop', TextActionService.stopSpeaking),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            if (_hudText.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Text(
-                  _hudText,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, height: 1.3),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 6, 10, 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _hudBtn(
-                    paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                    paused ? 'Continue' : (speaking ? 'Pause' : 'Play'),
-                    () async {
-                      if (TextActionService.isPaused) {
-                        await TextActionService.resumeSpeaking();
-                      } else if (TextActionService.isSpeaking) {
-                        await TextActionService.pauseSpeaking();
-                      } else {
-                        final text = _hudText.isNotEmpty ? _hudText : await _pageText(_currentPage);
-                        final src = _hudSource.isNotEmpty ? _hudSource : 'Page ${_currentPage + 1}';
-                        await _playHudTarget(text, src);
-                      }
-                      if (mounted) setState(() {});
-                    },
-                  ),
-                  _hudBtn(Icons.menu_book_rounded, 'Read Page', _playPageInHud),
-                  _hudBtn(Icons.highlight_rounded, 'Read Sel', hasSelection ? _playSelectionInHud : null),
-                  _hudBtn(Icons.stop_rounded, 'Stop', TextActionService.stopSpeaking),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

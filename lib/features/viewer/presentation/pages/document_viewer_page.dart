@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/services/document_to_html.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/makaw_toast.dart';
 
 class DocumentViewerPage extends StatefulWidget {
   final String filePath;
@@ -99,19 +100,17 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
         title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
-            icon: const Icon(Icons.record_voice_over, color: Colors.white70),
+            icon: const Icon(Icons.headphones_rounded, color: Colors.white70, size: 21),
             onPressed: _webViewController != null ? () async {
               final text = await _webViewController!.evaluateJavascript(source: 'document.body.innerText');
-              final clean = text?.toString().trim() ?? '';
+              final clean = (text?.toString() ?? '').replaceAll(RegExp(r'^null$'), '').trim();
               if (clean.isNotEmpty && mounted) {
                 showReadAloudDialog(context, clean);
               } else if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('No selectable text'), duration: Duration(seconds: 1), backgroundColor: Color(0xFF334155)),
-                );
+                MakawToast.warning(context, 'No readable text found in document');
               }
             } : null,
-            tooltip: 'Read Aloud',
+            tooltip: 'Listen (Read Aloud)',
           ),
           IconButton(
             icon: const Icon(Icons.copy, color: Colors.white70),
@@ -119,9 +118,7 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
               final text = await _webViewController!.evaluateJavascript(source: 'document.body.innerText');
               if (text != null && mounted) {
                 Clipboard.setData(ClipboardData(text: text.toString()));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 1), backgroundColor: Color(0xFF334155)),
-                );
+                MakawToast.success(context, 'Copied to clipboard');
               }
             } : null,
             tooltip: 'Copy all text',

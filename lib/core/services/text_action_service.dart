@@ -7,6 +7,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../../core/platform/session_paths.dart';
+import '../ui/makaw_toast.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -54,144 +55,263 @@ class TextActionService {
   static bool _isSpeaking = false;
   static bool _isPaused = false;
   static String _currentText = '';
+  static List<String> _chunks = const [];
+  static int _chunkIndex = 0;
+  static double _speechMultiplier = 1.0;
+  static int _sessionToken = 0;
   static bool _initialized = false;
+  static bool _handlersBound = false;
+  static OverlayEntry? _listenOverlay;
+  static final ValueNotifier<int> speechVersion = ValueNotifier<int>(0);
+
+  /// Splits long text into natural sentence/clause chunks <= [maxChunkLen] chars
+  /// so Android TextToSpeech never hits its 4000-char limit and Pause/Resume/Skip
+  /// track exact sentence position.
+  static List<String> chunkSpeechText(String raw, {int maxChunkLen = 440}) {
+    final normalized = raw.replaceAll('\r\n', '\n').replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.isEmpty) return const [];
+
+    final sentences = normalized
+        .split(RegExp(r'(?<=[.!?])\s+|\n+'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty);
+
+    final out = <String>[];
+    final buf = StringBuffer();
+
+    void flushBuf() {
+      final s = buf.toString().trim();
+      if (s.isNotEmpty) out.add(s);
+      buf.clear();
+    }
+
+    for (final sentence in sentences) {
+      if (sentence.length > maxChunkLen) {
+        flushBuf();
+        var start = 0;
+        while (start < sentence.length) {
+          var end = (start + maxChunkLen).clamp(0, sentence.length);
+          if (end < sentence.length) {
+            final space = sentence.lastIndexOf(' ', end);
+            if (space > start + 40) end = space;
+          }
+          final piece = sentence.substring(start, end).trim();
+          if (piece.isNotEmpty) out.add(piece);
+          start = end;
+        }
+        continue;
+      }
+
+      if (buf.isEmpty) {
+        buf.write(sentence);
+      } else if (buf.length + 1 + sentence.length <= maxChunkLen) {
+        buf.write(' $sentence');
+      } else {
+        flushBuf();
+        buf.write(sentence);
+      }
+    }
+    flushBuf();
+    return out;
+  }
+
+  static void _notifySpeechChanged() {
+    speechVersion.value++;
+  }
+
+  static double ttsRateForMultiplier(double multiplier) =>
+      (multiplier * 0.5).clamp(0.25, 0.95);
 
   static Future<void> ensureInit() async {
-    if (_initialized) return;
+    if (!_initialized) {
+      try {
+        await _tts.awaitSpeakCompletion(false);
+        await _tts.setSpeechRate(ttsRateForMultiplier(_speechMultiplier));
+        _initialized = true;
+      } catch (_) {}
+    }
+    if (!_handlersBound) {
+      _handlersBound = true;
+      _tts.setCompletionHandler(() {
+        final token = _sessionToken;
+        if (!_isSpeaking || _isPaused || token != _sessionToken) return;
+        if (_chunkIndex + 1 < _chunks.length) {
+          _chunkIndex++;
+          _notifySpeechChanged();
+          _speakCurrentChunk(token);
+        } else {
+          _isSpeaking = false;
+          _isPaused = false;
+          _chunkIndex = 0;
+          _dismissListenOverlay();
+          _notifySpeechChanged();
+        }
+      });
+      _tts.setErrorHandler((_) {
+        _isSpeaking = false;
+        _isPaused = false;
+        _notifySpeechChanged();
+      });
+    }
+  }
+
+  static Future<void> _speakCurrentChunk(int token) async {
+    if (token != _sessionToken || _chunkIndex < 0 || _chunkIndex >= _chunks.length) return;
     try {
-      await _tts.awaitSpeakCompletion(true);
-      _initialized = true;
-    } catch (_) {}
+      await _tts.setSpeechRate(ttsRateForMultiplier(_speechMultiplier));
+      await _tts.speak(_chunks[_chunkIndex]);
+    } catch (_) {
+      if (token == _sessionToken) {
+        _isSpeaking = false;
+        _isPaused = false;
+        _notifySpeechChanged();
+      }
+    }
   }
 
   /// Pronounce a word or short text aloud once.
   static Future<void> pronounce(String text) async {
     await ensureInit();
+    final clean = text.trim();
+    if (clean.isEmpty) return;
     try {
+      _sessionToken++;
       await _tts.stop();
       _isSpeaking = false;
       _isPaused = false;
-      await _tts.speak(text.trim());
+      _notifySpeechChanged();
+      await _tts.setSpeechRate(ttsRateForMultiplier(0.95));
+      await _tts.speak(clean);
     } catch (_) {}
   }
 
-  /// Stop any in-progress speech.
+  /// Stop any in-progress speech and close the floating listen overlay.
   static Future<void> stopSpeaking() async {
+    _sessionToken++;
     try {
       await _tts.stop();
     } catch (_) {}
     _isSpeaking = false;
     _isPaused = false;
+    _chunks = const [];
+    _chunkIndex = 0;
+    _dismissListenOverlay();
+    _notifySpeechChanged();
   }
 
-  /// Pause in-progress speech.
+  /// Pause at the exact current sentence chunk (preserved for resumeSpeaking).
   static Future<void> pauseSpeaking() async {
+    _sessionToken++;
     try {
-      await _tts.pause();
+      await _tts.stop();
+    } catch (_) {}
+    if (_chunks.isNotEmpty) {
+      _isSpeaking = true;
       _isPaused = true;
-    } catch (_) {}
+    }
+    _notifySpeechChanged();
   }
 
-  /// Resume paused speech (flutter_tts resumes from where it left off).
+  /// Resume speaking cleanly from the exact paused sentence chunk.
   static Future<void> resumeSpeaking() async {
-    try {
-      await _tts.speak(_currentText);
-      _isPaused = false;
-    } catch (_) {}
+    if (_chunks.isEmpty) return;
+    await ensureInit();
+    final token = ++_sessionToken;
+    _isSpeaking = true;
+    _isPaused = false;
+    _notifySpeechChanged();
+    await _speakCurrentChunk(token);
   }
 
-  /// Read a passage aloud, keeping robust start/stop state so UI controls can
-  /// reflect and toggle playback. Toggles stop if already speaking.
-  static Future<void> readAloud(String text) async {
+  static Future<void> skipPrevious() async {
+    if (_chunks.isEmpty) return;
     await ensureInit();
+    final token = ++_sessionToken;
+    try {
+      await _tts.stop();
+    } catch (_) {}
+    _chunkIndex = (_chunkIndex - 1).clamp(0, _chunks.length - 1);
+    _isSpeaking = true;
+    _isPaused = false;
+    _notifySpeechChanged();
+    await _speakCurrentChunk(token);
+  }
+
+  static Future<void> skipNext() async {
+    if (_chunks.isEmpty) return;
+    await ensureInit();
+    final token = ++_sessionToken;
+    try {
+      await _tts.stop();
+    } catch (_) {}
+    if (_chunkIndex + 1 < _chunks.length) {
+      _chunkIndex++;
+      _isSpeaking = true;
+      _isPaused = false;
+      _notifySpeechChanged();
+      await _speakCurrentChunk(token);
+    } else {
+      await stopSpeaking();
+    }
+  }
+
+  static Future<void> setSpeechMultiplier(double multiplier) async {
+    _speechMultiplier = multiplier.clamp(0.7, 2.0);
+    _notifySpeechChanged();
+    if (_isSpeaking && !_isPaused && _chunks.isNotEmpty) {
+      final token = ++_sessionToken;
+      try {
+        await _tts.stop();
+      } catch (_) {}
+      await _speakCurrentChunk(token);
+    }
+  }
+
+  /// Read a passage aloud using sentence-chunked queue (handles huge documents!).
+  static Future<void> readAloud(String text) async {
     final clean = text.trim();
     if (clean.isEmpty) return;
     if (_isSpeaking) {
       await stopSpeaking();
       return;
     }
-    _currentText = clean;
-    _isSpeaking = true;
-    _isPaused = false;
-    _tts.setStartHandler(() {
-      _isSpeaking = true;
-      _isPaused = false;
-    });
-    _tts.setCompletionHandler(() {
-      _isSpeaking = false;
-      _isPaused = false;
-    });
-    _tts.setCancelHandler(() {
-      _isSpeaking = false;
-      _isPaused = false;
-    });
-    _tts.setPauseHandler(() {
-      _isSpeaking = true;
-      _isPaused = true;
-    });
-    _tts.setContinueHandler(() {
-      _isSpeaking = true;
-      _isPaused = false;
-    });
-    _tts.setErrorHandler((_) {
-      _isSpeaking = false;
-      _isPaused = false;
-    });
-    try {
-      await _tts.speak(clean);
-    } catch (_) {
-      _isSpeaking = false;
-      _isPaused = false;
-    }
+    await playFromBeginning(clean);
   }
 
-  /// Restart reading [text] from the very beginning (used by the persistent
-  /// HUD "Play from beginning" action). Unlike [readAloud], it always starts a
-  /// fresh playback even if audio is already playing or paused, wiring the same
-  /// handlers so the UI can track state live.
+  /// Restart reading [text] from the very beginning using sentence chunks.
   static Future<void> playFromBeginning(String text) async {
     await ensureInit();
     final clean = text.trim();
     if (clean.isEmpty) return;
-    await stopSpeaking();
+    final token = ++_sessionToken;
+    try {
+      await _tts.stop();
+    } catch (_) {}
     _currentText = clean;
+    _chunks = chunkSpeechText(clean);
+    if (_chunks.isEmpty) return;
+    _chunkIndex = 0;
     _isSpeaking = true;
     _isPaused = false;
-    _tts.setStartHandler(() {
-      _isSpeaking = true;
-      _isPaused = false;
-    });
-    _tts.setCompletionHandler(() {
-      _isSpeaking = false;
-      _isPaused = false;
-    });
-    _tts.setCancelHandler(() {
-      _isSpeaking = false;
-      _isPaused = false;
-    });
-    _tts.setPauseHandler(() {
-      _isSpeaking = true;
-      _isPaused = true;
-    });
-    _tts.setContinueHandler(() {
-      _isSpeaking = true;
-      _isPaused = false;
-    });
-    _tts.setErrorHandler((_) {
-      _isSpeaking = false;
-      _isPaused = false;
-    });
-    try {
-      await _tts.speak(clean);
-    } catch (_) {
-      _isSpeaking = false;
-      _isPaused = false;
-    }
+    _notifySpeechChanged();
+    await _speakCurrentChunk(token);
   }
 
   static bool get isSpeaking => _isSpeaking;
   static bool get isPaused => _isPaused;
   static String get currentText => _currentText;
+  static int get currentChunkIndex => _chunkIndex;
+  static int get totalChunks => _chunks.length;
+  static double get speechMultiplier => _speechMultiplier;
+  static String get currentChunkText =>
+      (_chunkIndex >= 0 && _chunkIndex < _chunks.length) ? _chunks[_chunkIndex] : _currentText;
+
+  static void _dismissListenOverlay() {
+    try {
+      _listenOverlay?.remove();
+    } catch (_) {}
+    _listenOverlay = null;
+  }
 
   /// Look up a word definition using the free DictionaryAPI.
   static Future<WordDefinition?> define(String text) async {
@@ -424,15 +544,9 @@ Future<void> showTextActionMenu(BuildContext context, String text, {String? titl
   if (selected.isEmpty) return;
   final readTarget = (readAloudContext ?? '').trim().isNotEmpty ? readAloudContext!.trim() : selected;
   final isSingleWord = selected.split(RegExp(r'\s+')).length == 1;
-  final scaffoldMessenger = ScaffoldMessenger.of(context);
 
   void toast(String msg) {
-    scaffoldMessenger.hideCurrentSnackBar();
-    scaffoldMessenger.showSnackBar(SnackBar(
-      content: Text(msg, maxLines: 2, overflow: TextOverflow.ellipsis),
-      duration: const Duration(seconds: 2),
-      behavior: SnackBarBehavior.floating,
-    ));
+    MakawToast.info(context, msg);
   }
 
   // Show definition / translation inline on request.
@@ -661,118 +775,210 @@ Future<void> showTextActionMenu(BuildContext context, String text, {String? titl
   );
 }
 
-/// Shows live playback controls (Stop, Pause/Resume) while reading [text]
-/// aloud. It starts speaking, keeps the controls visible until playback ends
-/// (or the user stops), and updates the buttons live via a lightweight poll.
+/// Shows a non-blocking floating obsidian Listen Player dock (or clean sheet
+/// fallback in headless tests) with live sentence progress, Prev/Next skip,
+/// Pause/Resume at exact sentence, speed cycling (`0.8x`..`1.8x`), and Stop.
 Future<void> showReadAloudDialog(BuildContext context, String text) async {
   final trimmed = text.trim();
   if (trimmed.isEmpty) return;
 
-  final navigator = Navigator.of(context, rootNavigator: true);
-  await TextActionService.readAloud(trimmed);
+  await TextActionService.playFromBeginning(trimmed);
+  if (!context.mounted) return;
 
-  if (!TextActionService.isSpeaking) return;
-
-  var dismissed = false;
-  var poller = Timer(const Duration(seconds: 0), () {});
-  void close() {
-    if (dismissed) return;
-    dismissed = true;
-    poller.cancel();
-    if (navigator.canPop()) navigator.pop();
-    TextActionService.stopSpeaking();
+  final overlay = Overlay.maybeOf(context, rootOverlay: true);
+  if (overlay != null) {
+    TextActionService._dismissListenOverlay();
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => _MakawListenOverlayHost(
+        onStop: () {
+          if (TextActionService._listenOverlay == entry) {
+            TextActionService._dismissListenOverlay();
+          }
+          TextActionService.stopSpeaking();
+        },
+      ),
+    );
+    TextActionService._listenOverlay = entry;
+    overlay.insert(entry);
+    return;
   }
 
+  // Fallback for widget test environments without a root Overlay
   await showModalBottomSheet<void>(
     context: context,
-    isDismissible: false,
-    enableDrag: false,
-    backgroundColor: const Color(0xFF1E293B),
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-    builder: (_) {
-      poller = Timer.periodic(const Duration(milliseconds: 200), (t) {
-        if (!TextActionService.isSpeaking) {
-          t.cancel();
-          if (!dismissed && navigator.canPop()) {
-            dismissed = true;
-            navigator.pop();
-          }
-        }
-      });
-      return StatefulBuilder(
-        builder: (ctx, setSheet) => PopScope(
-          canPop: false,
-          child: SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  margin: const EdgeInsets.only(top: 8),
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-                ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 14, 20, 8),
-                  child: Row(
-                    children: [
-                      Icon(Icons.record_voice_over_rounded, color: Color(0xFFF472B6), size: 18),
-                      SizedBox(width: 8),
-                      Text('Reading Aloud',
-                          style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-                const Divider(color: Color(0xFF2D3748), height: 1),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-                  child: Text(
-                    trimmed,
-                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13, height: 1.4),
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    backgroundColor: const Color(0xFF141826),
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+    builder: (ctx) => _MakawListenCardBody(
+      onClose: () {
+        Navigator.of(ctx).pop();
+        TextActionService.stopSpeaking();
+      },
+    ),
+  );
+}
+
+class _MakawListenOverlayHost extends StatelessWidget {
+  final VoidCallback onStop;
+  const _MakawListenOverlayHost({required this.onStop});
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    return Positioned(
+      left: 14,
+      right: 14,
+      bottom: mq.padding.bottom + 14,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Material(
+            color: Colors.transparent,
+            child: _MakawListenCardBody(onClose: onStop),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MakawListenCardBody extends StatelessWidget {
+  final VoidCallback onClose;
+  const _MakawListenCardBody({required this.onClose});
+
+  static const _speeds = [0.8, 1.0, 1.25, 1.5, 1.8];
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: TextActionService.speechVersion,
+      builder: (_, __, ___) {
+        final idx = TextActionService.currentChunkIndex;
+        final total = TextActionService.totalChunks;
+        final paused = TextActionService.isPaused;
+        final speed = TextActionService.speechMultiplier;
+        final progress = total > 0 ? ((idx + 1) / total).clamp(0.0, 1.0) : 0.0;
+        final preview = TextActionService.currentChunkText;
+
+        return Container(
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: const Color(0xF5141928),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFA78BFA).withValues(alpha: 0.45)),
+            boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 8))],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 8, 4),
+                child: Row(
                   children: [
-                    TextButton.icon(
-                      onPressed: () {
-                        if (TextActionService.isPaused) {
-                          TextActionService.resumeSpeaking();
-                        } else {
-                          TextActionService.pauseSpeaking();
-                        }
-                        setSheet(() {});
-                        Future.delayed(const Duration(milliseconds: 150), () {
-                          if (ctx.mounted) setSheet(() {});
-                        });
-                      },
-                      icon: Icon(
-                        TextActionService.isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                        color: const Color(0xFF22D3EE),
-                        size: 18,
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFA78BFA).withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(9),
                       ),
-                      label: Text(
-                        TextActionService.isPaused ? 'Resume' : 'Pause',
-                        style: const TextStyle(color: Color(0xFF22D3EE)),
+                      child: const Icon(Icons.headphones_rounded, color: Color(0xFFA78BFA), size: 16),
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Listening · ${total > 0 ? "${idx + 1}/$total" : "Ready"}',
+                            style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700),
+                          ),
+                          if (preview.isNotEmpty)
+                            Text(
+                              preview,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5, height: 1.3),
+                            ),
+                        ],
                       ),
                     ),
-                    TextButton.icon(
-                      onPressed: close,
-                      icon: const Icon(Icons.stop_rounded, color: Color(0xFFF87171), size: 18),
-                      label: const Text('Stop', style: TextStyle(color: Color(0xFFF87171))),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () {
+                        final curIdx = _speeds.indexWhere((s) => (s - speed).abs() < 0.05);
+                        final next = _speeds[(curIdx + 1) % _speeds.length];
+                        TextActionService.setSpeechMultiplier(next);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E293B),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '${speed.toStringAsFixed(speed == speed.roundToDouble() ? 1 : 2).replaceFirst(RegExp(r'0$'), '')}x',
+                          style: const TextStyle(color: Color(0xFFA78BFA), fontSize: 11.5, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close_rounded, color: Colors.white54, size: 18),
+                      tooltip: 'Stop Listening',
+                      onPressed: onClose,
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-              ],
-            ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  IconButton(
+                    iconSize: 22,
+                    color: Colors.white70,
+                    onPressed: idx > 0 ? TextActionService.skipPrevious : null,
+                    icon: const Icon(Icons.skip_previous_rounded),
+                    tooltip: 'Previous Sentence',
+                  ),
+                  FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFA78BFA).withValues(alpha: 0.2),
+                      foregroundColor: Colors.white,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () {
+                      if (paused) {
+                        TextActionService.resumeSpeaking();
+                      } else {
+                        TextActionService.pauseSpeaking();
+                      }
+                    },
+                    icon: Icon(paused ? Icons.play_arrow_rounded : Icons.pause_rounded, size: 19),
+                    label: Text(paused ? 'Resume' : 'Pause', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                  ),
+                  IconButton(
+                    iconSize: 22,
+                    color: Colors.white70,
+                    onPressed: idx + 1 < total ? TextActionService.skipNext : null,
+                    icon: const Icon(Icons.skip_next_rounded),
+                    tooltip: 'Next Sentence',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              LinearProgressIndicator(
+                value: progress,
+                minHeight: 2.5,
+                backgroundColor: Colors.white12,
+                color: const Color(0xFFA78BFA),
+              ),
+            ],
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
+  }
 }
 
 /// Builds a text-selection toolbar (with the platform's default Copy /

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:makaw/core/services/text_action_service.dart';
 import 'package:makaw/core/ui/makaw_toast.dart';
 import 'package:makaw/features/media/presentation/pages/video_player_page.dart';
 import 'package:makaw/features/viewer/presentation/pages/epub_viewer_page.dart';
@@ -126,6 +127,26 @@ Dialogue: 0,0:00:05.00,0:00:09.25,Default,,0,0,0,,{\\an8}First\\NSecond
       await tester.tap(find.text('Undo'));
       await tester.pump();
       expect(actionTapped, isTrue);
+    });
+  });
+
+  group('TextActionService chunked Read Aloud / Listen engine', () {
+    test('chunks long 10,000-char chapters cleanly under 440 chars without dropping sentences', () {
+      final longPassage = List.generate(
+        80,
+        (i) => 'Sentence number ${i + 1} explores physical book acoustics and smooth narration.',
+      ).join(' ');
+      expect(longPassage.length, greaterThan(4500));
+
+      final chunks = TextActionService.chunkSpeechText(longPassage);
+      expect(chunks.length, greaterThan(10));
+      for (final c in chunks) {
+        expect(c.length, lessThanOrEqualTo(440));
+      }
+      expect(chunks.first, contains('Sentence number 1'));
+      expect(chunks.last, contains('Sentence number 80'));
+      expect(TextActionService.ttsRateForMultiplier(1.0), closeTo(0.5, 0.001));
+      expect(TextActionService.ttsRateForMultiplier(1.8), closeTo(0.9, 0.001));
     });
   });
 }

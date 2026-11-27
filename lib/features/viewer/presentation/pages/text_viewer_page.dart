@@ -211,7 +211,7 @@ class _TextViewerPageState extends State<TextViewerPage> {
           onPressed: widget.onClose ?? () => Navigator.pop(context),
         ),
         actions: [
-          if (_isMarkdown || _isScreenplay)
+          if (_isMarkdown || _isScreenplay || _isJson)
             IconButton(
               icon: Icon(
                 _richMarkdown ? Icons.code_rounded : Icons.article_outlined,
@@ -221,56 +221,51 @@ class _TextViewerPageState extends State<TextViewerPage> {
               onPressed: () => setState(() => _richMarkdown = !_richMarkdown),
               tooltip: _richMarkdown ? 'Raw source' : 'Formatted view',
             ),
-          PopupMenuButton<ReaderTheme>(
-            icon: const Icon(Icons.palette_outlined, color: Colors.white, size: 20),
-            color: const Color(0xFF1A1A2E),
-            tooltip: 'Reader Theme',
-            onSelected: (t) {
-              setState(() => _theme = t);
-              _saveScrollPosition();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: ReaderTheme.dark, child: Text('Dark', style: TextStyle(color: Colors.white))),
-              PopupMenuItem(value: ReaderTheme.sepia, child: Text('Sepia', style: TextStyle(color: Colors.white))),
-              PopupMenuItem(value: ReaderTheme.light, child: Text('Light Paper', style: TextStyle(color: Colors.white))),
-              PopupMenuItem(value: ReaderTheme.highContrast, child: Text('OLED Contrast', style: TextStyle(color: Colors.white))),
-            ],
-          ),
           IconButton(
-            icon: const Icon(Icons.copy_rounded, color: Colors.white, size: 19),
-            onPressed: _content == null
-                ? null
-                : () {
-                    Clipboard.setData(ClipboardData(text: _content!));
-                    MakawToast.success(context, 'Copied to clipboard');
-                  },
-            tooltip: 'Copy all',
-          ),
-          IconButton(
-            icon: const Icon(Icons.record_voice_over, color: Colors.white, size: 20),
+            icon: const Icon(Icons.headphones_rounded, color: Colors.white, size: 20),
             onPressed: _content == null
                 ? null
                 : () => showReadAloudDialog(context, _content!),
-            tooltip: 'Read Aloud',
-          ),
-          IconButton(
-            icon: Icon(_wrap ? Icons.wrap_text : Icons.compare_arrows, color: Colors.white, size: 20),
-            onPressed: () => setState(() => _wrap = !_wrap),
-            tooltip: _wrap ? 'No wrap' : 'Word wrap',
+            tooltip: 'Listen (Read Aloud)',
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.text_fields, color: Colors.white, size: 20),
+            icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 20),
             color: const Color(0xFF1A1A2E),
+            tooltip: 'Reader Options',
             onSelected: (v) {
+              if (v == 'copy' && _content != null) {
+                Clipboard.setData(ClipboardData(text: _content!));
+                MakawToast.success(context, 'Copied to clipboard');
+                return;
+              }
+              if (v == 'wrap') {
+                setState(() => _wrap = !_wrap);
+                return;
+              }
               if (v == 'up') setState(() => _fontSize = (_fontSize + 1).clamp(8.0, 32.0));
               if (v == 'down') setState(() => _fontSize = (_fontSize - 1).clamp(8.0, 32.0));
               if (v == 'reset') setState(() => _fontSize = 14);
+              if (v == 'theme_dark') setState(() => _theme = ReaderTheme.dark);
+              if (v == 'theme_sepia') setState(() => _theme = ReaderTheme.sepia);
+              if (v == 'theme_light') setState(() => _theme = ReaderTheme.light);
+              if (v == 'theme_oled') setState(() => _theme = ReaderTheme.highContrast);
               _saveScrollPosition();
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'up', child: Text('Increase font', style: TextStyle(color: Colors.white))),
-              PopupMenuItem(value: 'down', child: Text('Decrease font', style: TextStyle(color: Colors.white))),
-              PopupMenuItem(value: 'reset', child: Text('Reset font size', style: TextStyle(color: Colors.white))),
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'up', child: Text('Larger Font', style: TextStyle(color: Colors.white))),
+              const PopupMenuItem(value: 'down', child: Text('Smaller Font', style: TextStyle(color: Colors.white))),
+              const PopupMenuItem(value: 'reset', child: Text('Reset Font (14pt)', style: TextStyle(color: Colors.white))),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'wrap',
+                child: Text(_wrap ? 'Disable Word Wrap' : 'Enable Word Wrap', style: const TextStyle(color: Colors.white)),
+              ),
+              const PopupMenuItem(value: 'copy', child: Text('Copy All Text', style: TextStyle(color: Colors.white))),
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'theme_dark', child: Text('Surface: Slate Dark', style: TextStyle(color: Colors.white))),
+              const PopupMenuItem(value: 'theme_sepia', child: Text('Surface: Warm Sepia', style: TextStyle(color: Colors.white))),
+              const PopupMenuItem(value: 'theme_light', child: Text('Surface: Light Paper', style: TextStyle(color: Colors.white))),
+              const PopupMenuItem(value: 'theme_oled', child: Text('Surface: OLED Black', style: TextStyle(color: Colors.white))),
             ],
           ),
         ],

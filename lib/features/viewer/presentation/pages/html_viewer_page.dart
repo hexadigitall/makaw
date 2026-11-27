@@ -6,6 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/makaw_toast.dart';
 
 class HtmlViewerPage extends StatefulWidget {
   final String filePath;
@@ -118,19 +119,17 @@ class _HtmlViewerPageState extends State<HtmlViewerPage> {
         actions: [
           if (_controller != null)
             IconButton(
-              icon: Icon(Icons.record_voice_over, color: Theme.of(context).colorScheme.onSurface, size: 20),
+              icon: Icon(Icons.headphones_rounded, color: Theme.of(context).colorScheme.onSurface, size: 20),
               onPressed: () async {
                 final text = await _controller!.evaluateJavascript(source: 'document.body.innerText');
-                final clean = text?.toString().trim() ?? '';
-                if (clean.isNotEmpty) {
+                final clean = (text?.toString() ?? '').replaceAll(RegExp(r'^null$'), '').trim();
+                if (clean.isNotEmpty && mounted) {
                   showReadAloudDialog(context, clean);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('No selectable text'), duration: Duration(seconds: 1)),
-                  );
+                } else if (mounted) {
+                  MakawToast.warning(context, 'No readable text on page');
                 }
               },
-              tooltip: 'Read Aloud',
+              tooltip: 'Listen (Read Aloud)',
             ),
           if (_controller != null)
             IconButton(
