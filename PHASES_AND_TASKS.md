@@ -217,5 +217,5 @@
     - [x] `MakawToast` floating obsidian toast overlay (`core/ui/makaw_toast.dart`) + `SnackBarThemeData`.
     - [x] Always-visible multi-format subtitles (`.srt`/`.vtt`/`.ass`/`.ssa`/`.sub`), gzip auto-decompression, subfolder discovery, and live sync offset sheet in `DirectVideoPlayer`.
     - [x] Full step-by-step Back chain (`DirectVideoPlayer -> VideoPlayerWidget -> MediaLibrary -> Makaw Home`) across Home Continue, Recent, and Live Video Card launchers.
-    - [x] Physical book EPUB page-flip swipe, `resolveEpubChapterLink` internal chapter link fix, 4-color highlights/notes, inline Meaning & Pronounce dock, bookmark ribbon, Warmth filter, and **Listen** added to `SlideViewerPage` & `PimViewerPage` (**156/156** tests passing).
+    - [x] Physical book EPUB page-flip swipe, `resolveEpubChapterLink` internal chapter link fix, 4-color highlights/notes, inline Meaning & Pronounce dock, bookmark ribbon, Warmth filter, non-blocking chunked Read Aloud / Listen overlay across Document/Text/Slide/PIM/PDF viewers, portrait header consolidation, **157/157** tests passing (`2ba7296`, CI Run `45977148583` `9m15s`, installed on TECNO `PID 4585` & Redmi `PID 25724`).
   - [ ] Phase E future enhancements: Native binary PPT/MSG OLE2 streams & SQLite FTS5 document full-text search.
