@@ -163,7 +163,7 @@ class _AppRouteObserver extends NavigatorObserver {
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (previousRoute != null) {
+    if (route is PageRoute && previousRoute != null) {
       _routeDepth++;
       onRouteChange?.call();
     }
@@ -171,7 +171,7 @@ class _AppRouteObserver extends NavigatorObserver {
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (_routeDepth > 0) {
+    if (route is PageRoute && _routeDepth > 0) {
       _routeDepth--;
       onRouteChange?.call();
     }
@@ -179,7 +179,7 @@ class _AppRouteObserver extends NavigatorObserver {
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (_routeDepth > 0) {
+    if (route is PageRoute && _routeDepth > 0) {
       _routeDepth--;
       onRouteChange?.call();
     }
@@ -1235,7 +1235,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
 
   // AI
   String _aiApiKey = '';
-  String _aiModel = 'gemini-2.5-flash';
+  String _aiModel = 'gemini-3.8-flash';
 
   void _onMusicChanged() {
     // Only rebuild root MakawHome when structural playback state changes
@@ -3616,6 +3616,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               _goToMakawHome();
             },
             child: SafeArea(
+              bottom: !_isMakawHome,
               child: _currentView == 'browser' ? _buildBrowserContent() : SizedBox.shrink(),
             ),
           ),
@@ -4485,51 +4486,21 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   void _showMiniPlayerQueue() {
+    GlobalPlayerState.instance.pushToolRoute('queue');
     showModalBottomSheet(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Container(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, margin: EdgeInsets.symmetric(vertical: 12), decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2), borderRadius: BorderRadius.circular(2))),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Row(children: [
-                Text('Queue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-                Spacer(),
-                Text('${_musicService.queueLength} tracks', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
-              ]),
-            ),
-            SizedBox(height: 8),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _musicService.queueLength,
-                itemBuilder: (ctx, i) {
-                  final track = _musicService.queue[i];
-                  final isCurrent = i == _musicService.currentIndex;
-                  return ListTile(
-                    leading: Container(
-                      width: 40, height: 40,
-                      decoration: BoxDecoration(color: isCurrent ? kAccentTeal.withOpacity(0.2) : Theme.of(context).cardColor, borderRadius: BorderRadius.circular(8)),
-                      child: Center(child: isCurrent
-                          ? Icon(Icons.equalizer, color: kAccentTeal, size: 20)
-                          : Text('${i + 1}', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: 13))),
-                    ),
-                    title: Text(track.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14, fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400)),
-                    subtitle: Text(track.displayArtist, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5), fontSize: 12)),
-                    onTap: () { Navigator.pop(ctx); _musicService.playFromQueue(i); },
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => MusicQueueSheet(
+        service: _musicService,
+        onOpenPlayer: () {
+          Navigator.of(ctx).pop();
+          _switchToView('music');
+        },
       ),
-    );
+    ).whenComplete(() {
+      GlobalPlayerState.instance.popToolRoute('queue');
+    });
   }
 
   Widget _buildMediaLibraryPage() {
@@ -4571,9 +4542,6 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
       onOpenVideos: () {
         Navigator.of(context).pop();
         _switchToView('player');
-      },
-      onOpenSettings: () {
-        _showToast('Music settings coming soon');
       },
     );
   }
@@ -5447,16 +5415,7 @@ TappableIcon(
     // them on every surface transition churns the inappwebview text-input
     // client and crashes on Windows ("view ID is null" attach storm).
     if (_isMakawHome) {
-      final content = _buildHomeContent();
-      if (!kIsWeb && Responsive.isMobile(context)) {
-        return Column(
-          children: [
-            Expanded(child: content),
-            _buildBottomNavBar(),
-          ],
-        );
-      }
-      return content;
+      return _buildHomeContent();
     }
 
     return Column(
@@ -5599,114 +5558,12 @@ TappableIcon(
       }
     });
   }
-  Widget? _buildHomeWorkspaceBar() {
-    final openTabs = _browserTabs.where((t) => !t.incognito && t.url.isNotEmpty).length;
-    final privateTabs = _browserTabs.where((t) => t.incognito).length;
-    if (openTabs == 0 && privateTabs == 0) return null;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.layers_outlined, color: Color(0xFF38BDF8), size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: InkWell(
-              onTap: _showTabSwitcher,
-              child: Text(
-                openTabs > 0
-                    ? '$openTabs active ${openTabs == 1 ? "browser tab" : "browser tabs"}'
-                    : '$privateTabs private ${privateTabs == 1 ? "tab" : "tabs"}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w500),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: _showTabSwitcher,
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF38BDF8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: const Text('Tabs', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-          ),
-          const SizedBox(width: 6),
-          TextButton(
-            onPressed: () => _switchToView('downloads'),
-            style: TextButton.styleFrom(
-              foregroundColor: kAccentTeal,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: const Text('Downloads', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomNavBar() {
-    final items = <(IconData, Color, String, VoidCallback)>[
-      (Icons.home_rounded, const Color(0xFF94A3B8), 'Home', _goToMakawHome),
-      (Icons.video_collection_outlined, const Color(0xFFF87171), 'Media', () => _switchToView('media')),
-      (Icons.language_rounded, const Color(0xFF00A7C2), 'Browser', _openBrowserTab),
-      (Icons.folder_outlined, const Color(0xFF34D399), 'Files', () => _switchToView('files')),
-      (Icons.code_rounded, const Color(0xFF818CF8), 'Studio', () => _switchToView('studio')),
-    ];
-    return Material(
-      color: const Color(0xFF0B1120),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 66,
-          child: Row(
-            children: [
-              for (final it in items) _footerItem(it.$1, it.$2, it.$3, it.$4),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _footerItem(IconData icon, Color accent, String label, VoidCallback onTap) {
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: accent, size: 24),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: Colors.white70,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ─── Home Screen ───────────────────────────────────────────────────────────
 
   Widget _buildHomeContent() {
     if (_isIncognitoActive) return _buildIncognitoLandingPage();
     if (_showHomeScreen) _urlController.clear();
-    // ─── Makaw Root Portal: master launcher hub ──────────────────────────────
+    // ─── Makaw Root Portal: full-bleed master launcher canvas (no footer) ───
     return MakawHomePortalPage(
       onNavigate: (route) => _switchToView(route),
       onOpenEcosystem: (id) => _openEcosystem(id),
@@ -5718,7 +5575,6 @@ TappableIcon(
       continueItems: _buildHomeContinueItems(),
       recentItems: _buildHomeRecentItems(),
       playerWidget: _buildHomePlayerWidget(),
-      workspaceBar: _buildHomeWorkspaceBar(),
       onClearContinue: _clearHomeContinueGroup,
       onClearRecent: _clearHomeRecentGroup,
       onDismissItem: _dismissHomeActivityItem,
@@ -8143,15 +7999,10 @@ try {
   Future<void> _loadAiKey() async {
     final prefs = await SharedPreferences.getInstance();
     _aiApiKey = AiChatPage.cleanApiKey(prefs.getString('gemini_api_key') ?? '');
-    final savedModel = (prefs.getString('gemini_model') ?? '').trim();
-    if (savedModel.isEmpty ||
-        savedModel.startsWith('gemini-3.') ||
-        savedModel == 'gemini-1.5-flash' ||
-        savedModel == 'gemini-1.5-pro') {
-      _aiModel = 'gemini-2.5-flash';
-    } else {
-      _aiModel = savedModel;
-    }
+    final rawModel = (prefs.getString('gemini_model') ?? '').trim();
+    _aiModel = (rawModel.isEmpty || rawModel == 'gemini-2.5-flash-lite' || rawModel.startsWith('gemini-1.'))
+        ? 'gemini-3.8-flash'
+        : rawModel;
   }
 
   Future<String?> _showAISettings() {
@@ -8159,10 +8010,11 @@ try {
     final modelCtrl = TextEditingController(text: _aiModel);
     bool obscure = true;
     final presetModels = [
+      'gemini-3.8-flash',
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.0-flash',
       'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-2.0-flash',
-      'gemini-2.5-pro',
     ];
     String selectedModel = presetModels.contains(_aiModel) ? _aiModel : 'custom';
 
@@ -8234,7 +8086,7 @@ try {
                       ...presetModels.map((m) => DropdownMenuItem(
                             value: m,
                             child: Text(
-                              m == 'gemini-2.5-flash' ? '$m (Fast · Default)' : m,
+                              m == 'gemini-3.8-flash' ? '$m (Default)' : m,
                               style: const TextStyle(color: Colors.white),
                             ),
                           )),
@@ -8261,7 +8113,7 @@ try {
                       decoration: const InputDecoration(
                         labelText: 'Custom Model ID',
                         labelStyle: TextStyle(color: kTextSecondary),
-                        hintText: 'e.g. gemini-2.5-flash',
+                        hintText: 'e.g. gemini-3.8-flash',
                         hintStyle: TextStyle(color: kTextSecondary),
                         border: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
                         enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: kSurfaceBorder)),
@@ -8286,7 +8138,7 @@ try {
                           : selectedModel)
                       .trim();
                   final effectiveModel =
-                      chosenModel.isNotEmpty ? chosenModel : 'gemini-2.5-flash';
+                      chosenModel.isNotEmpty ? chosenModel : 'gemini-3.8-flash';
                   final prefs = await SharedPreferences.getInstance();
                   if (key.isNotEmpty) {
                     await prefs.setString('gemini_api_key', key);

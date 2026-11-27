@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:makaw/core/services/global_player_state.dart';
 import 'package:makaw/core/storage/lrc_storage_service.dart';
 import 'package:makaw/features/ai/data/services/ai_pdf_exporter.dart';
 import 'package:makaw/features/documents/data/services/archive_service.dart';
@@ -160,6 +161,20 @@ void main() {
       } finally {
         tempDir.deleteSync(recursive: true);
       }
+    });
+  });
+
+  group('GlobalPlayerState queue overlay suppression', () {
+    test('hides floating FAB while queue route is open and restores after close', () {
+      final state = GlobalPlayerState.instance;
+      state.update(isHome: false, inFullPlayer: false);
+      expect(state.isScreenWithPlayer, isFalse);
+
+      state.pushToolRoute('queue');
+      expect(state.isScreenWithPlayer, isTrue);
+
+      state.popToolRoute('queue');
+      expect(state.isScreenWithPlayer, isFalse);
     });
   });
 }

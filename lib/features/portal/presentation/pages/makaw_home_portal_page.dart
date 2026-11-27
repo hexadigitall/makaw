@@ -51,15 +51,19 @@ class MakawHomePortalPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottomPad = MediaQuery.of(context).padding.bottom;
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
+        bottom: false,
         child: AdaptiveContainer(
           child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-            padding: EdgeInsets.symmetric(
-              horizontal: Responsive.isMobile(context) ? 16 : 32,
-              vertical: Responsive.isMobile(context) ? 12 : 24,
+            padding: EdgeInsets.fromLTRB(
+              Responsive.isMobile(context) ? 16 : 32,
+              Responsive.isMobile(context) ? 12 : 24,
+              Responsive.isMobile(context) ? 16 : 32,
+              (Responsive.isMobile(context) ? 16 : 24) + bottomPad,
             ),
             child: Responsive.isDesktop(context)
                 ? _buildDesktopLayout(context)

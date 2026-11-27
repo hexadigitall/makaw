@@ -36,7 +36,7 @@ void main() {
   });
 
   group('AiChatPage model configuration', () {
-    testWidgets('renders AiChatPage with gemini-2.5-flash and migrates legacy defaults', (tester) async {
+    testWidgets('renders AiChatPage with initialModel gemini-3.8-flash', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: AiChatPage(
@@ -47,7 +47,7 @@ void main() {
       );
 
       expect(find.text('AI Assistant'), findsOneWidget);
-      expect(find.text('gemini-2.5-flash'), findsOneWidget);
+      expect(find.text('gemini-3.8-flash'), findsOneWidget);
     });
   });
 }

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -213,30 +212,14 @@ class _AiChatPageState extends State<AiChatPage> {
   bool _lastFailed = false;
   String _lastQuestion = '';
 
-  String _activeModel = 'gemini-2.5-flash';
+  String _activeModel = 'gemini-3.8-flash';
   static const List<String> _candidateModels = [
+    'gemini-3.8-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.0-flash',
     'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-2.0-flash',
-    'gemini-2.5-pro',
   ];
-
-  static String _normalizeModel(String? raw) {
-    final m = (raw ?? '').trim();
-    if (m.isEmpty ||
-        m.startsWith('gemini-3.') ||
-        m == 'gemini-1.5-flash' ||
-        m == 'gemini-1.5-pro') {
-      return 'gemini-2.5-flash';
-    }
-    return m;
-  }
-
-  static final Content _systemInstruction = Content.system(
-    'You are Makaw AI Assistant built on Gemini. Provide fast, accurate, actionable responses. '
-    'Format documents cleanly in Markdown with headings, tables, and bullet points. '
-    'When writing code, use labeled fenced code blocks (e.g. ```dart, ```python, ```html) with complete, runnable implementations.',
-  );
 
   // Sessions and History
   List<AiChatSession> _sessions = [];
@@ -263,8 +246,9 @@ class _AiChatPageState extends State<AiChatPage> {
   void initState() {
     super.initState();
     _key = AiChatPage.cleanApiKey(widget.apiKey);
-    _activeModel = _normalizeModel(widget.initialModel);
-    _httpClient = http.Client();
+    if (widget.initialModel != null && widget.initialModel!.trim().isNotEmpty) {
+      _activeModel = widget.initialModel!.trim();
+    }
     _initTts();
     _loadSessions().then((_) {
       _ensureSession();
@@ -291,13 +275,13 @@ class _AiChatPageState extends State<AiChatPage> {
   void didUpdateWidget(AiChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     final cleaned = AiChatPage.cleanApiKey(widget.apiKey);
-    final newModel = _normalizeModel(widget.initialModel);
+    final newModel = widget.initialModel?.trim();
     bool shouldReset = false;
     if (cleaned != _key) {
       _key = cleaned;
       shouldReset = true;
     }
-    if (newModel != _activeModel && (widget.initialModel ?? '').trim().isNotEmpty) {
+    if (newModel != null && newModel.isNotEmpty && newModel != _activeModel) {
       _activeModel = newModel;
       shouldReset = true;
     }
@@ -449,7 +433,7 @@ class _AiChatPageState extends State<AiChatPage> {
 
   bool _ensureSession({String? model, bool resetHttpClient = false}) {
     if (_key.isEmpty) return false;
-    final m = _normalizeModel(model ?? _activeModel);
+    final m = model ?? _activeModel;
     _activeModel = m;
     try {
       if (resetHttpClient || _httpClient == null) {
@@ -460,14 +444,13 @@ class _AiChatPageState extends State<AiChatPage> {
         model: m,
         apiKey: _key,
         httpClient: _httpClient,
-        systemInstruction: _systemInstruction,
       );
       // Window recent conversation turns to keep prompt payload fast and compact
       final validMsgs = _currentSession.messages
           .where((msg) => msg.text.isNotEmpty && !msg.isError)
           .toList();
-      final windowed = validMsgs.length > 14
-          ? validMsgs.sublist(validMsgs.length - 14)
+      final windowed = validMsgs.length > 16
+          ? validMsgs.sublist(validMsgs.length - 16)
           : validMsgs;
       final history = <Content>[];
       for (final msg in windowed) {
@@ -512,16 +495,12 @@ class _AiChatPageState extends State<AiChatPage> {
           'Please tap the Settings icon (⚙) at the top right to verify and update your key.';
     }
     if (s.contains('resource_exhausted') || s.contains('429')) {
-      return 'Gemini rate limit reached across active models.\n\n'
-          'Tap Retry in a few seconds or switch models in the header (e.g. gemini-2.5-flash-lite).';
-    }
-    if (s.contains('unavailable') || s.contains('503') || s.contains('overloaded')) {
-      return 'Gemini servers reported temporary high demand across fallback models.\n\n'
-          'Please tap Retry in a moment.';
+      return 'Gemini API quota or rate limit exceeded.\n\n'
+          'Please wait a moment before trying again, or check your Google AI Studio plan.';
     }
     if (s.contains('not found') || s.contains('404')) {
-      return 'Gemini model "$_activeModel" was not found.\n\n'
-          'Tap the model badge in the header or Settings (⚙) to select gemini-2.5-flash.';
+      return 'Gemini model "$_activeModel" was not found or is deprecated.\n\n'
+          'Please tap the Settings icon (⚙) to switch to gemini-3.8-flash.';
     }
     return 'Error: $error\n\nPlease check your network connection and API key.';
   }
@@ -675,7 +654,7 @@ class _AiChatPageState extends State<AiChatPage> {
           final buffer = StringBuffer();
           buffer.writeln('Repository/Directory: ${p.basename(dirPath)}');
           buffer.writeln('Path: $dirPath\n');
-          buffer.writeln('File tree:');
+          buffer.writeln('Contents summary:');
           final sampleFiles = <File>[];
           int count = 0;
           await for (final entity in dir.list(recursive: true, followLinks: false)) {
@@ -887,7 +866,7 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToEnd();
     await _saveSessions();
 
-    // Prepare prompt bundle + binary parts (images / PDFs)
+    // Prepare prompt bundle with context and attachments
     final promptBuffer = StringBuffer();
     if ((widget.pageUrl ?? '').isNotEmpty) {
       promptBuffer.writeln('Browser Context Title: ${widget.pageTitle ?? ""}');
@@ -898,7 +877,6 @@ class _AiChatPageState extends State<AiChatPage> {
     for (final att in attached) {
       if (att.bytes != null && att.mimeType != null) {
         binaryParts.add(DataPart(att.mimeType!, att.bytes!));
-        promptBuffer.writeln('Attached binary/media: ${att.name} (${att.mimeType})');
       }
       if (att.type == AiAttachmentType.file || att.type == AiAttachmentType.repo) {
         promptBuffer.writeln('### Attached ${att.name}:');
@@ -921,68 +899,69 @@ class _AiChatPageState extends State<AiChatPage> {
       _activeModel,
       ..._candidateModels.where((m) => m != _activeModel),
     ];
-
     final buffer = StringBuffer();
     Object? lastError;
 
-    for (int idx = 0; idx < orderedModels.length; idx++) {
-      final candidate = orderedModels[idx];
-      if (idx > 0) {
-        final errStr = (lastError ?? '').toString().toLowerCase();
-        final isSocketDrop = errStr.contains('handshake') ||
-            errStr.contains('socket') ||
-            errStr.contains('connection terminated');
-        _ensureSession(model: candidate, resetHttpClient: isSocketDrop);
-        await Future.delayed(const Duration(milliseconds: 180));
-      } else if (_model == null || _chat == null) {
-        _ensureSession(model: candidate);
-      }
-
+    for (int attempt = 0; attempt < orderedModels.length; attempt++) {
+      final candidate = orderedModels[attempt];
       try {
-        final content = binaryParts.isNotEmpty
-            ? Content.multi([TextPart(finalPrompt), ...binaryParts])
-            : Content.text(finalPrompt);
-
-        final stream = (binaryParts.isNotEmpty
-                ? _model!.generateContentStream([content])
-                : _chat!.sendMessageStream(content))
-            .timeout(const Duration(seconds: 24));
-
-        buffer.clear();
-        await for (final chunk in stream) {
-          final piece = chunk.text;
-          if (piece == null || piece.isEmpty) continue;
-          buffer.write(piece);
-          modelMsg.text = buffer.toString();
-          if (mounted) {
-            setState(() {});
-            _scrollToEnd();
-          }
+        if (attempt > 0) {
+          final errStr = (lastError ?? '').toString().toLowerCase();
+          final isSocketDrop = errStr.contains('handshake') ||
+              errStr.contains('socket') ||
+              errStr.contains('connection terminated');
+          _ensureSession(model: candidate, resetHttpClient: isSocketDrop);
+          await Future.delayed(const Duration(milliseconds: 220));
         }
-        if (buffer.isNotEmpty) {
-          lastError = null;
-          break;
+
+        if (binaryParts.isNotEmpty) {
+          final content = Content.multi([
+            TextPart(finalPrompt),
+            ...binaryParts,
+          ]);
+          final resp = await _model!.generateContent([content]).timeout(const Duration(seconds: 40));
+          if (resp.text != null && resp.text!.isNotEmpty) {
+            buffer.write(resp.text);
+            modelMsg.text = buffer.toString();
+            if (mounted) setState(() {});
+            break;
+          }
+        } else {
+          final stream = _chat!
+              .sendMessageStream(Content.text(finalPrompt))
+              .timeout(const Duration(seconds: 40));
+
+          buffer.clear();
+          await for (final chunk in stream) {
+            final piece = chunk.text;
+            if (piece == null || piece.isEmpty) continue;
+            buffer.write(piece);
+            modelMsg.text = buffer.toString();
+            if (mounted) {
+              setState(() {});
+              _scrollToEnd();
+            }
+          }
+          if (buffer.isNotEmpty) {
+            lastError = null;
+            break;
+          }
         }
       } catch (e) {
         lastError = e;
         final errStr = e.toString().toLowerCase();
-        // Do not burn retries on an invalid API key
         if (errStr.contains('api_key_invalid') || errStr.contains('api key not valid')) {
           break;
         }
-        // Fail fast onto next healthy Gemini model for 404, 429, 503, overload, or timeout
         continue;
       }
     }
 
-    // One fast direct generateContent fallback if streaming yielded nothing
-    if (buffer.isEmpty && lastError != null && _model != null && !lastError.toString().toLowerCase().contains('api_key_invalid')) {
+    // Fallback standard generateContent using current healthy _model (never a hardcoded stale model)
+    if (buffer.isEmpty && lastError != null && _model != null && binaryParts.isEmpty && !lastError.toString().toLowerCase().contains('api_key_invalid')) {
       try {
-        _ensureSession(model: 'gemini-2.5-flash-lite', resetHttpClient: true);
-        final content = binaryParts.isNotEmpty
-            ? Content.multi([TextPart(finalPrompt), ...binaryParts])
-            : Content.text(finalPrompt);
-        final resp = await _model!.generateContent([content]).timeout(const Duration(seconds: 24));
+        _ensureSession(resetHttpClient: true);
+        final resp = await _model!.generateContent([Content.text(finalPrompt)]).timeout(const Duration(seconds: 40));
         if (resp.text != null && resp.text!.isNotEmpty) {
           buffer.write(resp.text);
           modelMsg.text = buffer.toString();
@@ -1219,7 +1198,7 @@ ${msg.text}
     final savedModel = prefs.getString('gemini_model');
     setState(() {
       if (savedKey != null) _key = AiChatPage.cleanApiKey(savedKey);
-      if (savedModel != null && savedModel.isNotEmpty) _activeModel = _normalizeModel(savedModel);
+      if (savedModel != null && savedModel.isNotEmpty) _activeModel = savedModel;
       _model = null;
       _chat = null;
     });
@@ -1594,47 +1573,12 @@ ${msg.text}
                   const Icon(Icons.edit_outlined, size: 12, color: _accent),
                 ],
               ),
-              PopupMenuButton<String>(
-                tooltip: 'Switch Gemini model',
-                onSelected: (m) async {
-                  setState(() {
-                    _activeModel = m;
-                    _model = null;
-                    _chat = null;
-                  });
-                  _ensureSession(model: m);
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setString('gemini_model', m);
-                },
-                itemBuilder: (_) => _candidateModels
-                    .map((m) => PopupMenuItem(
-                          value: m,
-                          child: Row(
-                            children: [
-                              Icon(
-                                m == _activeModel ? Icons.check_circle : Icons.auto_awesome,
-                                size: 16,
-                                color: m == _activeModel ? _accent : Colors.grey,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(m),
-                            ],
-                          ),
-                        ))
-                    .toList(),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _activeModel,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const Icon(Icons.arrow_drop_down, size: 16, color: _accent),
-                  ],
+              Text(
+                _activeModel,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ],

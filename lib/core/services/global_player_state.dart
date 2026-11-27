@@ -56,7 +56,8 @@ class GlobalPlayerState extends ChangeNotifier {
           top == 'music' ||
           top == 'player' ||
           top == 'video_player' ||
-          top == 'playlist';
+          top == 'playlist' ||
+          top == 'queue';
     }
     return _isHome;
   }

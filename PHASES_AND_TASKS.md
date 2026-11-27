@@ -160,8 +160,8 @@
 
 ### Phase 9: AI Context/PDF, File Explorer Archives, Lyrics Studio & Player Settings (Sprint 8)
 - [x] **9.1 AI Assistant Upgrades**
-  - [x] Migrate model defaults/fallbacks to Gemini 2.5 family with legacy saved-model normalization and in-chat model picker.
-  - [x] Add browser-page and repository context, binary PDF/image attachments, and code-snippet actions.
+  - [x] Preserve proven `GenerativeModel` streaming with `gemini-3.8-flash` / `3.5-flash` / `3.5-flash-lite` failover and keep-alive HTTP client.
+  - [x] Add browser-page HTTP reading, repository file inlining, binary PDF/image attachments, and **Open in Makaw** actions on exports & snippets.
   - [x] Add pure-Dart multipage PDF export with sanitized ASCII-safe rendering ([ai_pdf_exporter.dart](file:///D:/projects/makaw/lib/features/ai/data/services/ai_pdf_exporter.dart)).
 - [x] **9.2 File Explorer & Archive Engine**
   - [x] Add isolate-based recursive search with category filters, natural sorting, and `FileExclusionFilter` enforcement.
@@ -176,7 +176,8 @@
   - [x] Persist music sort/buffer/skip/crossfade/speed/lyrics/EQ settings and wire native Android equalizer/bass boost.
   - [x] Persist video background play, night mode, mirror, loop, shuffle, skip interval, aspect ratio, and decoder preference.
   - [x] Add A-B repeat, sleep timer, playlist auto-advance, smoother scrubbing, and live Home player/video cards.
-  - [x] Replace redundant mobile Home footer nav with contextual active workspace bar (`_buildHomeWorkspaceBar`) and interactive Home album-art player card.
+  - [x] Remove redundant mobile bottom footer from Makaw Home so the home canvas runs edge-to-edge with full vertical height for cards & Apps.
+  - [x] Unify `MusicQueueSheet` across Makaw Music and Home Music Widget, wire Music footer Settings to `_openMusicSettings`, and suppress floating FAB while Home queue modals are open.
 - [x] **9.5 Documents, Downloads & Verification**
   - [x] Render Word-HTML `.doc` bodies cleanly, add Markdown raw/source toggle, and route more code/subtitle extensions to `TextViewerPage`.
   - [x] Add styled download start/complete/failed notifications with Open, folder, and Downloads actions.
