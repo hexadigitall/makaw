@@ -8,6 +8,7 @@ class Pty {
   Future<int> get exitCode => _exitCode.future;
 
   void write(List<int> bytes) {}
+  void resize(int rows, int cols) {}
   void kill() {}
 
   static Pty start(

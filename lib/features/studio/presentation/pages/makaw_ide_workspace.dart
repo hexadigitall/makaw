@@ -22,6 +22,7 @@ import '../../data/integration_helpers.dart';
 import '../../data/studio_project.dart';
 import '../../data/terminal_engine.dart';
 import '../../data/git_service.dart';
+import '../../../terminal/domain/terminal_models.dart';
 import '../widgets/git_diff_viewer.dart';
 import '../widgets/project_tree_view.dart';
 import '../widgets/source_control_panel.dart';
@@ -926,12 +927,48 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
       ),
     );
     if (host == null) return;
-    _terminalEngine.startSession(
-      workingDirectory: _project.directory.path,
-      executable: 'ssh',
-      arguments: ['-tt', '-p', host.port, host.target],
-    );
     if (!_showDesktopTerminal) setState(() => _showDesktopTerminal = true);
+    final profile = SshHostProfile(
+      id: 'ide_${host.host}_${host.port}',
+      name: host.name.isEmpty ? host.target : host.name,
+      host: host.host,
+      port: int.tryParse(host.port) ?? 22,
+      username: host.user.isEmpty ? 'root' : host.user,
+      createdAt: DateTime.now(),
+    );
+    await _terminalEngine.startSshSession(
+      profile,
+      onPromptPassword: (prompt) async {
+        if (!mounted) return null;
+        final ctrl = TextEditingController();
+        final pw = await showDialog<String>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF16263F),
+            title: Text(prompt, style: const TextStyle(color: Colors.white, fontSize: 14)),
+            content: TextField(
+              controller: ctrl,
+              obscureText: true,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              onSubmitted: (v) => Navigator.of(ctx).pop(v),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+                child: const Text('Connect'),
+              ),
+            ],
+          ),
+        );
+        ctrl.dispose();
+        return pw;
+      },
+    );
   }
 
   /// Attaches the integrated terminal to a running Docker container.

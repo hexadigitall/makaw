@@ -1,385 +1,790 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xterm/xterm.dart';
 
-import '../../../core/platform/conditional_pty.dart';
-import '../../../core/services/terminal_sessions_store.dart';
 import '../../../app/providers/service_providers.dart';
+import '../../../core/services/terminal_sessions_store.dart';
+import '../../../core/ui/makaw_toast.dart';
 import '../../../core/widgets/widgets.dart';
-/// A live terminal session: its own transcript buffer and PTY (started only
-/// while active so we don't hold many processes open).
-class _LiveSession {
-  final int id;
-  final String name;
-  final Terminal term = Terminal(maxLines: 10000);
-  final TerminalController controller = TerminalController();
-  Pty? _pty;
-  bool started = false;
+import '../application/terminal_runtime_manager.dart';
+import '../domain/terminal_models.dart';
+import 'widgets/ssh_hosts_sheet.dart';
+import 'widgets/terminal_soft_keyboard.dart';
 
-  _LiveSession({required this.id, required this.name});
-}
-
-/// Terminal tool with multiple, user-created sessions. Sessions are persisted
-/// so they can be queued as "Recent Sessions" on the Terminal hub. Only the
-/// active session keeps a live PTY; switching sessions starts/resumes that
-/// session's process while its transcript scrollback is retained.
+/// Makaw Terminal 2.0 — persistent multi-session local (`pwsh`, `powershell`,
+/// `cmd`, `Git Bash`, `Ubuntu / WSL`, `zsh`, `bash`, `makaw-sh`) & pure-Dart
+/// `dartssh2` remote terminal workstation for Mobile, Tablet, and Desktop.
 class TerminalSessionsPage extends ConsumerStatefulWidget {
   final int? initialSessionId;
   const TerminalSessionsPage({super.key, this.initialSessionId});
 
   @override
-  ConsumerState<TerminalSessionsPage> createState() => _TerminalSessionsPageState();
+  ConsumerState<TerminalSessionsPage> createState() =>
+      _TerminalSessionsPageState();
 }
 
 class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
-  final Map<int, _LiveSession> _sessions = {};
-  final List<int> _order = [];
-  int? _activeId;
   final _nameCtrl = TextEditingController();
-  bool _ready = false;
+  final _searchCtrl = TextEditingController();
 
-  TerminalSessionsStore get _store => ref.read(terminalSessionsStoreProvider) ?? TerminalSessionsStore();
+  bool _searchVisible = false;
+  List<TerminalSearchMatch> _matches = const [];
+  int _matchCursor = 0;
+  final List<TerminalHighlight> _activeHighlights = [];
+
+  TerminalRuntimeManager get _mgr => ref.read(terminalRuntimeManagerProvider);
 
   @override
   void initState() {
     super.initState();
-    _bootstrap();
+    _mgr.onPromptPassword = _promptSecret;
+    _mgr.addListener(_onManagerChanged);
+    unawaited(_mgr.ensureInitialized(requestedSessionId: widget.initialSessionId));
   }
 
   @override
   void dispose() {
-    for (final s in _sessions.values) {
-      s._pty?.kill();
-      s.controller.dispose();
-    }
+    _clearSearchHighlights();
+    _mgr.onPromptPassword = null;
+    _mgr.removeListener(_onManagerChanged);
     _nameCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _bootstrap() async {
-    final metas = await _store.load();
-    for (final m in metas) {
-      _sessions[m.id] = _LiveSession(id: m.id, name: m.name);
-      _order.add(m.id);
-    }
-    if (widget.initialSessionId == -1) {
-      final m = await _store.create('Terminal ${_order.length + 1}');
-      _sessions[m.id] = _LiveSession(id: m.id, name: m.name);
-      _order.add(m.id);
-    } else if (_order.isEmpty) {
-      final m = await _store.create('Terminal 1');
-      _sessions[m.id] = _LiveSession(id: m.id, name: m.name);
-      _order.add(m.id);
-    }
-    int? target = widget.initialSessionId;
-    if (target == null || target == -1 || !_order.contains(target)) target = _order.first;
-    if (!mounted) return;
-    setState(() {
-      _ready = true;
-      _activeId = target;
-    });
-    _activate(target);
+  void _onManagerChanged() {
+    if (mounted) setState(() {});
   }
 
-  _LiveSession? get _active => _activeId == null ? null : _sessions[_activeId];
-
-  void _activate(int id) {
-    final previous = _active;
-    if (previous != null && previous.id != id) {
-      // Release the previous PTY but keep its transcript buffer.
-      previous._pty?.kill();
-      previous._pty = null;
-      previous.started = false;
-    }
-    final session = _sessions[id];
-    if (session == null) return;
-    _activeId = id;
-    _startSession(session);
-    _store.recentOpen(id);
-  }
-
-  void _startSession(_LiveSession session) {
-    if (session.started) return;
-    if (kIsWeb) return;
-    final List<(String, String, String, List<String>)> candidates;
-    if (Platform.isWindows) {
-      // Prefer PowerShell, but a broken PowerShell quits within a second of
-      // launch (e.g. "Loading managed Windows PowerShell failed with
-      // 0x8009001d"), so fall back to cmd.exe when that happens.
-      candidates = [
-        ('powershell', 'powershell.exe', r'C:\', ['-NoLogo', '-NoProfile']),
-        ('cmd', 'cmd.exe', Platform.environment['USERPROFILE'] ?? r'C:\', const []),
-      ];
-    } else if (Platform.isAndroid) {
-      candidates = [
-        ('sh', 'sh', '/storage/emulated/0', ['-c', 'cd /storage/emulated/0 && sh']),
-      ];
-    } else {
-      candidates = [
-        ('bash', 'bash', Platform.environment['HOME'] ?? '/', const []),
-      ];
-    }
-    _spawnSession(session, candidates);
-  }
-
-  void _spawnSession(_LiveSession session, List<(String, String, String, List<String>)> candidates) {
-    if (candidates.isEmpty) {
-      session.term.write('\r\n[error starting PTY] no usable shell found');
-      session.started = true;
-      return;
-    }
-    final (display, executable, cwd, args) = candidates.first;
-    final remaining = candidates.sublist(1);
-    try {
-      final pty = Pty.start(
-        executable,
-        arguments: args,
-        environment: {'TERM': 'xterm-256color'},
-        workingDirectory: cwd,
-      );
-      session._pty = pty;
-      session.started = true;
-      final startedAt = DateTime.now();
-      final output = StringBuffer();
-      pty.output
-          .cast<List<int>>()
-          .transform(const Utf8Decoder())
-          .listen((chunk) {
-        output.write(chunk);
-        session.term.write(chunk);
-      });
-      if (Platform.isWindows && display == 'cmd') {
-        pty.write(utf8.encode('chcp 65001>nul\r\n'));
-      }
-      pty.exitCode.then((_) {
-        session._pty = null;
-        final crashedAtStartup = remaining.isNotEmpty &&
-            (DateTime.now().difference(startedAt).inMilliseconds < 2000 ||
-                output.toString().contains('8009001d') ||
-                output.toString().contains('managed Windows PowerShell failed') ||
-                output.toString().contains('Internal Windows PowerShell Error'));
-        if (crashedAtStartup) {
-          session.started = false;
-          session.term.write('\r\n[$display exited unexpectedly at startup — '
-              'retrying with ${remaining.first.$1}]\r\n');
-          _spawnSession(session, remaining);
-          return;
-        }
-        session.term.write('\r\n[process exited]');
-      });
-      session.term.onOutput = (data) {
-        pty.write(const Utf8Encoder().convert(data));
-      };
-    } catch (e) {
-      session.term.write('\r\n[error starting $executable]\r\n$e');
-      session.started = false;
-      if (remaining.isNotEmpty) _spawnSession(session, remaining);
-    }
-  }
-
-  Future<void> _newSession() async {
-    final name = await _promptName();
-    if (name == null || !mounted) return;
-    final m = await _store.create(name);
-    if (!mounted) return;
-    final session = _LiveSession(id: m.id, name: m.name);
-    setState(() {
-      _sessions[m.id] = session;
-      _order.add(m.id);
-    });
-    _activate(m.id);
-  }
-
-  Future<String?> _promptName() async {
-    _nameCtrl.clear();
-    final name = await showDialog<String>(
+  Future<String?> _promptSecret(String prompt) async {
+    if (!mounted) return null;
+    final ctrl = TextEditingController();
+    final res = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        title: const Text('New Terminal Session', style: TextStyle(color: Colors.white, fontSize: 16)),
+        backgroundColor: const Color(0xFF0F172A),
+        title: Text(prompt,
+            style: const TextStyle(color: Colors.white, fontSize: 15)),
         content: TextField(
-          controller: _nameCtrl,
+          controller: ctrl,
+          obscureText: true,
           autofocus: true,
           style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
-            hintText: 'Session name (optional)',
+            hintText: 'Enter secret...',
             hintStyle: TextStyle(color: Colors.white38),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF818CF8))),
           ),
           onSubmitted: (v) => Navigator.of(ctx).pop(v),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
-          TextButton(onPressed: () => Navigator.of(ctx).pop(_nameCtrl.text.trim()), child: const Text('Create', style: TextStyle(color: Color(0xFF818CF8)))),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+            child: const Text('Authenticate'),
+          ),
         ],
       ),
     );
-    return (name == null || name.isEmpty) ? null : name;
+    ctrl.dispose();
+    return res;
   }
 
-  void _closeSession(int id) {
-    if (_order.length <= 1) {
-      _startSession(_sessions[id]!);
+  Future<void> _openNewShellPicker() async {
+    await _mgr.refreshEnvironment();
+    if (!mounted) return;
+    final shells = _mgr.availableShells;
+    final sshHosts = _mgr.sshVault.hosts;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text('Launch Shell or Remote Target',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 10),
+                for (final sp in shells)
+                  ListTile(
+                    dense: true,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    leading: Icon(
+                      sp.category == ShellCategory.wsl
+                          ? Icons.dns_outlined
+                          : (sp.isHybridBuiltIn
+                              ? Icons.bolt_rounded
+                              : Icons.terminal_rounded),
+                      color: const Color(0xFF38BDF8),
+                    ),
+                    title: Text(sp.label,
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 13.5)),
+                    subtitle: Text(sp.subtitle,
+                        style: const TextStyle(
+                            color: Color(0xFF94A3B8), fontSize: 11)),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      unawaited(_mgr.createLocalSession(profile: sp));
+                    },
+                  ),
+                if (sshHosts.isNotEmpty) ...[
+                  const Divider(color: Colors.white12),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4),
+                    child: Text('SAVED SSH WORKSTATIONS & SERVERS',
+                        style: TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                  for (final h in sshHosts)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.router_outlined,
+                          color: Color(0xFF34D399)),
+                      title: Text(h.name,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 13.5)),
+                      subtitle: Text(h.displayTarget,
+                          style: const TextStyle(
+                              color: Color(0xFF94A3B8), fontSize: 11)),
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        unawaited(_mgr.createSshSession(h));
+                      },
+                    ),
+                ],
+                const Divider(color: Colors.white12),
+                ListTile(
+                  dense: true,
+                  leading:
+                      const Icon(Icons.add_circle_outline, color: Color(0xFF818CF8)),
+                  title: const Text('Configure SSH Hosts & Keys…',
+                      style:
+                          TextStyle(color: Color(0xFF818CF8), fontSize: 13.5)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _openHostsSheet();
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openHostsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SshHostsSheet(
+        vault: _mgr.sshVault,
+        onConnect: (host) => unawaited(_mgr.createSshSession(host)),
+      ),
+    );
+  }
+
+  void _openAppearanceSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (_, setModalState) {
+          final prefs = _mgr.appearance;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text('Terminal Appearance',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15.5,
+                            fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Text('Font Size (${prefs.fontSize.toStringAsFixed(1)}pt)',
+                            style: const TextStyle(
+                                color: Color(0xFFCBD5E1), fontSize: 12.5)),
+                        Expanded(
+                          child: Slider(
+                            min: 10,
+                            max: 24,
+                            divisions: 14,
+                            value: prefs.fontSize,
+                            onChanged: (v) {
+                              _mgr.updateAppearance(prefs.copyWith(fontSize: v));
+                              setModalState(() {});
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text('Cursor Style',
+                        style:
+                            TextStyle(color: Color(0xFFCBD5E1), fontSize: 12)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final c in const [
+                          ('block', 'Block'),
+                          ('underline', 'Underline'),
+                          ('bar', 'Bar'),
+                        ])
+                          ChoiceChip(
+                            label: Text(c.$2),
+                            selected: prefs.cursorStyle == c.$1,
+                            onSelected: (_) {
+                              _mgr.updateAppearance(
+                                  prefs.copyWith(cursorStyle: c.$1));
+                              setModalState(() {});
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('Theme Palette',
+                        style:
+                            TextStyle(color: Color(0xFFCBD5E1), fontSize: 12)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final preset in MakawTerminalThemePreset.presets)
+                          ChoiceChip(
+                            avatar: CircleAvatar(
+                              backgroundColor: preset.theme.background,
+                              child: Icon(Icons.circle,
+                                  size: 10, color: preset.theme.cyan),
+                            ),
+                            label: Text(preset.label),
+                            selected: prefs.themeId == preset.id,
+                            onSelected: (_) {
+                              _mgr.updateAppearance(
+                                  prefs.copyWith(themeId: preset.id));
+                              setModalState(() {});
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: prefs.showSoftKeys,
+                      onChanged: (v) {
+                        _mgr.updateAppearance(prefs.copyWith(showSoftKeys: v));
+                        setModalState(() {});
+                      },
+                      title: const Text('Show Touch Soft-Key Bar',
+                          style: TextStyle(color: Colors.white, fontSize: 13)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _renameSession(TerminalSessionRuntime rt) async {
+    _nameCtrl.text = rt.name;
+    final next = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        title: const Text('Rename Tab',
+            style: TextStyle(color: Colors.white, fontSize: 15)),
+        content: TextField(
+          controller: _nameCtrl,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(_nameCtrl.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (next != null && next.isNotEmpty) {
+      await _mgr.renameSession(rt.id, next);
+    }
+  }
+
+  void _copySelectionOrScreen(TerminalSessionRuntime rt) {
+    final sel = rt.controller.selection;
+    final text = sel != null
+        ? rt.terminal.buffer.getText(sel)
+        : rt.terminal.buffer.getText();
+    Clipboard.setData(ClipboardData(text: text.trimRight()));
+    MakawToast.success(
+      context,
+      sel != null ? 'Selection copied' : 'Terminal buffer copied',
+    );
+  }
+
+  Future<void> _pasteClipboard(TerminalSessionRuntime rt) async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text ?? '';
+    if (text.isEmpty) {
+      if (mounted) MakawToast.info(context, 'Clipboard is empty');
       return;
     }
-    final idx = _order.indexOf(id);
-    _sessions[id]?._pty?.kill();
+    rt.terminal.paste(text);
+  }
+
+  void _clearSearchHighlights() {
+    for (final h in _activeHighlights) {
+      h.dispose();
+    }
+    _activeHighlights.clear();
+  }
+
+  void _runSearch(String query) {
+    _clearSearchHighlights();
+    final active = _mgr.activeSession;
+    if (active == null || query.trim().isEmpty) {
+      setState(() {
+        _matches = const [];
+        _matchCursor = 0;
+      });
+      return;
+    }
+    final hits = TerminalRuntimeManager.searchScrollback(active.terminal, query);
+    final preset = MakawTerminalThemePreset.byId(_mgr.appearance.themeId);
+    for (final m in hits) {
+      if (m.lineIndex >= active.terminal.buffer.lines.length) continue;
+      final line = active.terminal.buffer.lines[m.lineIndex];
+      final a1 = line.createAnchor(m.startCol);
+      final a2 = line.createAnchor(m.endCol);
+      _activeHighlights.add(
+        active.controller.highlight(
+          p1: a1,
+          p2: a2,
+          color: preset.theme.searchHitBackground.withOpacity(0.55),
+        ),
+      );
+    }
     setState(() {
-      _sessions.remove(id);
-      _order.removeAt(idx);
-      if (_activeId == id) {
-        _activeId = _order[idx.clamp(0, _order.length - 1)];
-      }
+      _matches = hits;
+      _matchCursor = hits.isEmpty ? 0 : hits.length - 1;
     });
-    _store.remove(id);
-    if (_activeId != null) _startSession(_sessions[_activeId!]!);
+  }
+
+  void _stepSearch(int delta) {
+    if (_matches.isEmpty) return;
+    setState(() {
+      _matchCursor = (_matchCursor + delta) % _matches.length;
+      if (_matchCursor < 0) _matchCursor += _matches.length;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final active = _mgr.activeSession;
+    final appearance = _mgr.appearance;
+    final preset = MakawTerminalThemePreset.byId(appearance.themeId);
+    final isWide = MediaQuery.of(context).size.width >= 720;
+
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: preset.theme.background,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface,
+        backgroundColor: const Color(0xFF0F172A),
+        elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onSurface),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Terminal', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            Text(
-              _active?.name ?? '',
-              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
-            ),
-          ],
+        titleSpacing: 0,
+        title: GestureDetector(
+          onTap: active == null ? null : () => _renameSession(active),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _statusDot(active?.state ?? TerminalSessionState.idle),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      active?.name ?? 'Terminal',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                active == null
+                    ? ''
+                    : '${active.shellLabel} · ${active.cwd}',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10.5),
+              ),
+            ],
+          ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.post_add, color: Theme.of(context).colorScheme.onSurface),
-            onPressed: _newSession,
-            tooltip: 'New session',
+            icon: const Icon(Icons.search_rounded, color: Colors.white70, size: 20),
+            tooltip: 'Find in scrollback',
+            onPressed: () {
+              setState(() => _searchVisible = !_searchVisible);
+              if (!_searchVisible) _clearSearchHighlights();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.dns_outlined, color: Color(0xFF38BDF8), size: 20),
+            tooltip: 'SSH Hosts & Keys',
+            onPressed: _openHostsSheet,
+          ),
+          if (isWide && _mgr.order.length >= 2)
+            IconButton(
+              icon: Icon(
+                Icons.vertical_split_rounded,
+                color: _mgr.splitEnabled ? const Color(0xFF38BDF8) : Colors.white70,
+                size: 20,
+              ),
+              tooltip: 'Toggle split pane',
+              onPressed: _mgr.toggleSplitPane,
+            ),
+          IconButton(
+            icon: const Icon(Icons.palette_outlined, color: Colors.white70, size: 20),
+            tooltip: 'Themes & typography',
+            onPressed: _openAppearanceSheet,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_box_outlined, color: Color(0xFF38BDF8), size: 21),
+            tooltip: 'New shell / remote',
+            onPressed: _openNewShellPicker,
           ),
         ],
       ),
-      body: !_ready
-          ? Center(child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary))
+      body: !_mgr.initialized
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFF38BDF8)))
           : Column(
               children: [
-                _buildSessionBar(),
-                Expanded(child: _buildTerminal()),
-                _buildControls(),
+                _buildSessionTabBar(active),
+                if (_searchVisible) _buildSearchBar(),
+                Expanded(
+                  child: active == null
+                      ? const Center(
+                          child: Text('Tap + to launch a shell',
+                              style: TextStyle(color: Colors.white54)))
+                      : (isWide &&
+                              _mgr.splitEnabled &&
+                              _mgr.splitSecondarySession != null)
+                          ? Row(
+                              children: [
+                                Expanded(
+                                    child: _buildTerminalPane(
+                                        active, preset, appearance,
+                                        isPrimary: true)),
+                                Container(width: 1, color: Colors.white12),
+                                Expanded(
+                                    child: _buildTerminalPane(
+                                        _mgr.splitSecondarySession!,
+                                        preset,
+                                        appearance,
+                                        isPrimary: false)),
+                              ],
+                            )
+                          : _buildTerminalPane(active, preset, appearance,
+                              isPrimary: true),
+                ),
+                if (active != null && appearance.showSoftKeys)
+                  TerminalSoftKeyboard(
+                    terminal: active.terminal,
+                    controller: active.controller,
+                    showRow2: appearance.showSoftKeyRow2,
+                    onToggleRow2: (v) => _mgr.updateAppearance(
+                        appearance.copyWith(showSoftKeyRow2: v)),
+                    onCopySelection: () => _copySelectionOrScreen(active),
+                    onPasteClipboard: () => _pasteClipboard(active),
+                    onClear: active.clearDisplay,
+                    onOpenHosts: _openHostsSheet,
+                    onToggleFind: () {
+                      setState(() => _searchVisible = !_searchVisible);
+                      if (!_searchVisible) _clearSearchHighlights();
+                    },
+                  ),
               ],
             ),
     );
   }
 
-  Widget _buildSessionBar() {
+  Widget _buildSessionTabBar(TerminalSessionRuntime? active) {
     return Container(
-      color: Theme.of(context).colorScheme.surface,
+      color: const Color(0xFF0F172A),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (final id in _order) _buildSessionChip(id),
-            const SizedBox(width: 4),
-            IconButton(
-              icon: const Icon(Icons.add, color: Color(0xFF818CF8), size: 20),
-              onPressed: _newSession,
-              tooltip: 'New session',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSessionChip(int id) {
-    final s = _sessions[id];
-    if (s == null) return const SizedBox.shrink();
-    final active = id == _activeId;
-    return GestureDetector(
-      onTap: () => setState(() => _activate(id)),
-      child: Container(
-        margin: const EdgeInsets.only(right: 6),
-        padding: const EdgeInsets.only(left: 12, right: 6),
-        height: 34,
-        decoration: BoxDecoration(
-          color: active ? const Color(0xFF818CF8) : const Color(0xFF1E293B),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Text(s.name,
-                style: TextStyle(color: active ? Colors.black : Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-            const SizedBox(width: 2),
-            TappableIcon(
-              icon: Icons.close,
-              iconSize: 15,
-              color: active ? Colors.black87 : Colors.white38,
-              onTap: () => _closeSession(id),
-              tooltip: 'Close session',
-              target: 28,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTerminal() {
-    final active = _active;
-    if (active == null) return const SizedBox.shrink();
-    if (kIsWeb) {
-      return const Center(child: Text('Terminal is not available on web', style: TextStyle(color: Colors.white54)));
-    }
-    return TerminalView(
-      active.term,
-      controller: active.controller,
-      theme: TerminalThemes.defaultTheme,
-      autofocus: true,
-    );
-  }
-
-  Widget _buildControls() {
-    final active = _active;
-    final pty = active?._pty;
-    return Container(
-      color: Theme.of(context).colorScheme.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
-          Icon(Icons.terminal, size: 16, color: Colors.grey),
-          const SizedBox(width: 8),
-          Text(active?._pty != null ? '● ${active?.name}' : 'idle', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.block, size: 18),
-            tooltip: 'Interrupt (Ctrl+C)',
-            visualDensity: VisualDensity.compact,
-            onPressed: pty == null ? null : () => pty.write(const Utf8Encoder().convert('\x03')),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final id in _mgr.order) _buildTabPill(id),
+                ],
+              ),
+            ),
           ),
+          if (active != null && active.lastExitCode != null)
+            Container(
+              margin: const EdgeInsets.only(left: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: active.lastExitCode == 0
+                    ? const Color(0xFF10B981).withOpacity(0.16)
+                    : const Color(0xFFF87171).withOpacity(0.18),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                active.lastExitCode == 0
+                    ? '✓ 0'
+                    : '✗ ${active.lastExitCode}',
+                style: TextStyle(
+                  color: active.lastExitCode == 0
+                      ? const Color(0xFF34D399)
+                      : const Color(0xFFFCA5A5),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           IconButton(
-            icon: const Icon(Icons.stop, size: 18),
-            tooltip: 'EOF (Ctrl+D)',
+            icon: const Icon(Icons.add, color: Color(0xFF38BDF8), size: 20),
             visualDensity: VisualDensity.compact,
-            onPressed: pty == null ? null : () => pty.write(const Utf8Encoder().convert('\x04')),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh, size: 18),
-            tooltip: 'Clear',
-            visualDensity: VisualDensity.compact,
-            onPressed: () { active?.term.eraseDisplay(); active?.term.eraseScrollbackOnly(); },
+            tooltip: 'Quick new tab',
+            onPressed: () => unawaited(_mgr.createLocalSession()),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildTabPill(int id) {
+    final rt = _mgr.sessionById(id);
+    if (rt == null) return const SizedBox.shrink();
+    final isActive = id == _mgr.activeId;
+    final isSplit = _mgr.splitEnabled && id == _mgr.splitSecondaryId;
+    return GestureDetector(
+      onTap: () => unawaited(_mgr.activateSession(id)),
+      onLongPress: () => _renameSession(rt),
+      child: Container(
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.only(left: 10, right: 4),
+        height: 32,
+        decoration: BoxDecoration(
+          color: isActive
+              ? const Color(0xFF38BDF8)
+              : (isSplit
+                  ? const Color(0xFF1D4ED8).withOpacity(0.45)
+                  : const Color(0xFF1E293B)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _statusDot(rt.state,
+                colorOverride: isActive ? const Color(0xFF090D16) : null),
+            const SizedBox(width: 5),
+            Text(
+              rt.name,
+              style: TextStyle(
+                color: isActive ? const Color(0xFF090D16) : Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 2),
+            TappableIcon(
+              icon: Icons.close,
+              iconSize: 14,
+              color: isActive ? Colors.black87 : Colors.white38,
+              onTap: () => unawaited(_mgr.closeSession(id)),
+              tooltip: 'Close tab',
+              target: 26,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Container(
+      color: const Color(0xFF1E293B),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchCtrl,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: 'Find in terminal output…',
+                hintStyle: TextStyle(color: Colors.white38, fontSize: 12),
+                isDense: true,
+                border: InputBorder.none,
+              ),
+              onChanged: _runSearch,
+            ),
+          ),
+          Text(
+            _matches.isEmpty
+                ? '0'
+                : '${_matchCursor + 1}/${_matches.length}',
+            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
+          ),
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_up, color: Colors.white70, size: 18),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _stepSearch(-1),
+          ),
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 18),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _stepSearch(1),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+            visualDensity: VisualDensity.compact,
+            onPressed: () {
+              setState(() => _searchVisible = false);
+              _clearSearchHighlights();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTerminalPane(
+    TerminalSessionRuntime rt,
+    MakawTerminalThemePreset preset,
+    TerminalAppearancePrefs appearance, {
+    required bool isPrimary,
+  }) {
+    if (kIsWeb) {
+      return const Center(
+        child: Text('Terminal PTY is not available on web',
+            style: TextStyle(color: Colors.white54)),
+      );
+    }
+    return Stack(
+      children: [
+        TerminalView(
+          rt.terminal,
+          controller: rt.controller,
+          theme: preset.theme,
+          textStyle: TerminalStyle(fontSize: appearance.fontSize),
+          cursorType: _mgr.cursorType,
+          deleteDetection: Platform.isAndroid || Platform.isIOS,
+          autofocus: isPrimary,
+        ),
+        if (rt.state == TerminalSessionState.exited ||
+            rt.state == TerminalSessionState.error)
+          Positioned(
+            right: 12,
+            bottom: 12,
+            child: FilledButton.icon(
+              onPressed: () => unawaited(_mgr.restartSession(rt.id)),
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('Reconnect / Restart',
+                  style: TextStyle(fontSize: 12)),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF38BDF8),
+                foregroundColor: const Color(0xFF090D16),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _statusDot(TerminalSessionState st, {Color? colorOverride}) {
+    final c = colorOverride ??
+        switch (st) {
+          TerminalSessionState.running => const Color(0xFF34D399),
+          TerminalSessionState.connecting => const Color(0xFFFBBF24),
+          TerminalSessionState.error => const Color(0xFFF87171),
+          _ => const Color(0xFF64748B),
+        };
+    return Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: c, shape: BoxShape.circle),
     );
   }
 }

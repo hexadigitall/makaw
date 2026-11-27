@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/services/document_to_html.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/in_app_browser_sheet.dart';
 import '../../../../core/ui/makaw_toast.dart';
 
 class DocumentViewerPage extends StatefulWidget {
@@ -161,6 +162,19 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
                     loadWithOverviewMode: true,
                     verticalScrollBarEnabled: false,
                   ),
+                  shouldOverrideUrlLoading: (_, navAction) async {
+                    final u = navAction.request.url?.toString() ?? '';
+                    if (u.startsWith('http://') ||
+                        u.startsWith('https://') ||
+                        u.startsWith('mailto:') ||
+                        u.startsWith('tel:')) {
+                      if (mounted) {
+                        MakawExternalLinks.open(context, u, sourceTitle: widget.title);
+                      }
+                      return NavigationActionPolicy.CANCEL;
+                    }
+                    return NavigationActionPolicy.ALLOW;
+                  },
                   onWebViewCreated: (controller) {
                     _webViewController = controller;
                     enableWebviewLearningActions(controller: controller, context: context);

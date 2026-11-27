@@ -3,6 +3,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:makaw/core/services/text_action_service.dart';
+import 'package:makaw/core/ui/in_app_browser_sheet.dart';
 import 'package:makaw/core/ui/makaw_toast.dart';
 import 'package:makaw/features/media/presentation/pages/video_player_page.dart';
 import 'package:makaw/features/viewer/presentation/pages/epub_viewer_page.dart';
@@ -147,6 +148,40 @@ Dialogue: 0,0:00:05.00,0:00:09.25,Default,,0,0,0,,{\\an8}First\\NSecond
       expect(chunks.last, contains('Sentence number 80'));
       expect(TextActionService.ttsRateForMultiplier(1.0), closeTo(0.5, 0.001));
       expect(TextActionService.ttsRateForMultiplier(1.8), closeTo(0.9, 0.001));
+    });
+
+    test('MakawExternalLinks extracts video and web links cleanly', () {
+      const sample =
+          'Watch lecture at https://youtu.be/abc123, or download https://cdn.example.org/demo.mp4.';
+      final urls = MakawExternalLinks.extractUrls(sample);
+      expect(urls, equals([
+        'https://youtu.be/abc123',
+        'https://cdn.example.org/demo.mp4',
+      ]));
+      expect(MakawExternalLinks.isVideoLikeUrl(urls[0]), isTrue);
+      expect(MakawExternalLinks.isVideoLikeUrl(urls[1]), isTrue);
+      expect(MakawExternalLinks.isVideoLikeUrl('https://docs.makaw.dev/guide'), isFalse);
+    });
+
+    testWidgets('MakawExtractedLinksBar renders playable video pill without overflow',
+        (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(size: Size(360, 640)),
+            child: Scaffold(
+              body: MakawExtractedLinksBar(
+                text: 'Watch demo: https://youtu.be/abc123',
+                sourceTitle: 'Sample EPUB',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text('youtu.be/abc123'), findsOneWidget);
+      expect(find.byIcon(Icons.play_circle_fill_rounded), findsOneWidget);
     });
   });
 }

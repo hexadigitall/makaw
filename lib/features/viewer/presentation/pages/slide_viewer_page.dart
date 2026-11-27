@@ -7,6 +7,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/in_app_browser_sheet.dart';
 import '../../../../core/utils/natural_sort.dart';
 import '../../../documents/data/services/document_state_service.dart';
 
@@ -510,6 +511,10 @@ class _SlideViewerPageState extends State<SlideViewerPage> {
                             ],
                           ),
                         ),
+                ),
+                MakawExtractedLinksBar(
+                  text: '${slide.title}\n${slide.lines.join('\n')}\n${slide.notes}',
+                  sourceTitle: 'Slide ${slide.index}',
                 ),
               ],
             ),

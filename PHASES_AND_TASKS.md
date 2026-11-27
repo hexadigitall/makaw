@@ -218,4 +218,9 @@
     - [x] Always-visible multi-format subtitles (`.srt`/`.vtt`/`.ass`/`.ssa`/`.sub`), gzip auto-decompression, subfolder discovery, and live sync offset sheet in `DirectVideoPlayer`.
     - [x] Full step-by-step Back chain (`DirectVideoPlayer -> VideoPlayerWidget -> MediaLibrary -> Makaw Home`) across Home Continue, Recent, and Live Video Card launchers.
     - [x] Physical book EPUB page-flip swipe, `resolveEpubChapterLink` internal chapter link fix, 4-color highlights/notes, inline Meaning & Pronounce dock, bookmark ribbon, Warmth filter, non-blocking chunked Read Aloud / Listen overlay across Document/Text/Slide/PIM/PDF viewers, portrait header consolidation, **157/157** tests passing (`2ba7296`, CI Run `45977148583` `9m15s`, installed on TECNO `PID 4585` & Redmi `PID 25724`).
-  - [ ] Phase E future enhancements: Native binary PPT/MSG OLE2 streams & SQLite FTS5 document full-text search.
+  - [x] **10.8 Sprint 12 Makaw Terminal 2.0 (Phase 1–3) & Cross-Viewer In-Reader Video/Web Link Browser:**
+    - [x] Singleton `TerminalRuntimeManager` + rich `TerminalSessionsStore` (`cwd`, `shellId`, `hostId`, `isPinned`, appearance prefs) so switching tabs/routes never kills live shells.
+    - [x] Multi-shell discovery (`pwsh`, `powershell`, `cmd`, `Git Bash`, `WSL Ubuntu`, `zsh`, `bash`, `fish`) + Android `makaw-sh` hybrid built-in POSIX/archive/curl/git/ssh REPL (`MakawHybridShell`).
+    - [x] Cross-platform pure-Dart `dartssh2` SSH transport, `FlutterSecureStorage` Host Vault + pure-Dart Ed25519 keygen, Studio SSH unification, 2-row sticky soft-keys/trackpad, 6 themes, scrollback search & wide split panes.
+    - [x] Shared in-reader video/web link browser (`MakawExternalLinks` / `MakawExtractedLinksBar`) replacing EPUB external-link blocking and wired across EPUB, PDF, Document, HTML/MHT, Slides, PIM Mail/Calendar, Vector/SVG & Markdown viewers (**170/170** tests passing).
+  - [ ] Future roadmap: Phase 4–5 (`ToolchainManager`, AI Tool Connector Vault, Git OAuth clone-to-Studio, & Continuous Desktop <-> Mobile Continuum Host/Sync), native binary PPT/MSG OLE2 streams & SQLite FTS5 document full-text search.

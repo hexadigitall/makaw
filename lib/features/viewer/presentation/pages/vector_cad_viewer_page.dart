@@ -8,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
+import '../../../../core/ui/in_app_browser_sheet.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../documents/domain/document_format_registry.dart';
 import '../../../pdf/presentation/pages/pdf_viewer_page.dart';
@@ -254,6 +255,19 @@ svg{max-width:100%;max-height:100%;width:auto;height:auto;}</style>
           builtInZoomControls: true,
           displayZoomControls: false,
         ),
+        shouldOverrideUrlLoading: (_, navAction) async {
+          final u = navAction.request.url?.toString() ?? '';
+          if (u.startsWith('http://') ||
+              u.startsWith('https://') ||
+              u.startsWith('mailto:') ||
+              u.startsWith('tel:')) {
+            if (mounted) {
+              MakawExternalLinks.open(context, u, sourceTitle: widget.title);
+            }
+            return NavigationActionPolicy.CANCEL;
+          }
+          return NavigationActionPolicy.ALLOW;
+        },
       );
     }
 

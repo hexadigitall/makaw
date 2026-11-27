@@ -6,6 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/in_app_browser_sheet.dart';
 import '../../../../core/ui/makaw_toast.dart';
 
 class HtmlViewerPage extends StatefulWidget {
@@ -143,11 +144,27 @@ class _HtmlViewerPageState extends State<HtmlViewerPage> {
         initialData: mhtHtml != null ? InAppWebViewInitialData(data: mhtHtml, baseUrl: WebUri('about:blank')) : null,
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
+          mediaPlaybackRequiresUserGesture: false,
+          allowsInlineMediaPlayback: true,
           useWideViewPort: true,
           supportZoom: true,
           builtInZoomControls: true,
           displayZoomControls: false,
         ),
+        shouldOverrideUrlLoading: (_, navAction) async {
+          final u = navAction.request.url?.toString() ?? '';
+          if ((mhtHtml != null || !uri.toString().startsWith('http')) &&
+              (u.startsWith('http://') ||
+                  u.startsWith('https://') ||
+                  u.startsWith('mailto:') ||
+                  u.startsWith('tel:'))) {
+            if (mounted) {
+              MakawExternalLinks.open(context, u, sourceTitle: widget.title);
+            }
+            return NavigationActionPolicy.CANCEL;
+          }
+          return NavigationActionPolicy.ALLOW;
+        },
         onWebViewCreated: (ctrl) {
           _controller = ctrl;
           enableWebviewLearningActions(controller: ctrl, context: context);

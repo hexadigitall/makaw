@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/in_app_browser_sheet.dart';
 import '../../../documents/data/services/document_state_service.dart';
 
 /// Mail, Calendar & Contact Viewer (`EML`, `MBOX`, `ICS`, `VCF`, `MSG`, `OFT`).
@@ -254,6 +255,10 @@ class _PimViewerPageState extends State<PimViewerPage> {
                     const SizedBox(height: 8),
                     Text(e['description']!, style: const TextStyle(color: Colors.white70, fontSize: 13)),
                   ],
+                  MakawExtractedLinksBar(
+                    text: '${e['location']} ${e['description']}',
+                    sourceTitle: e['summary'],
+                  ),
                 ],
               ),
             ),
@@ -310,6 +315,7 @@ class _PimViewerPageState extends State<PimViewerPage> {
                 if (m.date.isNotEmpty) Text('Date: ${m.date}', style: const TextStyle(color: Color(0xFF64748B), fontSize: 11)),
                 const Divider(color: Color(0xFF283148), height: 22),
                 SelectableText(m.body.isEmpty ? '(Empty body)' : m.body, style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 14, height: 1.5)),
+                MakawExtractedLinksBar(text: m.body, sourceTitle: m.subject),
               ],
             ),
           ),

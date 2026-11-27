@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/in_app_browser_sheet.dart';
 import '../../../../core/ui/makaw_toast.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../documents/domain/document_reader_contract.dart';
@@ -998,7 +999,7 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
       href: rawHref,
     );
     if (target.isExternalUrl) {
-      MakawToast.info(context, 'External link inside book blocked from leaving reader', title: rawHref);
+      MakawExternalLinks.open(context, rawHref, sourceTitle: _book?.bookTitle);
       return;
     }
     if (target.chapterIndex != null) {
@@ -2089,6 +2090,8 @@ class _EpubReaderWidgetState extends State<EpubReaderWidget> {
       ),
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
+        mediaPlaybackRequiresUserGesture: false,
+        allowsInlineMediaPlayback: true,
         supportZoom: true,
         builtInZoomControls: true,
         displayZoomControls: false,

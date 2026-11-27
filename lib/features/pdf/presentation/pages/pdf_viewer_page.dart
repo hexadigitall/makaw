@@ -10,6 +10,7 @@ import 'pdf_organizer_page.dart';
 import 'pdf_merger_page.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/in_app_browser_sheet.dart';
 import '../../../../core/ui/makaw_toast.dart';
 
 class _SearchResult {
@@ -453,6 +454,20 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                     widget.filePath,
                     params: PdfViewerParams(
                       enableTextSelection: true,
+                      linkHandlerParams: PdfLinkHandlerParams(
+                        enableAutoLinkDetection: true,
+                        onLinkTap: (link) {
+                          if (link.url != null) {
+                            MakawExternalLinks.open(
+                              context,
+                              link.url.toString(),
+                              sourceTitle: widget.title,
+                            );
+                          } else if (link.dest != null) {
+                            _controller?.goToDest(link.dest);
+                          }
+                        },
+                      ),
                       boundaryMargin: const EdgeInsets.all(50),
                       minScale: 0.5,
                       maxScale: 5.0,

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/in_app_browser_sheet.dart';
 import '../../../../core/ui/makaw_toast.dart';
 import '../../../ai/presentation/widgets/ai_markdown_view.dart';
 import '../../../documents/data/services/document_state_service.dart';
@@ -280,6 +281,11 @@ class _TextViewerPageState extends State<TextViewerPage> {
                   child: (_isMarkdown && _richMarkdown)
                       ? AiMarkdownView(
                           text: _content!,
+                          onLinkTap: (url) => MakawExternalLinks.open(
+                            context,
+                            url,
+                            sourceTitle: widget.title,
+                          ),
                           onCopyCode: (code, _) {
                             Clipboard.setData(ClipboardData(text: code));
                             ScaffoldMessenger.of(context).showSnackBar(

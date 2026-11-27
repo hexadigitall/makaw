@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,18 +6,29 @@ import 'package:flutter/foundation.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../../core/platform/conditional_pty.dart';
+import '../../terminal/data/makaw_hybrid_shell.dart';
+import '../../terminal/data/shell_discovery.dart';
+import '../../terminal/data/ssh_terminal_transport.dart';
+import '../../terminal/data/ssh_vault_service.dart';
+import '../../terminal/domain/terminal_models.dart';
 
 /// A self-contained terminal engine backing the Code Studio IDE terminal pane.
 ///
-/// Wraps an [xterm] [Terminal]/[TerminalController] with a real [Pty] process
-/// started in a project working directory. On web (where PTY is unavailable)
-/// it degrades to a read-only transcript that shows a notice.
+/// Unifies native [Pty] shells (`pwsh`, `powershell`, `cmd`, `git-bash`, `wsl`,
+/// `zsh`, `bash`), Makaw's built-in `makaw-sh` hybrid shell on stock Android,
+/// and cross-platform `dartssh2` remote SSH sessions behind one controller.
 class MakawTerminalEngine {
   final Terminal terminal = Terminal(maxLines: 10000);
   final TerminalController controller = TerminalController();
   Pty? _pty;
+  MakawHybridShell? _hybrid;
+  StreamSubscription<String>? _hybridSub;
+  SshTerminalTransport? _ssh;
 
-  bool get isRunning => _pty != null;
+  bool get isRunning =>
+      _pty != null ||
+      _hybrid != null ||
+      (_ssh != null && _ssh!.isConnected);
   String _cwd = '';
   String _shell = '';
   bool _disposed = false;
@@ -27,31 +39,17 @@ class MakawTerminalEngine {
 
   String get workingDirectory => _cwd;
 
-  /// Display name of the shell that backs this terminal, based on the
-  /// current platform (updated if a fallback shell takes over).
+  /// Display name of the shell that backs this terminal.
   String get shellName {
     if (_shell.isNotEmpty) return _shell;
     if (kIsWeb) return 'web';
     if (Platform.isWindows) return 'powershell';
-    if (Platform.isAndroid) return 'sh';
+    if (Platform.isAndroid) return 'makaw-sh';
     return 'bash';
   }
 
   /// Discovers Git Bash executable if installed on Windows.
-  static String? findGitBash() {
-    if (!Platform.isWindows) return null;
-    final candidates = [
-      r'C:\Program Files\Git\bin\bash.exe',
-      r'C:\Program Files\Git\usr\bin\bash.exe',
-      r'C:\Program Files (x86)\Git\bin\bash.exe',
-      if (Platform.environment['LOCALAPPDATA'] != null)
-        '${Platform.environment['LOCALAPPDATA']}\\Programs\\Git\\bin\\bash.exe',
-    ];
-    for (final path in candidates) {
-      if (File(path).existsSync()) return path;
-    }
-    return null;
-  }
+  static String? findGitBash() => ShellDiscovery.findGitBash();
 
   /// Starts a Git Bash session directly on Windows if available.
   bool startGitBash({String workingDirectory = ''}) {
@@ -65,9 +63,47 @@ class MakawTerminalEngine {
     return true;
   }
 
-  /// Starts (or restarts) the PTY shell rooted at [workingDirectory] with an
-  /// optional custom [executable]+[arguments] (e.g. `wsl.exe` / `ssh`).
-  /// Safe (and silently a no-op) on web.
+  /// Starts a PowerShell 7 (`pwsh`) session directly on Windows if available.
+  bool startPwsh({String workingDirectory = ''}) {
+    final pwsh = ShellDiscovery.findPwsh();
+    if (pwsh == null) return false;
+    startSession(
+      workingDirectory: workingDirectory,
+      executable: pwsh,
+      arguments: const ['-NoLogo'],
+    );
+    return true;
+  }
+
+  /// Starts a pure-Dart `dartssh2` remote shell session inside Studio's pane
+  /// so SSH works seamlessly on both Android and Desktop.
+  Future<bool> startSshSession(
+    SshHostProfile host, {
+    SshVaultService? vault,
+    Future<String?> Function(String prompt)? onPromptPassword,
+  }) async {
+    _killPty();
+    if (kIsWeb) {
+      terminal.write('SSH is not available on web.\r\n');
+      return false;
+    }
+    _shell = 'ssh:${host.name}';
+    final transport = SshTerminalTransport(
+      host: host,
+      vault: vault ?? SshVaultService(),
+      onPromptPassword: onPromptPassword,
+    );
+    _ssh = transport;
+    final gen = _sessionGeneration;
+    terminal.onResize = (w, h, pw, ph) {
+      if (gen != _sessionGeneration) return;
+      transport.resize(h, w);
+    };
+    return transport.attach(terminal);
+  }
+
+  /// Starts (or restarts) the PTY or hybrid shell rooted at [workingDirectory]
+  /// with an optional custom [executable]+[arguments] (e.g. `wsl.exe`).
   void startSession({
     String workingDirectory = '',
     String? executable,
@@ -81,6 +117,10 @@ class MakawTerminalEngine {
     }
 
     if (executable != null && executable.isNotEmpty) {
+      if (executable == 'makaw-sh') {
+        _startHybrid();
+        return;
+      }
       final label = executable
           .split(Platform.pathSeparator)
           .last
@@ -89,52 +129,89 @@ class MakawTerminalEngine {
       return;
     }
 
+    if (Platform.isAndroid) {
+      // Check for Termux zsh/bash first, otherwise boot Makaw Hybrid Shell
+      // (`makaw-sh`) so core dev utilities & `ssh` work out of the box!
+      const termuxBash = '/data/data/com.termux/files/usr/bin/bash';
+      if (File(termuxBash).existsSync()) {
+        _spawn([
+          ('bash', termuxBash, const ['-l']),
+          ('makaw-sh', 'makaw-sh', const []),
+        ]);
+        return;
+      }
+      _startHybrid();
+      return;
+    }
+
     final List<(String, String, List<String>)> candidates;
     if (Platform.isWindows) {
-      // Prefer PowerShell, but fall back to cmd.exe, Git Bash, or WSL
-      // if PowerShell fails or crashes.
+      final pwsh = ShellDiscovery.findPwsh();
       final gitBash = findGitBash();
       candidates = [
+        if (pwsh != null) ('pwsh', pwsh, const ['-NoLogo']),
         ('powershell', 'powershell.exe', ['-NoLogo', '-NoProfile']),
         ('cmd', 'cmd.exe', const []),
-        if (gitBash != null)
-          ('git-bash', gitBash, ['--login', '-i']),
+        if (gitBash != null) ('git-bash', gitBash, ['--login', '-i']),
         ('wsl', 'wsl.exe', const []),
       ];
-    } else if (Platform.isAndroid) {
-      candidates = [
-        ('sh', 'sh', ['-c', 'cd ${_shellQuote(workingDirectory.isEmpty ? '/storage/emulated/0' : workingDirectory)} && exec sh']),
-      ];
     } else {
+      final envShell = Platform.environment['SHELL'];
       candidates = [
+        if (envShell != null && envShell.isNotEmpty)
+          (envShell.split('/').last, envShell, const ['-i']),
+        ('zsh', '/bin/zsh', const ['-i']),
         ('bash', 'bash', const []),
       ];
     }
     _spawn(candidates);
   }
 
+  void _startHybrid() {
+    final cwd = ShellDiscovery.resolveDefaultCwd(_cwd);
+    final hybrid = MakawHybridShell(initialCwd: cwd);
+    _hybrid = hybrid;
+    _shell = 'makaw-sh';
+    final gen = _sessionGeneration;
+    _hybridSub = hybrid.output.listen((chunk) {
+      if (gen == _sessionGeneration) terminal.write(chunk);
+    });
+    terminal.onOutput = (data) {
+      if (gen == _sessionGeneration) hybrid.feedInput(data);
+    };
+    hybrid.start();
+  }
+
   /// Restarts the underlying process, killing any in-flight shell first.
   void _killPty() {
-    if (_pty == null) return;
     _sessionGeneration++;
     try {
-      _pty!.kill();
+      _pty?.kill();
     } catch (_) {}
     _pty = null;
+    _hybridSub?.cancel();
+    _hybridSub = null;
+    try {
+      _hybrid?.close();
+    } catch (_) {}
+    _hybrid = null;
+    _ssh?.dispose();
+    _ssh = null;
   }
 
   void _spawn(List<(String, String, List<String>)> candidates) {
     if (_disposed) return;
     if (candidates.isEmpty) {
-      terminal.write('\r\n[error starting PTY] no usable shell found');
-      _pty = null;
+      _startHybrid();
       return;
     }
     final (display, executable, args) = candidates.first;
     final remaining = candidates.sublist(1);
-    String? cwd = _cwd.isEmpty ? null : _cwd;
-    if (Platform.isWindows && cwd == null) cwd = Platform.environment['USERPROFILE'];
-    if (!Platform.isWindows && cwd == null) cwd = Platform.environment['HOME'];
+    if (executable == 'makaw-sh') {
+      _startHybrid();
+      return;
+    }
+    final cwd = ShellDiscovery.resolveDefaultCwd(_cwd);
 
     try {
       final pty = Pty.start(
@@ -143,6 +220,7 @@ class MakawTerminalEngine {
         environment: {'TERM': 'xterm-256color'},
         workingDirectory: cwd,
       );
+      pty.resize(terminal.viewHeight.clamp(12, 120), terminal.viewWidth.clamp(40, 240));
       _pty = pty;
       _shell = display;
       final startedAt = DateTime.now();
@@ -150,26 +228,22 @@ class MakawTerminalEngine {
       final generation = _sessionGeneration;
       pty.output
           .cast<List<int>>()
-          .transform(const Utf8Decoder())
+          .transform(const Utf8Decoder(allowMalformed: true))
           .listen((chunk) {
         if (generation != _sessionGeneration) return;
         output.write(chunk);
         terminal.write(chunk);
       });
-      // cmd shows garbage for UTF-8 output by default; switch it to UTF-8.
       if (Platform.isWindows && display == 'cmd') {
         pty.write(utf8.encode('chcp 65001>nul\r\n'));
       }
       terminal.write('\x1b[38;5;49mMakaw terminal — $display'
-          '${cwd == null ? '' : ' • $cwd'}\x1b[0m\r\n'
+          ' • $cwd\x1b[0m\r\n'
           'Type here, Ctrl+C stops the running task, Ctrl+Shift+C copies, '
           'Ctrl+Shift+V pastes.\r\n');
       pty.exitCode.then((code) {
         if (generation != _sessionGeneration) return;
         _pty = null;
-        // A shell that dies seconds after launch is crashing (e.g. a broken
-        // PowerShell: "Loading managed Windows PowerShell failed with
-        // 0x8009001d"). Retry the next candidate rather than dying silently.
         final crashedAtStartup = remaining.isNotEmpty &&
             (DateTime.now().difference(startedAt).inMilliseconds < 2000 ||
                 output.toString().contains('8009001d') ||
@@ -185,7 +259,14 @@ class MakawTerminalEngine {
         terminal.write('\r\n[process exited]');
       });
       terminal.onOutput = (data) {
+        if (generation != _sessionGeneration) return;
         _pty?.write(const Utf8Encoder().convert(data));
+      };
+      terminal.onResize = (w, h, pw, ph) {
+        if (generation != _sessionGeneration) return;
+        try {
+          _pty?.resize(h, w);
+        } catch (_) {}
       };
     } catch (e) {
       terminal.write('\r\n[error starting $executable]\r\n$e');
@@ -194,14 +275,18 @@ class MakawTerminalEngine {
     }
   }
 
-  /// Writes raw [command] (plus a newline) to the running process.
-  void writeCommand(String command) {
-    _pty?.write(const Utf8Encoder().convert(command));
-  }
+  /// Writes raw [command] to the running process.
+  void writeCommand(String command) => writeRaw(command);
 
   /// Sends raw bytes (e.g. '\x03' for Ctrl+C) to the process.
   void writeRaw(String bytes) {
-    _pty?.write(const Utf8Encoder().convert(bytes));
+    if (_pty != null) {
+      _pty!.write(const Utf8Encoder().convert(bytes));
+    } else if (_hybrid != null) {
+      _hybrid!.feedInput(bytes);
+    } else if (_ssh != null) {
+      _ssh!.writeString(bytes);
+    }
   }
 
   /// Interrupts the running process (Ctrl+C / SIGINT).
@@ -219,10 +304,7 @@ class MakawTerminalEngine {
   /// Stops the underlying process and releases the PTY.
   void dispose() {
     _disposed = true;
-    _pty?.kill();
-    _pty = null;
+    _killPty();
     controller.dispose();
   }
-
-  String _shellQuote(String path) => "'${path.replaceAll("'", r"'\''")}'";
 }
