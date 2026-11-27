@@ -7,10 +7,14 @@ import 'package:xterm/xterm.dart';
 
 import '../../../core/platform/conditional_pty.dart';
 import '../../../core/services/terminal_sessions_store.dart';
+import '../data/ai_tool_vault_service.dart';
+import '../data/continuum_sync_service.dart';
 import '../data/makaw_hybrid_shell.dart';
+import '../data/project_runbook_service.dart';
 import '../data/shell_discovery.dart';
 import '../data/ssh_terminal_transport.dart';
 import '../data/ssh_vault_service.dart';
+import '../data/workstation_companion_service.dart';
 import '../domain/terminal_models.dart';
 
 enum TerminalSessionState { idle, connecting, running, exited, error }
@@ -49,6 +53,7 @@ class TerminalSessionRuntime {
   MakawHybridShell? _hybrid;
   SshTerminalTransport? _ssh;
   StreamSubscription<String>? _hybridSub;
+  WebSocket? _companionWs;
   int _generation = 0;
 
   TerminalSessionRuntime({
@@ -68,7 +73,8 @@ class TerminalSessionRuntime {
   bool get isAlive =>
       _pty != null ||
       _hybrid != null ||
-      (_ssh != null && _ssh!.isConnected);
+      (_ssh != null && _ssh!.isConnected) ||
+      (_companionWs != null && _companionWs!.readyState == WebSocket.open);
 
   void writeString(String text) {
     if (_pty != null) {
@@ -77,6 +83,9 @@ class TerminalSessionRuntime {
       _hybrid!.feedInput(text);
     } else if (_ssh != null) {
       _ssh!.writeString(text);
+    } else if (_companionWs != null &&
+        _companionWs!.readyState == WebSocket.open) {
+      _companionWs!.add(text);
     }
   }
 
@@ -87,6 +96,9 @@ class TerminalSessionRuntime {
     } catch (_) {}
     _hybrid?.resize(cols, rows);
     _ssh?.resize(rows, cols);
+    if (_companionWs != null && _companionWs!.readyState == WebSocket.open) {
+      _companionWs!.add(jsonEncode({'resize': true, 'rows': rows, 'cols': cols}));
+    }
   }
 
   void interrupt() => writeString('\x03');
@@ -115,6 +127,11 @@ class TerminalSessionRuntime {
     _ssh?.dispose();
     _ssh = null;
 
+    try {
+      _companionWs?.close();
+    } catch (_) {}
+    _companionWs = null;
+
     state = TerminalSessionState.exited;
   }
 
@@ -132,6 +149,8 @@ class TerminalSessionRuntime {
 class TerminalRuntimeManager extends ChangeNotifier {
   final TerminalSessionsStore store;
   final SshVaultService sshVault;
+  final AiToolVaultService aiVault;
+  final MakawContinuumSync continuum;
 
   final Map<int, TerminalSessionRuntime> _runtimes = {};
   final List<int> _order = [];
@@ -140,6 +159,8 @@ class TerminalRuntimeManager extends ChangeNotifier {
   bool _splitEnabled = false;
   TerminalAppearancePrefs _appearance = const TerminalAppearancePrefs();
   List<ShellProfile> _availableShells = [];
+  List<RunbookCommand> _activeRunbooks = const [];
+  WorkstationCompanionHost? _companionHost;
   bool _initialized = false;
 
   /// Optional interactive secret prompt injected by the active Terminal UI.
@@ -154,8 +175,52 @@ class TerminalRuntimeManager extends ChangeNotifier {
   TerminalRuntimeManager({
     TerminalSessionsStore? store,
     SshVaultService? sshVault,
+    AiToolVaultService? aiVault,
+    MakawContinuumSync? continuum,
   })  : store = store ?? TerminalSessionsStore(),
-        sshVault = sshVault ?? SshVaultService();
+        sshVault = sshVault ?? SshVaultService(),
+        aiVault = aiVault ?? AiToolVaultService(),
+        continuum = continuum ?? MakawContinuumSync();
+
+  List<RunbookCommand> get activeRunbooks => List.unmodifiable(_activeRunbooks);
+  WorkstationCompanionHost? get companionHost => _companionHost;
+  String? get companionPairingUri {
+    final host = _companionHost;
+    if (host == null || !host.isRunning) return null;
+    return CompanionPairing(
+      name: Platform.localHostname,
+      host: _cachedLanIp,
+      port: host.port,
+      token: host.token,
+      rootDir: host.rootDir,
+    ).toPairingUri();
+  }
+
+  String _cachedLanIp = '127.0.0.1';
+
+  Future<void> startCompanionHost({required String rootDir}) async {
+    _companionHost ??= WorkstationCompanionHost(rootDir: rootDir);
+    await _companionHost!.start();
+    try {
+      final ifaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
+      for (final nic in ifaces) {
+        for (final addr in nic.addresses) {
+          if (!addr.isLoopback && !addr.address.startsWith('169.254.')) {
+            _cachedLanIp = addr.address;
+            notifyListeners();
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  Future<void> stopCompanionHost() async {
+    await _companionHost?.stop();
+    _companionHost = null;
+    notifyListeners();
+  }
 
   bool get initialized => _initialized;
   List<int> get order => List.unmodifiable(_order);
@@ -444,6 +509,10 @@ class TerminalRuntimeManager extends ChangeNotifier {
     if (rt.terminal.viewWidth > 0) {
       hybrid.resize(rt.terminal.viewWidth, rt.terminal.viewHeight);
     }
+    unawaited(aiVault.buildSessionEnv().then((envMap) {
+      hybrid.env.addAll(envMap);
+    }));
+    unawaited(refreshRunbooks());
 
     rt._hybridSub = hybrid.output.listen((chunk) {
       if (gen != rt._generation) return;
@@ -476,7 +545,7 @@ class TerminalRuntimeManager extends ChangeNotifier {
     TerminalSessionRuntime rt,
     List<ShellProfile> chain,
     int gen,
-  ) {
+  ) async {
     if (chain.isEmpty) {
       _startHybridShell(rt, gen);
       return;
@@ -489,11 +558,13 @@ class TerminalRuntimeManager extends ChangeNotifier {
     }
 
     final cwd = ShellDiscovery.resolveDefaultCwd(rt.cwd);
+    unawaited(refreshRunbooks());
     try {
+      final aiEnv = await aiVault.buildSessionEnv();
       final pty = Pty.start(
         chosen.executable,
         arguments: chosen.arguments,
-        environment: {'TERM': 'xterm-256color'},
+        environment: {'TERM': 'xterm-256color', ...aiEnv},
         workingDirectory: cwd,
       );
       pty.resize(rt.terminal.viewHeight.clamp(12, 120), rt.terminal.viewWidth.clamp(40, 240));
@@ -716,10 +787,103 @@ class TerminalRuntimeManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    unawaited(_companionHost?.stop());
     for (final rt in _runtimes.values) {
       rt.dispose();
     }
     _runtimes.clear();
     super.dispose();
+  }
+
+  /// Opens a live streaming interactive Workstation Companion shell tab over
+  /// WebSocket directly into a paired Desktop PC.
+  Future<TerminalSessionRuntime> createCompanionSession(
+    CompanionPairing pairing,
+  ) async {
+    if (!_initialized) await ensureInitialized();
+    final meta = await store.create(
+      pairing.name.isEmpty ? pairing.host : pairing.name,
+      targetType: 'companion',
+      shellId: 'workstation',
+      cwd: pairing.rootDir.isEmpty ? 'Workstation' : pairing.rootDir,
+    );
+    final rt = TerminalSessionRuntime(
+      id: meta.id,
+      name: meta.name,
+      targetType: 'companion',
+      shellId: 'workstation',
+      shellLabel: 'Workstation · ${pairing.host}',
+      cwd: meta.cwd,
+      state: TerminalSessionState.connecting,
+    );
+    _runtimes[meta.id] = rt;
+    _order.add(meta.id);
+    _activeId = meta.id;
+    notifyListeners();
+
+    final gen = ++rt._generation;
+    try {
+      rt.terminal.write(
+          '\x1b[38;5;45m[Workstation] Connecting to ${pairing.host}:${pairing.port}...\x1b[0m\r\n');
+      final uri = Uri.parse('${pairing.wsUrl}?token=${Uri.encodeComponent(pairing.token)}');
+      final ws = await WebSocket.connect(uri.toString());
+      if (gen != rt._generation) {
+        await ws.close();
+        return rt;
+      }
+      rt._companionWs = ws;
+      rt.state = TerminalSessionState.running;
+      rt.terminal.write('\x1b[32m[Workstation] Live Desktop Shell Ready\x1b[0m\r\n');
+      ws.listen(
+        (chunk) {
+          if (gen == rt._generation && chunk is String) {
+            rt.terminal.write(chunk);
+          }
+        },
+        onDone: () {
+          if (gen != rt._generation) return;
+          rt._companionWs = null;
+          rt.state = TerminalSessionState.exited;
+          rt.terminal.write('\r\n\x1b[33m[Workstation disconnected]\x1b[0m\r\n');
+          notifyListeners();
+        },
+      );
+      rt.terminal.onOutput = (data) {
+        if (gen == rt._generation && ws.readyState == WebSocket.open) {
+          ws.add(data);
+        }
+      };
+      rt.terminal.onResize = (w, h, pw, ph) {
+        if (gen == rt._generation) rt.resize(w, h);
+      };
+    } catch (e) {
+      rt.state = TerminalSessionState.error;
+      rt.terminal.write('\r\n\x1b[31m[Workstation error] $e\x1b[0m\r\n');
+    }
+    notifyListeners();
+    return rt;
+  }
+
+  Future<void> refreshRunbooks() async {
+    final active = activeSession;
+    if (active == null) return;
+    final auto = await RunbookDetector.detect(active.cwd);
+    final custom = await RunbookDetector.loadCustom();
+    _activeRunbooks = [...auto, ...custom];
+    notifyListeners();
+  }
+
+  Future<void> syncAiEnvToActiveSession() async {
+    final active = activeSession;
+    if (active == null) return;
+    final envMap = await aiVault.buildSessionEnv();
+    active._hybrid?.env.addAll(envMap);
+    notifyListeners();
+  }
+
+  void runQuickCommand(String cmd) {
+    final active = activeSession;
+    if (active == null) return;
+    active.writeString('$cmd\r');
   }
 }

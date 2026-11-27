@@ -9,10 +9,13 @@ import 'package:xterm/xterm.dart';
 
 import '../../../app/providers/service_providers.dart';
 import '../../../core/services/terminal_sessions_store.dart';
+import '../../../core/ui/in_app_browser_sheet.dart';
 import '../../../core/ui/makaw_toast.dart';
 import '../../../core/widgets/widgets.dart';
 import '../application/terminal_runtime_manager.dart';
+import '../data/project_runbook_service.dart';
 import '../domain/terminal_models.dart';
+import 'widgets/dev_ecosystem_sheet.dart';
 import 'widgets/sftp_browser_sheet.dart';
 import 'widgets/ssh_hosts_sheet.dart';
 import 'widgets/terminal_soft_keyboard.dart';
@@ -237,6 +240,146 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
         vault: _mgr.sshVault,
         onOpenInTerminal: (remoteDir) => unawaited(
           _mgr.createSshSession(host.copyWith(defaultRemoteDir: remoteDir)),
+        ),
+      ),
+    );
+  }
+
+  void _openDevHub([int tab = 0]) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF090D16),
+      builder: (_) => DevEcosystemSheet(manager: _mgr, initialTab: tab),
+    );
+  }
+
+  Future<void> _openAiDoctor(TerminalSessionRuntime rt) async {
+    final tail = rt.terminal.buffer.getText();
+    final lines = tail.split('\n');
+    final snippet = lines.length > 35
+        ? lines.sublist(lines.length - 35).join('\n')
+        : tail;
+    MakawToast.info(context, 'Analyzing error with Makaw AI Doctor...');
+    final diag = await _mgr.aiVault.diagnoseFailure(
+      command: rt.lastCommand.isEmpty ? 'command' : rt.lastCommand,
+      exitCode: rt.lastExitCode ?? 1,
+      outputTail: snippet,
+    );
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        title: const Row(
+          children: [
+            Icon(Icons.auto_awesome, color: Color(0xFF818CF8), size: 20),
+            SizedBox(width: 8),
+            Text('AI Error Doctor',
+                style: TextStyle(color: Colors.white, fontSize: 15)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(diag.explanation,
+                  style: const TextStyle(
+                      color: Color(0xFFE2E8F0), fontSize: 13, height: 1.45)),
+              if (diag.suggestedCommand != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF090D16),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    diag.suggestedCommand!,
+                    style: const TextStyle(
+                        color: Color(0xFF34D399),
+                        fontFamily: 'monospace',
+                        fontSize: 12),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close', style: TextStyle(color: Colors.white54))),
+          if (diag.suggestedCommand != null)
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _mgr.runQuickCommand(diag.suggestedCommand!);
+              },
+              child: const Text('Run Fix'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _openDetectedLinks(TerminalSessionRuntime rt) {
+    final links = TerminalLinkDetector.extractFromTerminal(rt.terminal);
+    if (links.isEmpty) {
+      MakawToast.info(context, 'No URLs or file:line traces in recent output');
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
+          children: [
+            const Text('Detected Output Links & Traces',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            for (final link in links)
+              ListTile(
+                dense: true,
+                leading: Icon(
+                  link.kind == TerminalLinkKind.url
+                      ? Icons.open_in_browser_rounded
+                      : Icons.bug_report_outlined,
+                  color: link.kind == TerminalLinkKind.url
+                      ? const Color(0xFF38BDF8)
+                      : const Color(0xFFFBBF24),
+                ),
+                title: Text(link.label,
+                    style: const TextStyle(color: Colors.white, fontSize: 13)),
+                subtitle: Text(link.target,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  if (link.kind == TerminalLinkKind.url) {
+                    MakawExternalLinks.open(context, link.target,
+                        sourceTitle: rt.name);
+                  } else {
+                    Clipboard.setData(ClipboardData(
+                        text: '${link.target}:${link.line ?? 1}'));
+                    MakawToast.success(context, 'Copied ${link.label}');
+                  }
+                },
+              ),
+          ],
         ),
       ),
     );
@@ -577,24 +720,30 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: Colors.white70, size: 20),
               color: const Color(0xFF0F172A),
-              onSelected: (v) {
-                if (v == 'find') {
-                  setState(() => _searchVisible = !_searchVisible);
-                  if (!_searchVisible) _clearSearchHighlights();
-                } else if (v == 'appearance') {
-                  _openAppearanceSheet();
-                } else if (v == 'clear' && active != null) {
-                  active.clearDisplay();
-                } else if (v == 'rename' && active != null) {
-                  _renameSession(active);
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'find', child: Text('Find in scrollback', style: TextStyle(color: Colors.white))),
-                PopupMenuItem(value: 'appearance', child: Text('Themes & Font', style: TextStyle(color: Colors.white))),
-                PopupMenuItem(value: 'clear', child: Text('Clear screen', style: TextStyle(color: Colors.white))),
-                PopupMenuItem(value: 'rename', child: Text('Rename tab', style: TextStyle(color: Colors.white))),
-              ],
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'hub', child: Text('Dev Hub (AI / Packages / Pair)', style: TextStyle(color: Colors.white))),
+              PopupMenuItem(value: 'links', child: Text('Detected Links & Traces', style: TextStyle(color: Colors.white))),
+              PopupMenuItem(value: 'find', child: Text('Find in scrollback', style: TextStyle(color: Colors.white))),
+              PopupMenuItem(value: 'appearance', child: Text('Themes & Font', style: TextStyle(color: Colors.white))),
+              PopupMenuItem(value: 'clear', child: Text('Clear screen', style: TextStyle(color: Colors.white))),
+              PopupMenuItem(value: 'rename', child: Text('Rename tab', style: TextStyle(color: Colors.white))),
+            ],
+            onSelected: (v) {
+              if (v == 'hub') {
+                _openDevHub();
+              } else if (v == 'links' && active != null) {
+                _openDetectedLinks(active);
+              } else if (v == 'find') {
+                setState(() => _searchVisible = !_searchVisible);
+                if (!_searchVisible) _clearSearchHighlights();
+              } else if (v == 'appearance') {
+                _openAppearanceSheet();
+              } else if (v == 'clear' && active != null) {
+                active.clearDisplay();
+              } else if (v == 'rename' && active != null) {
+                _renameSession(active);
+              }
+            },
             ),
         ],
       ),
@@ -631,6 +780,7 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
                           : _buildTerminalPane(active, preset, appearance,
                               isPrimary: true),
                 ),
+                if (active != null) _buildContextActionStrip(active),
                 if (active != null && appearance.showSoftKeys)
                   TerminalSoftKeyboard(
                     terminal: active.terminal,
@@ -649,6 +799,86 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
                   ),
               ],
             ),
+    );
+  }
+
+  Widget _buildContextActionStrip(TerminalSessionRuntime active) {
+    final runbooks = _mgr.activeRunbooks;
+    final hasError = active.lastExitCode != null && active.lastExitCode != 0;
+    return Container(
+      height: 32,
+      color: const Color(0xFF0B1120),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        children: [
+          _contextChip(
+            icon: Icons.hub_outlined,
+            label: 'Dev Hub',
+            accent: const Color(0xFF38BDF8),
+            onTap: _openDevHub,
+          ),
+          if (hasError)
+            _contextChip(
+              icon: Icons.auto_awesome,
+              label: 'Fix ✗ ${active.lastExitCode}',
+              accent: const Color(0xFFF87171),
+              onTap: () => _openAiDoctor(active),
+            ),
+          _contextChip(
+            icon: Icons.link_rounded,
+            label: 'Links',
+            accent: const Color(0xFF34D399),
+            onTap: () => _openDetectedLinks(active),
+          ),
+          for (final rb in runbooks.take(5))
+            _contextChip(
+              icon: rb.category == 'test'
+                  ? Icons.verified_outlined
+                  : Icons.play_arrow_rounded,
+              label: rb.label,
+              accent: const Color(0xFFFBBF24),
+              onTap: () => _mgr.runQuickCommand(rb.command),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _contextChip({
+    required IconData icon,
+    required String label,
+    required Color accent,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Material(
+        color: accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 13, color: accent),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
