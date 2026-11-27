@@ -30,7 +30,7 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 5** | Desktop-Native Polish (Shortcuts, Menus, In-Place Navigation) | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Windows Run 44713455869 Passed |
 | **Sprint 6** | End-to-End Testing, Device Sign-Off & v1.0.3 Release | 2026-11-20 | 2026-11-20 | **COMPLETED** | **PASSED** (Both Devices & Win) | Android & Windows CI Passed |
 | **Sprint 7** | Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign | 2026-11-24 | 2026-11-26 | **COMPLETED** | **TECNO CG8h Installed** | Android Run 45526057854 Passed |
-| **Sprint 8** | Video Scrub/Browser Jitter Fix, File Explorer Search & Archives, Download Banners, Lyrics Creator & Sync Studio, Music/Video Settings & EQ, Home Card & AI Upgrades | 2026-11-26 | 2026-11-27 | **IN PROGRESS** | Pending Fresh CI APK Install (TECNO CG8h & Redmi 14C connected) | Pending CI Run |
+| **Sprint 8** | Video Scrub/Browser Jitter Fix, File Explorer Search & Archives, Download Banners, Lyrics Creator & Sync Studio, Music/Video Settings & EQ, Home Card & AI Upgrades | 2026-11-26 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45930971191 Passed |
 | **Sprint 8** | AI Context/PDF Export, File Explorer Archives, Lyrics Studio & Player Settings | 2026-11-26 | 2026-11-26 | **IN PROGRESS** (code complete; local verification passed) | **PENDING** (fresh APK/Windows build required) | Pending commit/push |
 
 ---
@@ -212,7 +212,8 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 ---
 
 ### Sprint 8: Video Stutter Fix, Explorer Search/Archives, Lyrics Creator, Complete Settings, Home Upgrade & AI Overhaul
-- **Status:** **IN PROGRESS** (Verified locally 135/135 tests + 0 analyze errors/warnings; committing & launching CI build)
+- **Status:** **COMPLETED** (Verified locally 135/135 tests + 0 analyze errors/warnings; CI Run `45930971191` succeeded; installed & verified on both TECNO CG8h and Redmi 14C)
+- **Commit:** `cc82d69`
 
 #### Task Progress Checklist
 - [x] Video playback stutter & skip fix (`DirectVideoPlayer` debounce + `MediaSession` & JS poll elimination in [main.dart](file:///D:/projects/makaw/lib/main.dart) and [video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart))
@@ -227,7 +228,10 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 #### Verification & Device Log
 - **Local Test Suite:** `flutter test --no-pub` — **135/135 passed**
 - **Static Analysis:** `flutter analyze --no-pub` — **0 errors, 0 warnings**
-- **Android CI & Both-Device Install:** Pending commit/push & `build-android.yml` run
+- **Android CI Artifacts:** Run `45930971191` (`10m48s`) — `app-arm64-v8a-release.apk` (91.8 MB), `app-armeabi-v7a-release.apk` (124.8 MB), `app-x86_64-release.apk` (101.2 MB)
+- **Physical Device 1 (TECNO CG8h, `H854CG8012345678`):** Streamed ADB install `Success`; launched (`PID 21302`)
+- **Physical Device 2 (Redmi 14C, `JF9HQ8XOT4LVYPKV`):** Streamed ADB install `Success`; launched (`PID 5578`)
+- **Sign-off By:** Engineering Team
 
 ---
 

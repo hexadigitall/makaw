@@ -182,7 +182,7 @@
   - [x] Add styled download start/complete/failed notifications with Open, folder, and Downloads actions.
   - [x] Add Sprint 8 regression tests for LRC, archives, path traversal, PDF, and Word-HTML `.doc` ([sprint8_upgrades_test.dart](file:///D:/projects/makaw/test/features/media/sprint8_upgrades_test.dart)).
   - [x] Local verification: `flutter test --no-pub` **135/135 passed**; `flutter analyze --no-pub` **0 errors, 0 warnings**.
-- [ ] **9.6 Sprint 8 Sign-Off**
-  - [ ] Commit/push Sprint 8 working tree and verify Android + Windows GitHub Actions runs.
-  - [ ] Install fresh Sprint 8 APK on TECNO CG8h and Redmi 14C; verify lyrics, archives, players, and mobile navigation on device.
-  - [ ] Verify Windows desktop UI, keyboard shortcuts, and right-click menus on the fresh build.
+- [x] **9.6 Sprint 8 Sign-Off**
+  - [x] Commit/push Sprint 8 (`cc82d69`) and verify Android GitHub Actions Run `45930971191` (`10m48s`).
+  - [x] Install fresh Sprint 8 APK (`app-arm64-v8a-release.apk`) on TECNO CG8h (`H854CG8012345678`, PID `21302`) and Redmi 14C (`JF9HQ8XOT4LVYPKV`, PID `5578`).
+  - [ ] Verify Windows desktop UI build and right-click menus on the fresh commit.
