@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/services/document_to_html.dart';
 import '../../../../core/services/text_action_service.dart';
 
@@ -43,6 +45,31 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
     } catch (e) {
       if (mounted) setState(() { _error = 'Error reading document: $e'; _isLoading = false; });
     }
+  }
+
+  bool _restoredScroll = false;
+
+  Future<void> _restoreScroll() async {
+    if (_restoredScroll || _webViewController == null) return;
+    _restoredScroll = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('doc_scroll_${widget.filePath.hashCode}');
+      if (raw == null) return;
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final y = (map['y'] as num?)?.toInt() ?? 0;
+      if (y > 20) {
+        await Future.delayed(const Duration(milliseconds: 120));
+        await _webViewController?.scrollTo(x: 0, y: y, animated: false);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveScroll(int y) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('doc_scroll_${widget.filePath.hashCode}', jsonEncode({'y': y}));
+    } catch (_) {}
   }
 
   void _loadHtml() {
@@ -133,6 +160,14 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
                     _webViewController = controller;
                     enableWebviewLearningActions(controller: controller, context: context);
                     _loadHtml();
+                  },
+                  onLoadStop: (controller, _) {
+                    _restoreScroll();
+                  },
+                  onScrollChanged: (controller, x, y) {
+                    if (_restoredScroll && y >= 0) {
+                      _saveScroll(y);
+                    }
                   },
                   onLongPressHitTestResult: (controller, hitTestResult) {
                     handleWebLongPress(context, hitTestResult);

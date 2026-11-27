@@ -24,6 +24,7 @@ class MediaLibraryPage extends StatefulWidget {
   final VoidCallback onHome;
   final VoidCallback? onOpenMusicPlayer;
   final VoidCallback? onOpenVideoPlayer;
+  final MediaCategory initialCategory;
 
   const MediaLibraryPage({
     super.key,
@@ -36,6 +37,7 @@ class MediaLibraryPage extends StatefulWidget {
     required this.onHome,
     this.onOpenMusicPlayer,
     this.onOpenVideoPlayer,
+    this.initialCategory = MediaCategory.all,
   });
 
   @override
@@ -43,7 +45,7 @@ class MediaLibraryPage extends StatefulWidget {
 }
 
 class _MediaLibraryPageState extends State<MediaLibraryPage> {
-  MediaCategory _selectedCategory = MediaCategory.all;
+  late MediaCategory _selectedCategory = widget.initialCategory;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 

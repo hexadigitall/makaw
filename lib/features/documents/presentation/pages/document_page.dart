@@ -90,10 +90,18 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _kDark,
-      appBar: _selectedFolder != null ? _buildFolderAppBar() : _buildAppBar(),
-      body: _selectedFolder != null ? _buildFolderContents() : _buildBody(),
+    return PopScope(
+      canPop: _selectedFolder == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _selectedFolder != null) {
+          setState(() => _selectedFolder = null);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: _kDark,
+        appBar: _selectedFolder != null ? _buildFolderAppBar() : _buildAppBar(),
+        body: _selectedFolder != null ? _buildFolderContents() : _buildBody(),
+      ),
     );
   }
 

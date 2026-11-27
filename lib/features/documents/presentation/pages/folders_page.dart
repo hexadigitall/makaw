@@ -20,11 +20,15 @@ import '../../data/services/device_file_browser.dart';
 class FoldersPage extends StatefulWidget {
   final void Function(String filePath) openFile;
   final String? initialPath;
+  final String? highlightPath;
+  final bool autoOpenHighlight;
 
   const FoldersPage({
     super.key,
     required this.openFile,
     this.initialPath,
+    this.highlightPath,
+    this.autoOpenHighlight = false,
   });
 
   @override
@@ -37,6 +41,9 @@ class _FoldersPageState extends State<FoldersPage> {
   bool _loading = false;
   String? _error;
   bool _permissionGranted = true;
+  final ScrollController _dirScrollCtrl = ScrollController();
+  String? _highlightedPath;
+  bool _handledHighlight = false;
 
   // Search & Filter state
   bool _searchMode = false;
@@ -61,18 +68,49 @@ class _FoldersPageState extends State<FoldersPage> {
   static const _kCard = Color(0xFF141C2E);
   static const _kBorder = Color(0xFF1E293B);
 
+  void _seedInitialPathStack(String targetDir) {
+    final sep = Platform.pathSeparator;
+    final cleanTarget = targetDir.endsWith(sep) && targetDir.length > 1
+        ? targetDir.substring(0, targetDir.length - 1)
+        : targetDir;
+    final root = PlatformPaths.storageRoot();
+    final cleanRoot = root.endsWith(sep) && root.length > 1
+        ? root.substring(0, root.length - 1)
+        : root;
+    if (cleanTarget.toLowerCase() == cleanRoot.toLowerCase() ||
+        cleanTarget.toLowerCase().startsWith('${cleanRoot.toLowerCase()}$sep')) {
+      _pathStack.add(cleanRoot);
+      if (cleanTarget.length > cleanRoot.length) {
+        final rel = cleanTarget.substring(cleanRoot.length + 1);
+        var accum = cleanRoot;
+        for (final part in rel.split(sep)) {
+          if (part.isEmpty) continue;
+          accum = '$accum$sep$part';
+          _pathStack.add(accum);
+        }
+      }
+    } else {
+      _pathStack.add(cleanTarget);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _highlightedPath = widget.highlightPath;
     final init = widget.initialPath;
     if (init != null && init.isNotEmpty && Directory(init).existsSync()) {
-      _pathStack.add(init);
+      _seedInitialPathStack(init);
+    } else if (_highlightedPath != null && _highlightedPath!.isNotEmpty) {
+      final parent = Directory(_highlightedPath!).parent.path;
+      if (Directory(parent).existsSync()) _seedInitialPathStack(parent);
     }
     _ensurePermission();
   }
 
   @override
   void dispose() {
+    _dirScrollCtrl.dispose();
     _searchDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
@@ -156,6 +194,36 @@ class _FoldersPageState extends State<FoldersPage> {
         _entries = entries;
         _loading = false;
       });
+      _scrollToHighlightedEntry();
+    });
+  }
+
+  void _scrollToHighlightedEntry() {
+    final target = _highlightedPath;
+    if (target == null || target.isEmpty || _handledHighlight) return;
+    _handledHighlight = true;
+    final normTarget = target.replaceAll('\\', '/').toLowerCase();
+    final idx = _entries.indexWhere(
+      (e) => e.path.replaceAll('\\', '/').toLowerCase() == normTarget,
+    );
+    if (idx < 0) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_dirScrollCtrl.hasClients) {
+        final targetOffset = (idx * 68.0).clamp(0.0, _dirScrollCtrl.position.maxScrollExtent);
+        _dirScrollCtrl.animateTo(
+          targetOffset,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+        );
+      }
+      if (widget.autoOpenHighlight) {
+        final entry = _entries[idx];
+        if (!entry.isDirectory && ArchiveService.isArchivePath(entry.path)) {
+          _openArchiveSheet(entry);
+        }
+      }
     });
   }
 
@@ -652,6 +720,7 @@ class _FoldersPageState extends State<FoldersPage> {
       backgroundColor: _kCard,
       onRefresh: () async => _load(_currentPath),
       child: ListView.builder(
+        controller: _dirScrollCtrl,
         padding: const EdgeInsets.all(12),
         itemCount: _entries.length,
         itemBuilder: (_, i) => _buildEntry(_entries[i]),
@@ -724,6 +793,8 @@ class _FoldersPageState extends State<FoldersPage> {
 
   Widget _buildEntry(DeviceEntry e, {bool showParentPath = false}) {
     final selected = _selectedPaths.contains(e.path);
+    final isHighlighted = _highlightedPath != null &&
+        _highlightedPath!.replaceAll('\\', '/').toLowerCase() == e.path.replaceAll('\\', '/').toLowerCase();
     final isArchive = !e.isDirectory && ArchiveService.isArchivePath(e.path);
 
     void handleTap() {
@@ -750,10 +821,17 @@ class _FoldersPageState extends State<FoldersPage> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
       child: Material(
-        color: selected ? const Color(0xFF232F4D) : _kCard,
+        color: selected
+            ? const Color(0xFF232F4D)
+            : (isHighlighted ? const Color(0xFF1A2942) : _kCard),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(11),
-          side: BorderSide(color: selected ? _kAccent : _kBorder, width: selected ? 1.2 : 0.6),
+          side: BorderSide(
+            color: selected
+                ? _kAccent
+                : (isHighlighted ? const Color(0xFF14B8A6) : _kBorder),
+            width: (selected || isHighlighted) ? 1.4 : 0.6,
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: ListTile(

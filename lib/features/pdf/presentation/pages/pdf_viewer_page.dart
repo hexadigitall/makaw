@@ -85,6 +85,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
 
   @override
   void dispose() {
+    _savePosition();
     _ttsPoller?.cancel();
     _searchCtrl.dispose();
     _chromeAnim.dispose();
@@ -110,30 +111,46 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
     if (document == null) return;
     _document = document;
     _totalPages = document.pages.length;
-    setState(() { _isLoading = false; _currentPage = 0; });
-    _restorePosition();
+    setState(() { _isLoading = false; });
   }
 
+  bool _positionRestored = false;
+
   Future<void> _restorePosition() async {
+    if (_positionRestored) return;
+    _positionRestored = true;
     try {
       final prefs = await SharedPreferences.getInstance();
       final data = prefs.getString('pdf_pos_${widget.filePath.hashCode}');
       if (data != null) {
         final map = jsonDecode(data) as Map<String, dynamic>;
         final page = map['page'] as int? ?? 0;
-        if (page > 0 && page < _totalPages) {
-          _controller?.goToPage(pageNumber: page + 1);
+        if (page > 0 && page < _totalPages && _controller != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _controller?.goToPage(pageNumber: page + 1);
+            setState(() => _currentPage = page);
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Resumed at page ${page + 1} of $_totalPages'),
+                duration: const Duration(seconds: 2),
+                backgroundColor: _kCard,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          });
         }
       }
     } catch (_) {}
   }
 
   Future<void> _savePosition() async {
-    if (_currentPage <= 0) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('pdf_pos_${widget.filePath.hashCode}', jsonEncode({
         'page': _currentPage,
+        'total': _totalPages,
         'zoom': _zoom,
         'ts': DateTime.now().toIso8601String(),
       }));
@@ -388,6 +405,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                         _totalPages = doc.pages.length;
                         _document = doc;
                         if (mounted) setState(() => _isLoading = false);
+                        _restorePosition();
                       },
                     ),
                   ),

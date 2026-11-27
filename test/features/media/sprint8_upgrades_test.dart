@@ -2,11 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:makaw/core/services/global_player_state.dart';
 import 'package:makaw/core/storage/lrc_storage_service.dart';
 import 'package:makaw/features/ai/data/services/ai_pdf_exporter.dart';
 import 'package:makaw/features/documents/data/services/archive_service.dart';
+import 'package:makaw/features/documents/presentation/pages/folders_page.dart';
 import 'package:makaw/features/viewer/data/services/document_to_html.dart';
 
 void main() {
@@ -175,6 +177,34 @@ void main() {
 
       state.popToolRoute('queue');
       expect(state.isScreenWithPlayer, isFalse);
+    });
+  });
+
+  group('FoldersPage highlight and natural back navigation', () {
+    testWidgets('opens target folder with highlighted file and steps back cleanly', (tester) async {
+      final tempDir = await Directory.systemTemp.createTemp('makaw_folders_hi_');
+      try {
+        final targetFile = File('${tempDir.path}${Platform.pathSeparator}report_final.txt')
+          ..writeAsStringSync('hello');
+        String? opened;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: FoldersPage(
+              initialPath: tempDir.path,
+              highlightPath: targetFile.path,
+              openFile: (path) => opened = path,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('report_final.txt'), findsOneWidget);
+        await tester.tap(find.text('report_final.txt'));
+        expect(opened, equals(targetFile.path));
+      } finally {
+        tempDir.deleteSync(recursive: true);
+      }
     });
   });
 }

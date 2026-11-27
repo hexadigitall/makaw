@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/services/text_action_service.dart';
 import '../../../ai/presentation/widgets/ai_markdown_view.dart';
 
@@ -22,6 +24,8 @@ class _TextViewerPageState extends State<TextViewerPage> {
   bool _wrap = false;
   double _fontSize = 13;
   bool _richMarkdown = true;
+  final ScrollController _scrollCtrl = ScrollController();
+  Timer? _saveScrollDebounce;
 
   bool get _isMarkdown {
     final lower = widget.filePath.toLowerCase();
@@ -31,7 +35,52 @@ class _TextViewerPageState extends State<TextViewerPage> {
   @override
   void initState() {
     super.initState();
+    _scrollCtrl.addListener(_onScroll);
     _loadFile();
+  }
+
+  @override
+  void dispose() {
+    _saveScrollDebounce?.cancel();
+    _saveScrollPosition();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    _saveScrollDebounce?.cancel();
+    _saveScrollDebounce = Timer(const Duration(milliseconds: 500), _saveScrollPosition);
+  }
+
+  Future<void> _saveScrollPosition() async {
+    if (!_scrollCtrl.hasClients) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pos = _scrollCtrl.offset;
+      final max = _scrollCtrl.position.maxScrollExtent;
+      final pct = max > 0 ? (pos / max).clamp(0.0, 1.0) : 0.0;
+      await prefs.setString('doc_scroll_${widget.filePath.hashCode}', jsonEncode({
+        'offset': pos,
+        'progress': pct,
+      }));
+    } catch (_) {}
+  }
+
+  Future<void> _restoreScrollPosition() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('doc_scroll_${widget.filePath.hashCode}');
+      if (raw == null) return;
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final savedOffset = (map['offset'] as num?)?.toDouble() ?? 0.0;
+      if (savedOffset > 16) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_scrollCtrl.hasClients) return;
+          final clamped = savedOffset.clamp(0.0, _scrollCtrl.position.maxScrollExtent);
+          _scrollCtrl.jumpTo(clamped);
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadFile() async {
@@ -50,7 +99,10 @@ class _TextViewerPageState extends State<TextViewerPage> {
       } else {
         text = await file.readAsString();
       }
-      if (mounted) setState(() => _content = text);
+      if (mounted) {
+        setState(() => _content = text);
+        _restoreScrollPosition();
+      }
     } catch (e) {
       if (mounted) setState(() => _error = 'Error reading file: $e');
     }
@@ -123,6 +175,7 @@ class _TextViewerPageState extends State<TextViewerPage> {
           : _content == null
               ? Center(child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary))
               : SingleChildScrollView(
+                  controller: _scrollCtrl,
                   padding: const EdgeInsets.all(16),
                   child: (_isMarkdown && _richMarkdown)
                       ? AiMarkdownView(

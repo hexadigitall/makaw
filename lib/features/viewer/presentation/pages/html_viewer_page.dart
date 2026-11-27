@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/services/text_action_service.dart';
 
 class HtmlViewerPage extends StatefulWidget {
@@ -19,6 +21,30 @@ class _HtmlViewerPageState extends State<HtmlViewerPage> {
   InAppWebViewController? _controller;
   bool _isLoading = true;
   double _progress = 0;
+  bool _restoredScroll = false;
+
+  Future<void> _restoreScroll() async {
+    if (_restoredScroll || _controller == null) return;
+    _restoredScroll = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('doc_scroll_${widget.filePath.hashCode}');
+      if (raw == null) return;
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final y = (map['y'] as num?)?.toInt() ?? 0;
+      if (y > 20) {
+        await Future.delayed(const Duration(milliseconds: 120));
+        await _controller?.scrollTo(x: 0, y: y, animated: false);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveScroll(int y) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('doc_scroll_${widget.filePath.hashCode}', jsonEncode({'y': y}));
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -100,7 +126,13 @@ class _HtmlViewerPageState extends State<HtmlViewerPage> {
           handleWebLongPress(context, hitTestResult);
         },
         onLoadStart: (ctrl, url) => setState(() => _isLoading = true),
-        onLoadStop: (ctrl, url) => setState(() => _isLoading = false),
+        onLoadStop: (ctrl, url) {
+          setState(() => _isLoading = false);
+          _restoreScroll();
+        },
+        onScrollChanged: (ctrl, x, y) {
+          if (_restoredScroll && y >= 0) _saveScroll(y);
+        },
         onProgressChanged: (ctrl, progress) => setState(() => _progress = progress / 100.0),
       ),
     );

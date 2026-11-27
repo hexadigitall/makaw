@@ -1196,6 +1196,10 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
   String? _pendingOpenFilePath;
   String? _pendingOpenMimeType = '';
   String? _pendingExplorerPath;
+  String? _pendingExplorerHighlightPath;
+  bool _pendingExplorerAutoOpen = false;
+  String? _pendingDocumentInitialTab;
+  MediaCategory? _pendingMediaCategory;
 
   // VPN / Proxy
   bool _vpnEnabled = false;
@@ -2464,7 +2468,7 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
                 InkWell(
                   onTap: () {
                     messenger.hideCurrentSnackBar();
-                    _openFileExplorerAt(p.dirname(filePath));
+                    _openFileExplorerAt(p.dirname(filePath), highlightFile: filePath);
                   },
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
@@ -4504,6 +4508,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildMediaLibraryPage() {
+    final initCategory = _pendingMediaCategory ?? MediaCategory.all;
+    _pendingMediaCategory = null;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -4513,6 +4519,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         musicService: _musicService,
         videoService: _videoService,
         imageService: _imageService,
+        initialCategory: initCategory,
         onOpenMusicPlayer: () => _switchToView('music'),
         onOpenVideoPlayer: () => _switchToView('player'),
         onPlaySong: (song, queue) {
@@ -4559,6 +4566,8 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   Widget _buildDocumentPage() {
+    final initTab = _pendingDocumentInitialTab ?? 'all';
+    _pendingDocumentInitialTab = null;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -4567,6 +4576,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
         }
       },
       child: DocumentWidget(
+        initialTab: initTab,
         openFile: (path) => _openFile(path),
       ),
     );
@@ -4574,18 +4584,16 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
 
   Widget _buildFoldersPage() {
     final initPath = _pendingExplorerPath;
+    final hiPath = _pendingExplorerHighlightPath;
+    final autoOpen = _pendingExplorerAutoOpen;
     _pendingExplorerPath = null;
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) {
-          Navigator.of(context).pop();
-        }
-      },
-      child: FoldersPage(
-        initialPath: initPath,
-        openFile: (path) => _openFile(path),
-      ),
+    _pendingExplorerHighlightPath = null;
+    _pendingExplorerAutoOpen = false;
+    return FoldersPage(
+      initialPath: initPath,
+      highlightPath: hiPath,
+      autoOpenHighlight: autoOpen,
+      openFile: (path) => _openFile(path),
     );
   }
 
@@ -5614,7 +5622,7 @@ TappableIcon(
             'Continue watching · ${_homeClock(_videoService.resumePosition(inProgressVideo))}',
         icon: Icons.movie_outlined,
         accent: const Color(0xFF818CF8),
-        onTap: () => _openFile(inProgressVideo),
+        onTap: () => _openFile(inProgressVideo, fromHome: true),
         onDismiss: () => _dismissHomeActivityItemById('video_$inProgressVideo'),
       );
       items.add(item);
@@ -5641,16 +5649,22 @@ TappableIcon(
     }
     if (_homeRecentFiles.isNotEmpty) {
       for (final file in _homeRecentFiles) {
+        final existsAsFile = File(file.path).existsSync();
+        final existsAsDir = !existsAsFile && Directory(file.path).existsSync();
+        if (!existsAsFile && !existsAsDir) continue;
         final id = 'file_${file.path}';
         if (!_dismissedHomeItems.contains(id)) {
           final name = file.name ?? p.basename(file.path);
+          final meta = _recentFileMeta(file.path, existsAsDir, file.lastOpened);
           final item = HomeActivityItem(
             id: id,
             title: name,
-            subtitle: file.isDirectory ? 'Folder' : 'File',
-            icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
-            accent: const Color(0xFF34D399),
-            onTap: () => file.isDirectory ? _openFileExplorerAt(file.path) : _openFile(file.path),
+            subtitle: meta.$3,
+            icon: meta.$1,
+            accent: meta.$2,
+            onTap: () => existsAsDir
+                ? _openFileExplorerAt(file.path)
+                : _openFile(file.path, fromHome: true),
             onDismiss: () => _dismissHomeActivityItemById(id),
           );
           items.add(item);
@@ -5661,28 +5675,65 @@ TappableIcon(
     return items;
   }
 
+  (IconData, Color, String) _recentFileMeta(String path, bool isDir, DateTime? lastOpened) {
+    final ago = lastOpened != null ? _homeAgo(lastOpened.toIso8601String()) : 'recent';
+    if (isDir) return (Icons.folder_outlined, const Color(0xFF34D399), 'Folder · $ago');
+    final ext = path.split('.').last.toLowerCase();
+    final label = ext.isNotEmpty && ext.length <= 8 ? ext.toUpperCase() : 'FILE';
+    if (ext == 'pdf') return (Icons.picture_as_pdf_rounded, const Color(0xFFF87171), '$label · $ago');
+    if (ext == 'epub') return (Icons.menu_book_rounded, const Color(0xFFA78BFA), '$label · $ago');
+    if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp'].contains(ext)) {
+      return (Icons.movie_outlined, const Color(0xFF818CF8), '$label · $ago');
+    }
+    if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'opus'].contains(ext)) {
+      return (Icons.audio_file_rounded, const Color(0xFFF472B6), '$label · $ago');
+    }
+    if (['zip', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z'].contains(ext)) {
+      return (Icons.folder_zip_outlined, const Color(0xFFFB923C), '$label Archive · $ago');
+    }
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].contains(ext)) {
+      return (Icons.image_outlined, const Color(0xFF22D3EE), '$label · $ago');
+    }
+    if (['xls', 'xlsx', 'csv'].contains(ext)) {
+      return (Icons.table_chart_outlined, const Color(0xFF10B981), '$label · $ago');
+    }
+    if (['doc', 'docx', 'odt', 'rtf', 'pages'].contains(ext)) {
+      return (Icons.article_outlined, const Color(0xFF38BDF8), '$label · $ago');
+    }
+    if (['dart', 'py', 'js', 'ts', 'json', 'html', 'htm', 'md', 'lrc', 'srt'].contains(ext)) {
+      return (Icons.code_rounded, const Color(0xFF2DD4BF), '$label · $ago');
+    }
+    return (Icons.description_outlined, const Color(0xFF34D399), '$label · $ago');
+  }
+
   /// Home "Recent" list: recent files plus recently visited pages (excluding
   /// the page already surfaced under Continue).
   List<HomeActivityItem> _buildHomeRecentItems() {
     final items = <HomeActivityItem>[];
     final seenFilePaths = <String>{};
     for (final file in _homeRecentFiles) {
+      final existsAsFile = File(file.path).existsSync();
+      final existsAsDir = !existsAsFile && Directory(file.path).existsSync();
+      if (!existsAsFile && !existsAsDir) continue;
       final norm = file.path.replaceAll('\\', '/').toLowerCase();
       if (!seenFilePaths.add(norm)) continue;
       final id = 'recent_file_${file.path}';
       if (_dismissedHomeItems.contains(id) || _dismissedHomeItems.contains('file_${file.path}')) continue;
       final name = file.name ?? p.basename(file.path);
+      final meta = _recentFileMeta(file.path, existsAsDir, file.lastOpened);
       final item = HomeActivityItem(
         id: id,
         title: name,
-        subtitle: file.isDirectory ? 'Folder' : 'File',
-        icon: file.isDirectory ? Icons.folder_outlined : Icons.description_outlined,
-        accent: const Color(0xFF34D399),
-        onTap: () => file.isDirectory ? _openFileExplorerAt(file.path) : _openFile(file.path),
+        subtitle: meta.$3,
+        icon: meta.$1,
+        accent: meta.$2,
+        onTap: () => existsAsDir
+            ? _openFileExplorerAt(file.path)
+            : _openFile(file.path, fromHome: true),
         onDismiss: () => _dismissHomeActivityItemById(id),
       );
       items.add(item);
-      if (items.length >= 3) break;
+      if (items.length >= 4) break;
     }
     // Skip the URL already surfaced under continue
     final continueUrl = items.any((it) => it.id.startsWith('browser_'))
@@ -5838,7 +5889,7 @@ TappableIcon(
             },
             onOpenFile: (path) {
               Navigator.of(context).pop();
-              _openFileExplorerAt(path);
+              _openFileExplorerAt(path, fromHome: true);
             },
             onSearchWeb: (term) {
               Navigator.of(context).pop();
@@ -5850,15 +5901,22 @@ TappableIcon(
     );
   }
 
-  /// Opens a file/folder result from the Universal Search. For a file, opens
-  /// it directly in the document viewer; for a folder, opens the File Explorer.
-  void _openFileExplorerAt(String path) {
-    final isFile = File(path).existsSync();
-    if (isFile) {
-      _openFile(path);
+  /// Opens a file/folder result. For a file without [highlightFile], opens it
+  /// directly in Makaw's viewer/player; for a folder (or when [highlightFile] is
+  /// supplied), opens File Explorer inside that folder and scrolls directly to [highlightFile].
+  void _openFileExplorerAt(
+    String path, {
+    String? highlightFile,
+    bool autoOpen = false,
+    bool fromHome = false,
+  }) {
+    if (highlightFile == null && File(path).existsSync()) {
+      _openFile(path, fromHome: fromHome);
       return;
     }
     _pendingExplorerPath = Directory(path).existsSync() ? path : p.dirname(path);
+    _pendingExplorerHighlightPath = highlightFile ?? (File(path).existsSync() ? path : null);
+    _pendingExplorerAutoOpen = autoOpen;
     _switchToView('files');
   }
 
@@ -6248,20 +6306,80 @@ TappableIcon(
 
   // ─── File Opener ────────────────────────────────────────────────────────────
 
-  void _playAudioFileFromIntent(String path) {
-    final song = SongInfo(
-      id: DateTime.now().microsecondsSinceEpoch,
-      title: path.split(Platform.pathSeparator).last.split('.').first,
-      artist: '',
-      album: '',
-      filePath: path,
-      duration: 0,
+  Route<dynamic> _fastToolRoute(Widget child, {Duration duration = const Duration(milliseconds: 200)}) {
+    return PageRouteBuilder(
+      pageBuilder: (_, __, ___) => _wrapDesktopShell(child),
+      transitionDuration: duration,
+      reverseTransitionDuration: const Duration(milliseconds: 150),
+      transitionsBuilder: (_, anim, __, built) =>
+          duration == Duration.zero ? built : FadeTransition(opacity: anim, child: built),
     );
-    _musicService.playSongInfo(song);
+  }
+
+  /// Pushes a tracked tool route and mirrors [_switchToView]'s lifecycle cleanup
+  /// when it pops. Used when seeding the parent tool stack beneath a direct file open.
+  void _pushToolRouteEntry(String view, Route<dynamic> route) {
+    _activeToolRoutes.add(view);
+    GlobalPlayerState.instance.pushToolRoute(view);
+    _updateGlobalPlayerState();
+    Navigator.of(context).push(route).then((_) {
+      if (!mounted) return;
+      setState(() {
+        _activeToolRoutes.remove(view);
+        GlobalPlayerState.instance.popToolRoute(view);
+        if (!_appRouteObserver.hasPushedRoutes) {
+          _currentView = 'browser';
+          _viewMode = ViewMode.home;
+          _browserSubView = BrowserSubView.browsing;
+          _urlController.clear();
+        }
+      });
+      _updateGlobalPlayerState();
+    });
+  }
+
+  /// Seeds the natural parent tool underneath a directly launched file viewer so
+  /// Back navigation walks step-by-step through that tool before returning to Makaw Home.
+  void _seedParentToolUnderViewer(String parentView) {
+    if (!mounted || _appRouteObserver.hasPushedRoutes) return;
+    final page = _buildFeaturePage(parentView);
+    if (page == null) return;
+    _pushToolRouteEntry(parentView, _fastToolRoute(page, duration: Duration.zero));
+  }
+
+  void _playAudioFileFromIntent(String path, {bool fromHome = false}) {
+    if (_musicService.currentSong?.filePath == path) {
+      if (!_musicService.isPlaying) _musicService.togglePlayPause();
+    } else {
+      final existing = _musicService.allSongs.where((s) => s.filePath == path).firstOrNull;
+      if (existing != null) {
+        _musicService.playSongInfo(existing);
+      } else {
+        final song = SongInfo(
+          id: path.hashCode,
+          title: path.split(Platform.pathSeparator).last.split('.').first,
+          artist: '',
+          album: '',
+          filePath: path,
+          duration: 0,
+        );
+        _musicService.playSongInfo(song);
+      }
+    }
+    _musicService.setShowNowPlaying(true);
+    if (fromHome && !_appRouteObserver.hasPushedRoutes) {
+      _pendingMediaCategory = MediaCategory.music;
+      _seedParentToolUnderViewer('media');
+      final musicPage = _buildFeaturePage('music');
+      if (musicPage != null) {
+        _pushToolRouteEntry('music', _fastToolRoute(musicPage));
+        return;
+      }
+    }
     _switchToView('music');
   }
 
-  void _openFile(String filePath) {
+  void _openFile(String filePath, {bool fromHome = false}) {
     final ext = filePath.split('.').last.toLowerCase();
 
     // Record the open so it surfaces in the Documents ecosystem's recent
@@ -6275,47 +6393,48 @@ TappableIcon(
       }
     };
 
-    Route fastRoute(Widget child) => PageRouteBuilder(
-      pageBuilder: (_, __, ___) => _wrapDesktopShell(child),
-      transitionDuration: Duration(milliseconds: 200),
-      reverseTransitionDuration: Duration(milliseconds: 150),
-      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-    );
+    final seedParent = fromHome && !_appRouteObserver.hasPushedRoutes;
+    final title = filePath.split('\\').last.split('/').last;
 
     if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', '3gp'].contains(ext)) {
-      _activeToolRoutes.add('video_player');
-      GlobalPlayerState.instance.pushToolRoute('video_player');
-      _updateGlobalPlayerState();
-      Navigator.of(context).push(fastRoute(DirectVideoPlayer(
-        filePath: filePath,
-        title: filePath.split('\\').last.split('/').last,
-      ))).then((_) {
-        if (mounted) {
-          setState(() {
-            _activeToolRoutes.remove('video_player');
-            GlobalPlayerState.instance.popToolRoute('video_player');
-          });
-          _updateGlobalPlayerState();
-        }
-      });
+      if (seedParent) {
+        _pendingMediaCategory = MediaCategory.video;
+        _seedParentToolUnderViewer('media');
+      }
+      _pushToolRouteEntry(
+        'video_player',
+        _fastToolRoute(DirectVideoPlayer(filePath: filePath, title: title)),
+      );
       return;
     }
     if (ext == 'pdf') {
-      Navigator.of(context).push(fastRoute(MakawPdfViewerPage(
+      if (seedParent) {
+        _pendingDocumentInitialTab = 'pdf';
+        _seedParentToolUnderViewer('documents');
+      }
+      Navigator.of(context).push(_fastToolRoute(MakawPdfViewerPage(
         filePath: filePath,
-        title: filePath.split('\\').last.split('/').last,
+        title: title,
         onClose: goBack,
       )));
     } else if (ext == 'epub') {
-      Navigator.of(context).push(fastRoute(EpubReaderWidget(
+      if (seedParent) {
+        _pendingDocumentInitialTab = 'epub';
+        _seedParentToolUnderViewer('documents');
+      }
+      Navigator.of(context).push(_fastToolRoute(EpubReaderWidget(
         filePath: filePath,
-        title: filePath.split('\\').last.split('/').last,
+        title: title,
         onClose: goBack,
       )));
     } else if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'opus'].contains(ext)) {
-      _playAudioFileFromIntent(filePath);
+      _playAudioFileFromIntent(filePath, fromHome: fromHome);
     } else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].contains(ext)) {
-      Navigator.of(context).push(fastRoute(_buildImageViewer(filePath, goBack)));
+      if (seedParent) {
+        _pendingMediaCategory = MediaCategory.photos;
+        _seedParentToolUnderViewer('media');
+      }
+      Navigator.of(context).push(_fastToolRoute(_buildImageViewer(filePath, goBack)));
     } else if ([
       'txt', 'md', 'markdown', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'log', 'csv',
       'dart', 'py', 'js', 'jsx', 'ts', 'tsx', 'java', 'kt', 'kts', 'swift',
@@ -6323,15 +6442,37 @@ TappableIcon(
       'sh', 'bash', 'ps1', 'bat', 'cmd', 'sql', 'css', 'scss', 'toml', 'env',
       'lrc', 'srt', 'vtt', 'ass', 'ssa', 'sub',
     ].contains(ext)) {
-      Navigator.of(context).push(fastRoute(TextViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
+      if (seedParent) {
+        if (['txt', 'md', 'markdown', 'csv'].contains(ext)) {
+          _pendingDocumentInitialTab = 'txt';
+          _seedParentToolUnderViewer('documents');
+        } else {
+          _pendingExplorerPath = Directory(filePath).parent.path;
+          _pendingExplorerHighlightPath = filePath;
+          _seedParentToolUnderViewer('files');
+        }
+      }
+      Navigator.of(context).push(_fastToolRoute(TextViewerPage(filePath: filePath, title: title, onClose: goBack)));
     } else if (['zip', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z'].contains(ext)) {
-      _openFileExplorerAt(Directory(filePath).parent.path);
+      _openFileExplorerAt(Directory(filePath).parent.path, highlightFile: filePath, autoOpen: true);
     } else if (['html', 'htm', 'xhtml'].contains(ext)) {
-      Navigator.of(context).push(fastRoute(HtmlViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
+      if (seedParent) {
+        _pendingDocumentInitialTab = 'html';
+        _seedParentToolUnderViewer('documents');
+      }
+      Navigator.of(context).push(_fastToolRoute(HtmlViewerPage(filePath: filePath, title: title, onClose: goBack)));
     } else if (['doc', 'docx', 'odt', 'rtf', 'pages'].contains(ext)) {
-      Navigator.of(context).push(fastRoute(DocumentViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
+      if (seedParent) {
+        _pendingDocumentInitialTab = 'doc';
+        _seedParentToolUnderViewer('documents');
+      }
+      Navigator.of(context).push(_fastToolRoute(DocumentViewerPage(filePath: filePath, title: title, onClose: goBack)));
     } else if (['xls', 'xlsx'].contains(ext)) {
-      Navigator.of(context).push(fastRoute(SpreadsheetViewerPage(filePath: filePath, title: filePath.split('\\').last.split('/').last, onClose: goBack)));
+      if (seedParent) {
+        _pendingDocumentInitialTab = 'xls';
+        _seedParentToolUnderViewer('documents');
+      }
+      Navigator.of(context).push(_fastToolRoute(SpreadsheetViewerPage(filePath: filePath, title: title, onClose: goBack)));
     } else {
       OpenFilex.open(filePath);
     }
