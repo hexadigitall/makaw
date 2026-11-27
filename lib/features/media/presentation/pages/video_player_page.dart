@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
+import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/platform/session_paths.dart';
 import '../../../../core/platform/platform_paths.dart';
+import '../../../../core/ui/makaw_toast.dart';
 import '../../data/services/video_player_service.dart';
 import '../../data/services/media_thumbnail_service.dart';
 import '../../../music/data/services/music_player_service.dart';
@@ -20,42 +22,168 @@ import '../../../../app/providers/service_providers.dart';
 import '../../../../core/storage/subtitle_service.dart';
 import '../../../../core/utils/natural_sort.dart';
 
-// ─── Subtitle data ───────────────────────────────────────────────────────────
-class _SubtitleEntry {
+// ─── Subtitle data & Multi-Format Parser ──────────────────────────────────────
+class SubtitleLine {
   final Duration start;
   final Duration end;
   final String text;
-  const _SubtitleEntry(this.start, this.end, this.text);
+  const SubtitleLine(this.start, this.end, this.text);
 }
 
-List<_SubtitleEntry> _parseSrt(String data) {
-  final entries = <_SubtitleEntry>[];
+typedef _SubtitleEntry = SubtitleLine;
+
+String decodeSubtitleBytes(List<int> bytes) {
+  var payload = bytes;
+  // Auto-decompress gzip-encoded subtitle downloads (common on OpenSubtitles).
+  if (bytes.length >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B) {
+    try {
+      payload = GZipDecoder().decodeBytes(bytes);
+    } catch (_) {}
+  }
+  if (payload.length >= 2 && payload[0] == 0xFF && payload[1] == 0xFE) {
+    final u = <int>[];
+    for (var i = 2; i + 1 < payload.length; i += 2) {
+      u.add(payload[i] | (payload[i + 1] << 8));
+    }
+    return String.fromCharCodes(u);
+  }
+  if (payload.length >= 2 && payload[0] == 0xFE && payload[1] == 0xFF) {
+    final u = <int>[];
+    for (var i = 2; i + 1 < payload.length; i += 2) {
+      u.add((payload[i] << 8) | payload[i + 1]);
+    }
+    return String.fromCharCodes(u);
+  }
+  return utf8.decode(payload, allowMalformed: true);
+}
+
+Duration _parseSubTimestamp(String raw) {
+  final clean = raw.trim().split(RegExp(r'\s+')).first.replaceAll(',', '.');
+  final parts = clean.split(':');
+  if (parts.length == 3) {
+    final h = int.tryParse(parts[0]) ?? 0;
+    final m = int.tryParse(parts[1]) ?? 0;
+    final secDouble = double.tryParse(parts[2]) ?? 0.0;
+    final msTotal = (secDouble * 1000).round();
+    return Duration(hours: h, minutes: m, milliseconds: msTotal);
+  }
+  if (parts.length == 2) {
+    final m = int.tryParse(parts[0]) ?? 0;
+    final secDouble = double.tryParse(parts[1]) ?? 0.0;
+    return Duration(minutes: m, milliseconds: (secDouble * 1000).round());
+  }
+  return Duration.zero;
+}
+
+String _cleanSubtitleText(String s) => s
+    .replaceAll(r'\N', '\n')
+    .replaceAll(r'\n', '\n')
+    .replaceAll(RegExp(r'\{[^}]*\}'), '')
+    .replaceAll(RegExp(r'<[^>]+>'), '')
+    .replaceAll('&nbsp;', ' ')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .trim();
+
+/// Parses SRT, WebVTT, ASS/SSA, and MicroDVD (.sub) subtitle payloads cleanly.
+List<SubtitleLine> parseSubtitleContent(String raw, {String? filePath}) {
+  var data = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  if (data.startsWith('\uFEFF')) data = data.substring(1);
+  final lowerPath = (filePath ?? '').toLowerCase();
+  final entries = <SubtitleLine>[];
+
+  // 1. ASS / SSA format
+  if (lowerPath.endsWith('.ass') ||
+      lowerPath.endsWith('.ssa') ||
+      data.contains('[Events]') ||
+      data.contains('Dialogue:')) {
+    var startIdx = 1;
+    var endIdx = 2;
+    var textIdx = 9;
+    for (final line in data.split('\n')) {
+      final t = line.trim();
+      if (t.startsWith('Format:')) {
+        final cols = t.substring(7).split(',').map((c) => c.trim().toLowerCase()).toList();
+        final sI = cols.indexOf('start');
+        final eI = cols.indexOf('end');
+        final tI = cols.indexOf('text');
+        if (sI >= 0) startIdx = sI;
+        if (eI >= 0) endIdx = eI;
+        if (tI >= 0) textIdx = tI;
+      } else if (t.startsWith('Dialogue:')) {
+        final rest = t.substring(9).trimLeft();
+        final parts = <String>[];
+        var pos = 0;
+        for (var k = 0; k < textIdx; k++) {
+          final comma = rest.indexOf(',', pos);
+          if (comma == -1) break;
+          parts.add(rest.substring(pos, comma).trim());
+          pos = comma + 1;
+        }
+        parts.add(pos <= rest.length ? rest.substring(pos) : '');
+        if (parts.length > textIdx) {
+          final start = _parseSubTimestamp(parts[startIdx]);
+          final end = _parseSubTimestamp(parts[endIdx]);
+          final txt = _cleanSubtitleText(parts[textIdx]);
+          if (txt.isNotEmpty && end > start) {
+            entries.add(SubtitleLine(start, end, txt));
+          }
+        }
+      }
+    }
+    if (entries.isNotEmpty) {
+      entries.sort((a, b) => a.start.compareTo(b.start));
+      return entries;
+    }
+  }
+
+  // 2. MicroDVD .sub ({startFrame}{endFrame}Text)
+  if (lowerPath.endsWith('.sub') || RegExp(r'^\{\d+\}\{\d+\}', multiLine: true).hasMatch(data)) {
+    const fps = 23.976;
+    for (final line in data.split('\n')) {
+      final m = RegExp(r'^\{(\d+)\}\{(\d+)\}(.+)$').firstMatch(line.trim());
+      if (m != null) {
+        final f1 = int.tryParse(m.group(1)!) ?? 0;
+        final f2 = int.tryParse(m.group(2)!) ?? 0;
+        final start = Duration(milliseconds: ((f1 / fps) * 1000).round());
+        final end = Duration(milliseconds: ((f2 / fps) * 1000).round());
+        final txt = _cleanSubtitleText(m.group(3)!.replaceAll('|', '\n'));
+        if (txt.isNotEmpty && end > start) entries.add(SubtitleLine(start, end, txt));
+      }
+    }
+    if (entries.isNotEmpty) {
+      entries.sort((a, b) => a.start.compareTo(b.start));
+      return entries;
+    }
+  }
+
+  // 3. SRT & WebVTT blocks (tolerates optional cue IDs, MM:SS.mmm, and settings)
   final blocks = data.trim().split(RegExp(r'\n\s*\n'));
   for (final block in blocks) {
     final lines = block.trim().split('\n');
-    if (lines.length < 3) continue;
-    final timeLine = lines[1].trim();
-    final times = timeLine.split(RegExp(r'\s*-->\s*'));
+    if (lines.isEmpty) continue;
+    final firstUpper = lines.first.trim().toUpperCase();
+    if (firstUpper.startsWith('WEBVTT') || firstUpper.startsWith('NOTE') || firstUpper.startsWith('STYLE')) {
+      continue;
+    }
+    final timeIdx = lines.indexWhere((l) => l.contains('-->'));
+    if (timeIdx == -1 || timeIdx + 1 >= lines.length) continue;
+    final times = lines[timeIdx].trim().split(RegExp(r'\s*-->\s*'));
     if (times.length != 2) continue;
-    final parseTime = (String s) {
-      final parts = s.replaceAll(',', '.').split(':');
-      if (parts.length == 3) {
-        return Duration(
-          hours: int.tryParse(parts[0]) ?? 0,
-          minutes: int.tryParse(parts[1]) ?? 0,
-          seconds: (double.tryParse(parts[2]) ?? 0).toInt(),
-          milliseconds: ((double.tryParse(parts[2]) ?? 0) % 1 * 1000).round(),
-        );
-      }
-      return Duration.zero;
-    };
-    final start = parseTime(times[0]);
-    final end = parseTime(times[1]);
-    final text = lines.sublist(2).join('\n').trim();
-    if (text.isNotEmpty) entries.add(_SubtitleEntry(start, end, text));
+    final start = _parseSubTimestamp(times[0]);
+    final end = _parseSubTimestamp(times[1]);
+    final text = _cleanSubtitleText(lines.sublist(timeIdx + 1).join('\n'));
+    if (text.isNotEmpty && end >= start) {
+      entries.add(SubtitleLine(start, end, text));
+    }
   }
+  entries.sort((a, b) => a.start.compareTo(b.start));
   return entries;
 }
+
+List<_SubtitleEntry> _parseSrt(String data, {String? filePath}) =>
+    parseSubtitleContent(data, filePath: filePath);
 
 // ─── Thumbnail widget (placeholder for now) ─────────────────────────────
 class _ThumbnailView extends StatelessWidget {
@@ -107,6 +235,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   List<_SubtitleEntry> _subtitles = [];
   String _subtitlePath = '';
   String _subtitleFileLabel = '';
+  Duration _subtitleOffset = Duration.zero;
   Timer? _subtitleTimer;
   double _subFontSize = 16;
   String _subFont = 'default';
@@ -835,6 +964,15 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
                 ),
               ),
             ),
+          if (_subtitleOn && _subtitles.isNotEmpty && _activeSubtitle.isNotEmpty)
+            Positioned(
+              left: 24,
+              right: 24,
+              bottom: (_showControls && !_locked) ? bottomPad + 168 : bottomPad + 28,
+              child: IgnorePointer(
+                child: _buildStyledSubtitle(),
+              ),
+            ),
           if (_showControls && !_locked) ...[
             Positioned(
               top: 0,
@@ -851,14 +989,6 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
                 ),
                 child: _buildTopBar(curTitle, isLandscape, hasMulti),
               ),
-            ),
-            Positioned(
-              left: 28,
-              right: 28,
-              bottom: bottomPad + 168,
-              child: _subtitleOn && _subtitles.isNotEmpty
-                  ? _buildStyledSubtitle()
-                  : const SizedBox.shrink(),
             ),
             Positioned(
               bottom: 0,
@@ -1469,36 +1599,96 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   }
 
   // ─── Subtitles ─────────────────────────────────────────────────────────────
+  void _activateSubtitles(List<_SubtitleEntry> parsed, String subPath, {bool showNotice = false}) {
+    _subtitles = parsed;
+    _subtitlePath = subPath;
+    _subtitleFileLabel = subPath.split('\\').last.split('/').last;
+    _subtitleOn = true;
+    _subtitleTimer?.cancel();
+    _subtitleTimer = Timer.periodic(const Duration(milliseconds: 180), (_) {
+      if (mounted && _subtitleOn) setState(() {});
+    });
+    if (mounted) setState(() {});
+    _persistSubtitles();
+    if (showNotice && mounted) {
+      MakawToast.success(context, 'Loaded $_subtitleFileLabel (${parsed.length} lines)', title: 'Subtitles Active');
+    }
+  }
+
   Future<void> _loadSubtitlesForFile() async {
     _subtitles = [];
     _subtitlePath = '';
     _subtitleFileLabel = '';
+    _subtitleOffset = Duration.zero;
     _subtitleTimer?.cancel();
     final path = _currentFile();
     if (path == null) return;
     final base = path.replaceAll(RegExp(r'\.[^.]+$'), '');
-    // Check for local sidecar files first
-    for (final ext in ['.srt', '.vtt', '.ass', '.ssa', '.sub']) {
-      final f = File('$base$ext');
-      if (f.existsSync()) {
-        try {
-          final raw = f.readAsStringSync();
-          final parsed = _parseSrt(raw);
-          if (parsed.isNotEmpty) {
-            _subtitles = parsed;
-            _subtitlePath = f.path;
-            _subtitleFileLabel = _subtitlePath.split('\\').last.split('/').last;
-            _subtitleOn = true;
-            _subtitleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
-              if (mounted) setState(() {});
-            });
-            _persistSubtitles();
-            return;
+    final baseName = base.split('\\').last.split('/').last.toLowerCase();
+    final cleanStem = baseName.replaceAll(RegExp(r'[\.\-_]+'), ' ').trim();
+    const exts = ['.srt', '.vtt', '.ass', '.ssa', '.sub'];
+
+    // 1. Exact sidecar paths first
+    final candidates = <File>[
+      for (final ext in exts) File('$base$ext'),
+    ];
+
+    // 2. Scan same folder + Subs/Subtitles subfolders for language-tagged or case-variant sidecars
+    try {
+      final parentDir = File(path).parent;
+      final scanDirs = <Directory>[
+        parentDir,
+        Directory('${parentDir.path}${Platform.pathSeparator}Subs'),
+        Directory('${parentDir.path}${Platform.pathSeparator}Subtitles'),
+        Directory('${parentDir.path}${Platform.pathSeparator}subs'),
+      ];
+      for (final dir in scanDirs) {
+        if (!dir.existsSync()) continue;
+        for (final entity in dir.listSync(followLinks: false)) {
+          if (entity is! File) continue;
+          final fLower = entity.path.toLowerCase();
+          if (!exts.any((e) => fLower.endsWith(e))) continue;
+          final fStem = fLower.split('\\').last.split('/').last.replaceAll(RegExp(r'\.[^.]+$'), '');
+          final fClean = fStem.replaceAll(RegExp(r'[\.\-_]+'), ' ').trim();
+          if (fStem.startsWith(baseName) || fClean.startsWith(cleanStem) || dir != parentDir) {
+            if (!candidates.any((c) => c.path == entity.path)) {
+              candidates.add(entity);
+            }
           }
-        } catch (_) {}
+        }
       }
+    } catch (_) {}
+
+    for (final f in candidates) {
+      if (!f.existsSync()) continue;
+      try {
+        final raw = decodeSubtitleBytes(f.readAsBytesSync());
+        final parsed = parseSubtitleContent(raw, filePath: f.path);
+        if (parsed.isNotEmpty) {
+          _activateSubtitles(parsed, f.path);
+          return;
+        }
+      } catch (_) {}
     }
-    // Auto-search online if no local subtitle found
+
+    // 3. Fallback to persisted cues in SubtitleService (if user previously synced/loaded one)
+    try {
+      final savedCues = await SubtitleService.cuesForMedia(path);
+      if (savedCues.isNotEmpty) {
+        final parsed = savedCues
+            .map((c) => _SubtitleEntry(
+                  Duration(milliseconds: c.startMs),
+                  Duration(milliseconds: c.endMs),
+                  c.text,
+                ))
+            .toList()
+          ..sort((a, b) => a.start.compareTo(b.start));
+        _activateSubtitles(parsed, 'Saved Subtitle (${savedCues.length})');
+        return;
+      }
+    } catch (_) {}
+
+    // 4. Auto-search online if no local subtitle found
     _autoSearchSubtitle(path, base);
   }
 
@@ -1513,21 +1703,15 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
       if (url == null || url.isEmpty) return;
       final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
       if (res.statusCode != 200) return;
-      final parsed = _parseSrt(res.body);
+      final raw = decodeSubtitleBytes(res.bodyBytes);
+      final parsed = parseSubtitleContent(raw, filePath: '$basePath.srt');
       if (parsed.isEmpty) return;
       final srtPath = '$basePath.srt';
-      File(srtPath).writeAsStringSync(res.body);
+      try {
+        File(srtPath).writeAsStringSync(raw);
+      } catch (_) {}
       if (!mounted) return;
-      setState(() {
-        _subtitles = parsed;
-        _subtitlePath = srtPath;
-        _subtitleFileLabel = srtPath.split('\\').last.split('/').last;
-        _subtitleOn = true;
-      });
-      _subtitleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
-        if (mounted) setState(() {});
-      });
-      _persistSubtitles();
+      _activateSubtitles(parsed, srtPath);
     } catch (_) {}
   }
 
@@ -1554,12 +1738,68 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
   }
 
   String get _activeSubtitle {
-    final pos = _controller?.value.position;
-    if (pos == null) return '';
+    final rawPos = _controller?.value.position;
+    if (rawPos == null) return '';
+    final pos = rawPos - _subtitleOffset;
     for (final s in _subtitles) {
       if (pos >= s.start && pos <= s.end) return s.text;
     }
     return '';
+  }
+
+  void _showSubtitleSyncSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF141826),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          final sec = _subtitleOffset.inMilliseconds / 1000.0;
+          void nudge(double deltaSec) {
+            setState(() {
+              final nextMs = (_subtitleOffset.inMilliseconds + (deltaSec * 1000).round()).clamp(-15000, 15000);
+              _subtitleOffset = Duration(milliseconds: nextMs);
+            });
+            setDlg(() {});
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Subtitle Sync Offset', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${sec >= 0 ? '+' : ''}${sec.toStringAsFixed(1)}s ${sec > 0 ? '(Delayed)' : sec < 0 ? '(Earlier)' : '(In Sync)'}',
+                    style: const TextStyle(color: Color(0xFF818CF8), fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      OutlinedButton(onPressed: () => nudge(-0.5), child: const Text('-0.5s')),
+                      OutlinedButton(onPressed: () => nudge(-0.1), child: const Text('-0.1s')),
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFF818CF8), foregroundColor: Colors.black),
+                        onPressed: () {
+                          setState(() => _subtitleOffset = Duration.zero);
+                          setDlg(() {});
+                        },
+                        child: const Text('Reset'),
+                      ),
+                      OutlinedButton(onPressed: () => nudge(0.1), child: const Text('+0.1s')),
+                      OutlinedButton(onPressed: () => nudge(0.5), child: const Text('+0.5s')),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _showSubtitlePanel() {
@@ -1637,8 +1877,17 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
               ListTile(
                 leading: const Icon(Icons.sync, color: Color(0xFF818CF8)),
                 title: const Text('Synchronization', style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: Text(
+                  _subtitleOffset == Duration.zero
+                      ? 'In sync (0.0s)'
+                      : 'Offset: ${(_subtitleOffset.inMilliseconds / 1000).toStringAsFixed(1)}s',
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
                 trailing: const Icon(Icons.chevron_right, color: Colors.white38),
-                onTap: () { Navigator.pop(ctx); _toast('Subtitle synchronization coming soon'); },
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showSubtitleSyncSheet();
+                },
               ),
             ],
           ),
@@ -1712,20 +1961,15 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
                       title: Text(fName, style: const TextStyle(color: Colors.white, fontSize: 13)),
                       onTap: () {
                         try {
-                          final raw = f.readAsStringSync();
-                          final parsed = _parseSrt(raw);
-                          if (parsed.isEmpty) { _toast('Invalid subtitle file'); return; }
-                          setState(() {
-                            _subtitles = parsed;
-                            _subtitlePath = f.path;
-                            _subtitleFileLabel = fName;
-                            _subtitleOn = true;
-                          });
-                          _subtitleTimer?.cancel();
-                          _subtitleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) { if (mounted) setState(() {}); });
-                          _persistSubtitles();
+                          final raw = decodeSubtitleBytes(f.readAsBytesSync());
+                          final parsed = parseSubtitleContent(raw, filePath: f.path);
+                          if (parsed.isEmpty) {
+                            MakawToast.warning(context, 'No timing cues found in $fName');
+                            return;
+                          }
+                          _activateSubtitles(parsed, f.path, showNotice: true);
                         } catch (e) {
-                          _toast('Error: $e');
+                          MakawToast.error(context, 'Could not load subtitle: $e');
                         }
                         Navigator.pop(ctx);
                       },
@@ -1908,50 +2152,57 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
     try {
       final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
-        final parsed = _parseSrt(res.body);
+        final raw = decodeSubtitleBytes(res.bodyBytes);
+        final parsed = parseSubtitleContent(raw, filePath: url);
         if (parsed.isEmpty || !mounted) {
           if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-          _toast('Could not download subtitle');
+          MakawToast.error(context, 'Downloaded file had no readable subtitle cues');
           return;
         }
-        final base = _currentFile()?.replaceAll(RegExp(r'\.[^.]+$'), '.srt');
-        if (base != null) {
-          File(base).writeAsStringSync(res.body);
-          setState(() {
-            _subtitles = parsed; _subtitlePath = base;
-            _subtitleFileLabel = base.split('\\').last.split('/').last; _subtitleOn = true;
-          });
-          _subtitleTimer?.cancel();
-          _subtitleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) { if (mounted) setState(() {}); });
-          _persistSubtitles();
+        final base = _currentFile()?.replaceAll(RegExp(r'\.[^.]+$'), '.srt') ?? '';
+        if (base.isNotEmpty) {
+          try {
+            File(base).writeAsStringSync(raw);
+          } catch (_) {}
+          _activateSubtitles(parsed, base);
+        } else {
+          _activateSubtitles(parsed, 'Downloaded Subtitle');
         }
         if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-        _toast('Subtitle downloaded');
+        if (mounted) MakawToast.success(context, 'Subtitle downloaded (${parsed.length} lines)', title: 'Subtitles Active');
       } else {
         if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-        _toast('Could not download subtitle');
+        if (mounted) MakawToast.error(context, 'Subtitle server returned HTTP ${res.statusCode}');
       }
     } catch (_) {
       if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-      _toast('Could not download subtitle');
+      if (mounted) MakawToast.error(context, 'Could not download subtitle');
     }
   }
 
   Future<List<Map<String, String>>> _fetchOpenSubtitles(String query, [String lang = 'English']) async {
     final results = <Map<String, String>>[];
+    final cleanQuery = query
+        .replaceAll(RegExp(r'[\.\-_]+'), ' ')
+        .replaceAll(RegExp(r'\b(1080p|720p|2160p|4k|x264|x265|hevc|bluray|webrip|web-dl|hdrip|brrip|aac)\b', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
     try {
-      final encoded = Uri.encodeComponent(query);
+      final encoded = Uri.encodeComponent(cleanQuery.isNotEmpty ? cleanQuery : query);
+      final langSlug = lang == 'All' ? '' : '/sublanguageid-eng';
       final res = await http.get(
-        Uri.parse('https://rest.opensubtitles.org/search/query-$encoded'),
-        headers: {'User-Agent': 'Makaw v1.0'},
-      ).timeout(const Duration(seconds: 10));
+        Uri.parse('https://rest.opensubtitles.org/search$langSlug/query-$encoded'),
+        headers: {'User-Agent': 'TemporaryUserAgent', 'X-User-Agent': 'TemporaryUserAgent'},
+      ).timeout(const Duration(seconds: 12));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
-        for (final item in data.take(20)) {
+        for (final item in data.take(25)) {
           final subUrl = item['SubDownloadLink'] as String?;
           if (subUrl == null) continue;
+          final langName = item['LanguageName']?.toString() ?? 'Unknown';
+          if (lang != 'All' && langName.toLowerCase() != lang.toLowerCase()) continue;
           results.add({
-            'lang': '${item['LanguageName']} (${item['SubFormat']})',
+            'lang': '$langName (${item['SubFormat'] ?? 'srt'}) · ${item['MovieName'] ?? ''}',
             'downloads': 'Downloads: ${item['SubDownloadsCnt'] ?? '?'}',
             'url': subUrl,
           });
@@ -2301,7 +2552,7 @@ class _DirectVideoPlayerState extends State<DirectVideoPlayer> {
 
   void _toast(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg, style: const TextStyle(fontSize: 13)), duration: const Duration(seconds: 2), behavior: SnackBarBehavior.floating));
+    MakawToast.info(context, msg);
   }
 }
 
@@ -4208,6 +4459,6 @@ class _VideoPlayerWidgetState extends ConsumerState<VideoPlayerWidget> {
 
   void _toast(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: _kCard, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)));
+    MakawToast.info(context, msg);
   }
 }

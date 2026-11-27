@@ -331,6 +331,89 @@ class TextActionTile extends StatelessWidget {
 
 /// Shows the shared learning/action menu for a selected [text].
 ///
+/// Directly opens the dictionary meaning modal for [text] (reused by EPUB reader
+/// selection bar and learning context menus).
+Future<void> showDefineDialog(BuildContext context, String text) async {
+  final selected = text.trim();
+  if (selected.isEmpty) return;
+  final wordToken = selected.split(RegExp(r'\s+')).first.replaceAll(RegExp("[^a-zA-Z'\\-]"), '');
+  final targetWord = wordToken.isNotEmpty ? wordToken : selected;
+  final dismiss = await _showLoadingIndicator(context, 'Looking up "$targetWord"...');
+  final def = await TextActionService.define(targetWord);
+  dismiss();
+  if (!context.mounted) return;
+  if (def == null || def.definitions.isEmpty) {
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text('No dictionary entry found for "$targetWord"')),
+    );
+    return;
+  }
+  await showDialog<void>(
+    context: context,
+    builder: (dCtx) => AlertDialog(
+      backgroundColor: const Color(0xFF141928),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(def.word, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          ),
+          if (def.phonetic.isNotEmpty)
+            Text(def.phonetic, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < def.definitions.length && i < def.partsOfSpeech.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${i + 1}. ${def.partsOfSpeech[i]}',
+                      style: const TextStyle(color: Color(0xFF818CF8), fontSize: 12, fontStyle: FontStyle.italic, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(def.definitions[i], style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4)),
+                    if (i < def.examples.length && def.examples[i].isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text('“${def.examples[i]}”', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontStyle: FontStyle.italic)),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: () => TextActionService.pronounce(def.word),
+          icon: const Icon(Icons.volume_up_rounded, color: Color(0xFF818CF8), size: 18),
+          label: const Text('Pronounce', style: TextStyle(color: Color(0xFF818CF8))),
+        ),
+        TextButton(
+          onPressed: () {
+            TextActionService.copyToClipboard(def.word);
+            Navigator.of(dCtx).pop();
+          },
+          child: const Text('Copy', style: TextStyle(color: Color(0xFF94A3B8))),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dCtx).pop(),
+          child: const Text('Close', style: TextStyle(color: Color(0xFF94A3B8))),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Centralized selection action menu supporting Define, Pronounce, Read Aloud,
+/// Translate, Copy, and Select All. Pass [readAloudContext] to read a broader
+/// surrounding block instead of just the selection itself (e.g. a whole paragraph).
 /// [readAloudContext] is the passage read by "Read Aloud" (defaults to the
 /// selection itself). Pass a larger block (e.g. the containing paragraph) so
 /// that reading aloud starts from the paragraph that holds the selection.

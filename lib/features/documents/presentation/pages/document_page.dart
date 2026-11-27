@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import '../../../../app/providers/service_providers.dart';
 import '../../../../core/utils/natural_sort.dart';
+import '../../../../core/ui/makaw_toast.dart';
 import '../../../../core/platform/platform_paths.dart';
 import '../../../pdf/presentation/pages/pdf_merger_page.dart';
 import '../../../pdf/presentation/pages/pdf_organizer_page.dart';
@@ -325,9 +326,11 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
                       _selectMode = false;
                       _selectedPaths.clear();
                     });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(res.success ? 'ZIP saved: ${p.basename(outZip)}' : res.message)),
-                    );
+                    if (res.success) {
+                      MakawToast.success(context, 'ZIP saved: ${p.basename(outZip)}');
+                    } else {
+                      MakawToast.error(context, res.message);
+                    }
                   },
           ),
           IconButton(

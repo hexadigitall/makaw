@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/makaw_toast.dart';
 import '../../../ai/presentation/widgets/ai_markdown_view.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../documents/domain/document_reader_contract.dart';
@@ -241,9 +242,7 @@ class _TextViewerPageState extends State<TextViewerPage> {
                 ? null
                 : () {
                     Clipboard.setData(ClipboardData(text: _content!));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 2)),
-                    );
+                    MakawToast.success(context, 'Copied to clipboard');
                   },
             tooltip: 'Copy all',
           ),

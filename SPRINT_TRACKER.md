@@ -33,6 +33,7 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 8** | Video Scrub/Browser Jitter Fix, File Explorer Search & Archives, Download Banners, Lyrics Creator & Sync Studio, Music/Video Settings & EQ, Home Card & AI Upgrades | 2026-11-26 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45930971191 Passed |
 | **Sprint 9** | Documents Workspace Overhaul (145+ Formats, Thumbnails, Comics, Slides, Sheets, PIM/Vector), Video Player Redesign, Auto-Hide Start Over & Global Multi-Select | 2026-11-27 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45947892328 Passed |
 | **Sprint 10** | Crash-Proof Flagship EPUB Reader, Continuous PDF Progress Scrubber, Spreadsheet BIFF8 XLS / Namespaced XLSX / CSV Engine, EPS/PS & XPS Vector Rendering, OLE2 DOC Recovery, Portrait Header Fix & AI Markdown Table/Heading Overhaul | 2026-11-27 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h PID `25851` & Redmi 14C PID `16005`) | Android Run 45965341822 Passed |
+| **Sprint 11** | Obsidian `MakawToast` System, Video Subtitle Engine & Sync, Step-by-Step Video/Continue Back Navigation, Physical-Book EPUB Swipe/Links/Highlighter/Dictionary/Pronounce, & Slide/PIM Listen Features | 2026-11-27 | 2026-11-27 | **IN PROGRESS** | **Deploying APK** | Triggering Build |
 
 ---
 
@@ -266,3 +267,15 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
   - [x] Upgrade `VectorCadViewerPage` with DOS EPSF/PostScript vector & EPSI bitmap interpreter + XPS/OXPS `FixedPage` SVG converter, upgrade `SlideViewerPage` (`namespace: '*'`) & `DocumentToHtml` OLE2 UTF-16LE `.doc` recovery, and add UTF-16 BOM + JSON pretty + horizontal unwrap support in `TextViewerPage`
   - [x] Fix AI Assistant raw `**` inside tables, `#{1,6}` headings, `#NoSpace`, `1. ### Step` list items, empty table cells, and table HTML/DOC/TXT export in [ai_markdown_view.dart](file:///D:/projects/makaw/lib/features/ai/presentation/widgets/ai_markdown_view.dart)
   - [x] Add automated unit & widget regression tests ([document_viewers_and_markdown_test.dart](file:///D:/projects/makaw/test/features/documents/document_viewers_and_markdown_test.dart)) — **150/150 tests passed**
+
+---
+
+### Sprint 11: Toasts Redesign, Subtitles Engine, Step-by-Step Back Navigation, Physical Book EPUB & Listen Upgrades
+- **Status:** **DEPLOYING**
+- **Task Checklist:**
+  - [x] Create floating obsidian `MakawToast` overlay system ([makaw_toast.dart](file:///D:/projects/makaw/lib/core/ui/makaw_toast.dart)) and modernize `MaterialApp.snackBarTheme` + viewer/main toast callers
+  - [x] Fix Video subtitles always-on overlay outside controls fade, add SRT/VTT/ASS/SSA/SUB multi-format parser, language/subfolder auto-discovery, gzip OpenSubtitles decompression, saved cues lookup, and live sync offset (`±0.1s` / `±0.5s`) in [video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart)
+  - [x] Enforce step-by-step Back navigation (`DirectVideoPlayer -> VideoPlayerWidget -> MediaLibrary -> Makaw Home` and parent tool seeding across Home Live Video Card, Mini-Player, `Continue`, and `Recent` sections) in [main.dart](file:///D:/projects/makaw/lib/main.dart)
+  - [x] Upgrade EPUB Reader with horizontal swipe & edge-tap page turning, internal chapter/anchor link resolution (`resolveEpubChapterLink` — no blank `about:blank` screens), 4-color pen highlights & notes, inline Dictionary `Meaning` + `Pronounce` bar, physical bookmark corner ribbon, Eye Warmth slider, reading time estimates, and 2-column tablet spreads in [epub_viewer_page.dart](file:///D:/projects/makaw/lib/features/viewer/presentation/pages/epub_viewer_page.dart)
+  - [x] Add **Listen** (`showReadAloudDialog`) support to [slide_viewer_page.dart](file:///D:/projects/makaw/lib/features/viewer/presentation/pages/slide_viewer_page.dart) and [pim_viewer_page.dart](file:///D:/projects/makaw/lib/features/viewer/presentation/pages/pim_viewer_page.dart)
+  - [x] Add automated unit & widget tests ([subtitles_toast_and_epub_book_test.dart](file:///D:/projects/makaw/test/features/media/subtitles_toast_and_epub_book_test.dart)) — **156/156 tests passed**

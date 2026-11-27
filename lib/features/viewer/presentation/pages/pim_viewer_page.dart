@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
+import '../../../../core/services/text_action_service.dart';
 import '../../../documents/data/services/document_state_service.dart';
 
 /// Mail, Calendar & Contact Viewer (`EML`, `MBOX`, `ICS`, `VCF`, `MSG`, `OFT`).
@@ -185,6 +186,15 @@ class _PimViewerPageState extends State<PimViewerPage> {
         ),
         title: Text(name, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
         actions: [
+          if (!_loading && _error == null)
+            IconButton(
+              icon: const Icon(Icons.headphones_rounded, color: Colors.white70, size: 20),
+              tooltip: 'Listen',
+              onPressed: () {
+                final text = _buildReadableSummary();
+                if (text.isNotEmpty) showReadAloudDialog(context, text);
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.open_in_new_rounded, color: Colors.white70, size: 20),
             onPressed: () => OpenFilex.open(widget.filePath),
@@ -193,6 +203,19 @@ class _PimViewerPageState extends State<PimViewerPage> {
       ),
       body: _buildBody(),
     );
+  }
+
+  String _buildReadableSummary() {
+    if (_events.isNotEmpty) {
+      return _events.map((e) => '${e['summary']}. ${e['start']} ${e['location']} ${e['description']}').join('\n\n').trim();
+    }
+    if (_emails.isNotEmpty) {
+      return _emails.map((m) => '${m.subject}. From ${m.from}. ${m.body}').join('\n\n').trim();
+    }
+    if (_contacts.isNotEmpty) {
+      return _contacts.map((c) => '${c['name']}. ${c['title']} ${c['org']}. ${c['tel']} ${c['email']}').join('\n\n').trim();
+    }
+    return '';
   }
 
   Widget _buildBody() {

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
+import '../../../../core/services/text_action_service.dart';
 import '../../../../core/utils/natural_sort.dart';
 import '../../../documents/data/services/document_state_service.dart';
 
@@ -299,6 +300,21 @@ class _SlideViewerPageState extends State<SlideViewerPage> {
           ],
         ),
         actions: [
+          if (_slides.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.headphones_rounded, color: Colors.white70, size: 20),
+              tooltip: 'Listen to Slide',
+              onPressed: () {
+                final s = _slides[_currentSlide];
+                final buf = StringBuffer()..writeln(s.title);
+                for (final line in s.lines) {
+                  buf.writeln(line);
+                }
+                if (s.notes.isNotEmpty) buf.writeln('Speaker notes: ${s.notes}');
+                final txt = buf.toString().trim();
+                if (txt.isNotEmpty) showReadAloudDialog(context, txt);
+              },
+            ),
           if (_slides.isNotEmpty && _slides[_currentSlide].notes.isNotEmpty)
             IconButton(
               icon: Icon(_showNotes ? Icons.speaker_notes : Icons.speaker_notes_outlined, color: const Color(0xFFF59E0B)),

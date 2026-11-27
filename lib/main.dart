@@ -41,6 +41,7 @@ import 'features/browser/data/services/content_blocker_service.dart';
 import 'features/browser/presentation/providers/download_service.dart';
 import 'core/services/update_service.dart';
 import 'core/services/media_notification_service.dart';
+import 'core/ui/makaw_toast.dart';
 import 'features/media/presentation/pages/video_player_page.dart';
 import 'features/media/presentation/pages/media_library_page.dart';
 import 'features/pdf/presentation/pages/pdf_viewer_page.dart';
@@ -479,6 +480,17 @@ class _MakawAppState extends ConsumerState<MakawApp> with WidgetsBindingObserver
             cardColor: Color(0xFFF8FAFC),
             appBarTheme: AppBarTheme(backgroundColor: Color(0xFFE2E8F0), foregroundColor: kSurfaceBase),
             textTheme: TextTheme(bodyMedium: TextStyle(color: kSurfaceElevated)),
+            snackBarTheme: SnackBarThemeData(
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: const Color(0xF0141928),
+              contentTextStyle: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+              actionTextColor: const Color(0xFF818CF8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: const Color(0xFF818CF8).withValues(alpha: 0.35)),
+              ),
+              elevation: 8,
+            ),
           ),
           darkTheme: ThemeData.dark().copyWith(
             scaffoldBackgroundColor: kSurfaceBase,
@@ -490,6 +502,17 @@ class _MakawAppState extends ConsumerState<MakawApp> with WidgetsBindingObserver
             ),
             cardColor: kSurfaceBorder,
             appBarTheme: AppBarTheme(backgroundColor: kSurfaceElevated),
+            snackBarTheme: SnackBarThemeData(
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: const Color(0xF0141928),
+              contentTextStyle: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+              actionTextColor: const Color(0xFF818CF8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: const Color(0xFF818CF8).withValues(alpha: 0.35)),
+              ),
+              elevation: 8,
+            ),
           ),
           home: MakawHome(themeMode: _themeMode, onThemeChanged: setThemeMode),
           navigatorObservers: [_hubRouteObserver, _appRouteObserver],
@@ -589,7 +612,7 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
       });
     }
     if (videoPath.isNotEmpty) {
-      _MakawHomeState.instance?._openFile(videoPath);
+      _MakawHomeState.instance?._openFile(videoPath, fromHome: true);
     } else {
       _MakawHomeState.instance?._switchToView('media');
     }
@@ -828,7 +851,7 @@ class _GlobalFloatingPlayerHostState extends State<GlobalFloatingPlayerHost> {
                     if (videoService?.activeVideoPath != null) {
                       videoService?.toggleActiveVideoPlayPause();
                     } else if (videoPath.isNotEmpty) {
-                      _MakawHomeState.instance?._openFile(videoPath);
+                      _MakawHomeState.instance?._openFile(videoPath, fromHome: true);
                     }
                     setState(() {});
                   },
@@ -1468,21 +1491,21 @@ class _MakawHomeState extends ConsumerState<MakawHome> with WidgetsBindingObserv
     setState(() => _pendingOpenFilePath = null);
 
     if (mimeType.contains('pdf') || path.endsWith('.pdf')) {
-      _openFile(path);
+      _openFile(path, fromHome: true);
     } else if (mimeType.contains('epub') || path.endsWith('.epub')) {
-      _openFile(path);
+      _openFile(path, fromHome: true);
     } else if (mimeType.contains('audio') || ['mp3','wav','aac','flac','ogg','m4a','wma','opus'].any((e) => path.endsWith('.$e'))) {
-      _playAudioFileFromIntent(path);
+      _playAudioFileFromIntent(path, fromHome: true);
     } else if (mimeType.contains('video') || ['mp4','mkv','webm','avi','mov','flv','wmv','3gp'].any((e) => path.endsWith('.$e'))) {
-      _openFile(path);
+      _openFile(path, fromHome: true);
     } else if (mimeType.contains('image') || ['jpg','jpeg','png','gif','webp','bmp','svg'].any((e) => path.endsWith('.$e'))) {
-      _openFile(path);
+      _openFile(path, fromHome: true);
     } else if (mimeType.contains('html') || ['html','htm','xhtml'].any((e) => path.endsWith('.$e'))) {
-      _openFile(path);
+      _openFile(path, fromHome: true);
     } else if (mimeType.contains('text') || ['txt','md','json','xml','yaml','yml','ini','log','csv'].any((e) => path.endsWith('.$e'))) {
-      _openFile(path);
+      _openFile(path, fromHome: true);
     } else if (mimeType.contains('msword') || mimeType.contains('openxmlformats') || path.endsWith('.doc') || path.endsWith('.docx') || path.endsWith('.odt') || path.endsWith('.rtf') || path.endsWith('.pages')) {
-      _openFile(path);
+      _openFile(path, fromHome: true);
     } else {
       OpenFilex.open(path);
     }
@@ -3457,11 +3480,15 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
   }
 
   void _showToast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      duration: Duration(seconds: 2),
-      behavior: SnackBarBehavior.floating,
-    ));
+    if (!mounted) return;
+    final lower = msg.toLowerCase();
+    if (lower.contains('fail') || lower.contains('error') || lower.contains('unable')) {
+      MakawToast.error(context, msg);
+    } else if (lower.contains('copied') || lower.contains('saved') || lower.contains('added') || lower.contains('success')) {
+      MakawToast.success(context, msg);
+    } else {
+      MakawToast.info(context, msg);
+    }
   }
 
   @override
@@ -3778,7 +3805,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
           isDesktopShell: Responsive.isDesktop(context) && !kIsWeb,
           onSearch: _openUniversalSearch,
           recentActivity: hub.id == 'documents'
-              ? RecentActivitySection(onOpen: (doc) => _openFile(doc.filePath))
+              ? RecentActivitySection(onOpen: (doc) => _openFile(doc.filePath, fromHome: true))
               : hub.id == 'terminal'
                   ? RecentTerminalSessionsSection(
                       onOpenSession: _openTerminalSession,
@@ -4403,7 +4430,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
               Row(
                 children: [
                   InkWell(
-                    onTap: () => _openFile(videoPath),
+                    onTap: () => _openFile(videoPath, fromHome: true),
                     borderRadius: BorderRadius.circular(12),
                     child: MediaArtworkWidget(
                       filePath: videoPath,
@@ -4419,7 +4446,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                   const SizedBox(width: 14),
                   Expanded(
                     child: InkWell(
-                      onTap: () => _openFile(videoPath),
+                      onTap: () => _openFile(videoPath, fromHome: true),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
@@ -4465,7 +4492,7 @@ pre{background:#1E293B;padding:12px;border-radius:8px;overflow-x:auto}
                       if (_videoService.activeVideoPath == videoPath && _videoService.onTogglePlayback != null) {
                         _videoService.toggleActiveVideoPlayPause();
                       } else {
-                        _openFile(videoPath);
+                        _openFile(videoPath, fromHome: true);
                       }
                     },
                   ),
@@ -5680,7 +5707,7 @@ TappableIcon(
             icon: meta.$1,
             accent: meta.$2,
             onTap: () => existsAsDir
-                ? _openFileExplorerAt(file.path)
+                ? _openFileExplorerAt(file.path, fromHome: true)
                 : _openFile(file.path, fromHome: true),
             onDismiss: () => _dismissHomeActivityItemById(id),
           );
@@ -5747,7 +5774,7 @@ TappableIcon(
         icon: meta.$1,
         accent: meta.$2,
         onTap: () => existsAsDir
-            ? _openFileExplorerAt(file.path)
+            ? _openFileExplorerAt(file.path, fromHome: true)
             : _openFile(file.path, fromHome: true),
         onDismiss: () => _dismissHomeActivityItemById(id),
       );
@@ -6419,6 +6446,10 @@ TappableIcon(
       if (seedParent) {
         _pendingMediaCategory = MediaCategory.video;
         _seedParentToolUnderViewer('media');
+        final playerTool = _buildFeaturePage('player');
+        if (playerTool != null) {
+          _pushToolRouteEntry('player', _fastToolRoute(playerTool, duration: Duration.zero));
+        }
       }
       _pushToolRouteEntry(
         'video_player',

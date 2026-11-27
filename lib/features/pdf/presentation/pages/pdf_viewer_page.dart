@@ -10,6 +10,7 @@ import 'pdf_organizer_page.dart';
 import 'pdf_merger_page.dart';
 import '../../../documents/data/services/document_state_service.dart';
 import '../../../../core/services/text_action_service.dart';
+import '../../../../core/ui/makaw_toast.dart';
 
 class _SearchResult {
   final int page;
@@ -162,13 +163,10 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
             _controller?.goToPage(pageNumber: page + 1);
             setState(() => _currentPage = page);
             ScaffoldMessenger.of(context).hideCurrentSnackBar();
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Resumed at page ${page + 1} of $_totalPages'),
-                duration: const Duration(seconds: 2),
-                backgroundColor: _kCard,
-                behavior: SnackBarBehavior.floating,
-              ),
+            MakawToast.info(
+              context,
+              'Resumed at page ${page + 1} of $_totalPages',
+              title: 'PDF Progress Restored',
             );
           });
         }
