@@ -187,9 +187,9 @@ class _SlideViewerPageState extends State<SlideViewerPage> {
     try {
       final doc = XmlDocument.parse(xmlStr);
       final out = <String>[];
-      for (final pElem in doc.findAllElements('p')) {
+      for (final pElem in doc.findAllElements('p', namespace: '*')) {
         final text = pElem
-            .findAllElements('t')
+            .findAllElements('t', namespace: '*')
             .map((t) => t.innerText)
             .join('')
             .trim();
@@ -205,7 +205,7 @@ class _SlideViewerPageState extends State<SlideViewerPage> {
     try {
       final doc = XmlDocument.parse(xmlStr);
       return doc
-          .findAllElements(tag)
+          .findAllElements(tag, namespace: '*')
           .map((e) => e.innerText.trim())
           .where((t) => t.isNotEmpty)
           .toList();
@@ -218,18 +218,18 @@ class _SlideViewerPageState extends State<SlideViewerPage> {
     final result = <_SlideData>[];
     try {
       final doc = XmlDocument.parse(xmlStr);
-      final pages = doc.findAllElements('page');
+      final pages = doc.findAllElements('page', namespace: '*');
       var idx = 0;
       for (final page in pages) {
         idx++;
         final lines = page
-            .findAllElements('p')
+            .findAllElements('p', namespace: '*')
             .map((p) => p.innerText.trim())
             .where((t) => t.isNotEmpty)
             .toList();
         final notes = page
-            .findAllElements('notes')
-            .expand((n) => n.findAllElements('p'))
+            .findAllElements('notes', namespace: '*')
+            .expand((n) => n.findAllElements('p', namespace: '*'))
             .map((p) => p.innerText.trim())
             .where((t) => t.isNotEmpty)
             .join('\n');

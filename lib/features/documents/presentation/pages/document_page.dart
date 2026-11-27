@@ -400,6 +400,7 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
     return AppBar(
       backgroundColor: _kSurface,
       elevation: 0,
+      titleSpacing: 4,
       leading: IconButton(
         icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
         onPressed: () {
@@ -420,8 +421,18 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
             )
           : Row(
               children: [
-                const Text('Documents', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-                const SizedBox(width: 8),
+                const Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Documents',
+                      maxLines: 1,
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
@@ -450,30 +461,106 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
               });
             },
           ),
-        IconButton(
-          icon: Icon(_gridMode ? Icons.view_list_rounded : Icons.grid_view_rounded, color: Colors.white),
-          tooltip: _gridMode ? 'List View' : 'Cover Grid View',
-          onPressed: () => setState(() => _gridMode = !_gridMode),
-        ),
-        PopupMenuButton<_DocSort>(
-          icon: const Icon(Icons.sort_rounded, color: Colors.white),
-          color: const Color(0xFF1A2238),
-          tooltip: 'Sort Documents',
-          onSelected: (s) => setState(() => _sortBy = s),
-          itemBuilder: (_) => [
-            _sortItem(_DocSort.recent, 'Recently Opened / Modified'),
-            _sortItem(_DocSort.name, 'Name (0-9, A-Z)'),
-            _sortItem(_DocSort.progress, 'Reading Progress'),
-            _sortItem(_DocSort.size, 'Largest First'),
-            _sortItem(_DocSort.ext, 'File Format'),
-          ],
-        ),
+        if (isDesktop) ...[
+          IconButton(
+            icon: Icon(_gridMode ? Icons.view_list_rounded : Icons.grid_view_rounded, color: Colors.white),
+            tooltip: _gridMode ? 'List View' : 'Cover Grid View',
+            onPressed: () => setState(() => _gridMode = !_gridMode),
+          ),
+          PopupMenuButton<_DocSort>(
+            icon: const Icon(Icons.sort_rounded, color: Colors.white),
+            color: const Color(0xFF1A2238),
+            tooltip: 'Sort Documents',
+            onSelected: (s) => setState(() => _sortBy = s),
+            itemBuilder: (_) => [
+              _sortItem(_DocSort.recent, 'Recently Opened / Modified'),
+              _sortItem(_DocSort.name, 'Name (0-9, A-Z)'),
+              _sortItem(_DocSort.progress, 'Reading Progress'),
+              _sortItem(_DocSort.size, 'Largest First'),
+              _sortItem(_DocSort.ext, 'File Format'),
+            ],
+          ),
+        ],
         IconButton(
           icon: const Icon(Icons.build_circle_outlined, color: _kAccent),
           tooltip: 'Document Tools & Folders',
           onPressed: _openToolsSheet,
         ),
       ],
+    );
+  }
+
+  Widget _buildMobileControlStrip(int shownCount) {
+    final sortLabel = switch (_sortBy) {
+      _DocSort.recent => 'Recent',
+      _DocSort.name => 'Name',
+      _DocSort.progress => 'Progress',
+      _DocSort.size => 'Size',
+      _DocSort.ext => 'Format',
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '$shownCount ${shownCount == 1 ? 'document' : 'documents'}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _kMuted, fontSize: 11.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 8),
+          PopupMenuButton<_DocSort>(
+            color: const Color(0xFF1A2238),
+            onSelected: (s) => setState(() => _sortBy = s),
+            itemBuilder: (_) => [
+              _sortItem(_DocSort.recent, 'Recently Opened / Modified'),
+              _sortItem(_DocSort.name, 'Name (0-9, A-Z)'),
+              _sortItem(_DocSort.progress, 'Reading Progress'),
+              _sortItem(_DocSort.size, 'Largest First'),
+              _sortItem(_DocSort.ext, 'File Format'),
+            ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: _kCard,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _kBorder),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.sort_rounded, color: _kMuted, size: 14),
+                  const SizedBox(width: 5),
+                  Text(sortLabel, style: const TextStyle(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => setState(() => _gridMode = !_gridMode),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: _kCard,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _kBorder),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(_gridMode ? Icons.view_list_rounded : Icons.grid_view_rounded, color: _kAccent, size: 14),
+                  const SizedBox(width: 4),
+                  Text(_gridMode ? 'List' : 'Grid', style: const TextStyle(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -505,6 +592,7 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
         if (_selectMode) _buildDocSelectionBar(docs),
         _buildFilterPillStrip(),
         if (_activeFilter != 'folders' && extCounts.length > 1) _buildDynamicExtChips(base.length, extCounts),
+        if (_activeFilter != 'folders') _buildMobileControlStrip(docs.length),
         Expanded(
           child: RefreshIndicator(
             color: _kAccent,
@@ -1186,10 +1274,12 @@ class _DocumentWidgetState extends ConsumerState<DocumentWidget> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            Text(
-                              '$ext · ${_formatSize(doc.fileSize)} · ${DocumentService.folderDisplayName(doc.folder)}',
-                              style: const TextStyle(color: _kMuted, fontSize: 11),
-                              overflow: TextOverflow.ellipsis,
+                            Flexible(
+                              child: Text(
+                                '$ext · ${_formatSize(doc.fileSize)} · ${DocumentService.folderDisplayName(doc.folder)}',
+                                style: const TextStyle(color: _kMuted, fontSize: 11),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                             if (pct > 0) ...[
                               const SizedBox(width: 8),

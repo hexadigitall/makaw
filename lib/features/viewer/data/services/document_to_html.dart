@@ -338,7 +338,7 @@ class DocumentToHtml {
     return buf.toString();
   }
 
-  // ── DOC / Pages (fallback) ────────────────────────────────────
+  // ── DOC / Pages (OLE2 + Word-HTML fallback) ───────────────────
 
   static Future<String> _doc(List<int> bytes) async {
     final text = utf8.decode(bytes, allowMalformed: true);
@@ -353,10 +353,70 @@ class DocumentToHtml {
       }
       return text;
     }
-    final printable = text.replaceAll(RegExp(r'[^\x20-\x7E\n\r\t]'), ' ');
-    final cleaned = printable.replaceAll(RegExp(r' {3,}'), '\n').trim();
-    if (cleaned.length > 100) return '<pre style="white-space:pre-wrap">${_e(cleaned)}</pre>';
-    return '<p style="color:#94A3B8;padding:20px">[DOC file — legacy binary format. Export as DOCX for full rendering.]</p>';
+
+    final paragraphs = <String>[];
+    // OLE2 Compound Document (binary Word 97-2003 .doc / .wps) stores modern Unicode text as UTF-16LE runs.
+    final isOle2 = bytes.length >= 8 &&
+        bytes[0] == 0xD0 &&
+        bytes[1] == 0xCF &&
+        bytes[2] == 0x11 &&
+        bytes[3] == 0xE0;
+    if (isOle2) {
+      final cur = StringBuffer();
+      for (var i = 0; i + 1 < bytes.length; i += 2) {
+        final code = bytes[i] | (bytes[i + 1] << 8);
+        final isAllowed = (code >= 0x20 && code <= 0x7E) ||
+            (code >= 0xA0 && code <= 0x024F) ||
+            code == 0x0D ||
+            code == 0x0A ||
+            code == 0x09;
+        if (isAllowed) {
+          cur.writeCharCode(code == 0x0D ? 0x0A : code);
+        } else {
+          if (cur.length >= 18) {
+            final run = cur.toString().trim();
+            if (!_isOleNoise(run)) paragraphs.add(run);
+          }
+          cur.clear();
+        }
+      }
+      if (cur.length >= 18) {
+        final run = cur.toString().trim();
+        if (!_isOleNoise(run)) paragraphs.add(run);
+      }
+    }
+
+    // Extract contiguous printable ASCII blocks (legacy ANSI Word / RTF chunks)
+    for (final m in RegExp(r'[A-Za-z0-9][A-Za-z0-9 ,.;:!?@#\$%&*()\-_+=\[\]/\\"\x27\n\r]{24,}').allMatches(text)) {
+      final run = m.group(0)!.replaceAll('\r', '\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+      if (!_isOleNoise(run) && !paragraphs.any((p) => p.contains(run))) {
+        paragraphs.add(run);
+      }
+      if (paragraphs.length >= 250) break;
+    }
+
+    if (paragraphs.isNotEmpty) {
+      final buf = StringBuffer();
+      for (final p in paragraphs) {
+        for (final line in p.split('\n')) {
+          final l = line.trim();
+          if (l.isNotEmpty) buf.writeln('<p>${_e(l)}</p>');
+        }
+      }
+      return buf.toString();
+    }
+    return '<p style="color:#94A3B8;padding:20px">[DOC file — legacy binary format with no extractable text stream. Export as DOCX or PDF for full fidelity.]</p>';
+  }
+
+  static bool _isOleNoise(String s) {
+    final lower = s.toLowerCase();
+    return lower.contains('root entry') ||
+        lower.contains('worddocument') ||
+        lower.contains('1table') ||
+        lower.contains('0table') ||
+        lower.contains('summaryinformation') ||
+        lower.contains('msworddoc') ||
+        lower.startsWith('bjbj');
   }
 
   static Future<String> _pages(List<int> bytes) async {
@@ -377,7 +437,7 @@ class DocumentToHtml {
     try {
       final doc = XmlDocument.parse(xmlStr);
       final buf = StringBuffer();
-      for (final node in doc.findAllElements('p')) {
+      for (final node in doc.findAllElements('p', namespace: '*')) {
         final t = node.innerText.trim();
         if (t.isNotEmpty) buf.write('<p>${_e(t)}</p>\n');
       }
@@ -391,20 +451,20 @@ class DocumentToHtml {
       final doc = XmlDocument.parse(xmlStr);
       final buf = StringBuffer();
       final binaries = <String, String>{};
-      for (final b in doc.findAllElements('binary')) {
+      for (final b in doc.findAllElements('binary', namespace: '*')) {
         final id = b.getAttribute('id') ?? '';
         final ct = b.getAttribute('content-type') ?? 'image/jpeg';
         if (id.isNotEmpty) binaries[id] = 'data:$ct;base64,${b.innerText.replaceAll(RegExp(r'\s+'), '')}';
       }
-      final title = doc.findAllElements('book-title').firstOrNull?.innerText.trim();
+      final title = doc.findAllElements('book-title', namespace: '*').firstOrNull?.innerText.trim();
       if (title != null && title.isNotEmpty) buf.write('<h1>${_e(title)}</h1>\n');
-      for (final coverImg in doc.findAllElements('coverpage').expand((c) => c.findAllElements('image'))) {
-        final href = (coverImg.getAttribute('l:href') ?? coverImg.getAttribute('xlink:href') ?? '').replaceFirst('#', '');
+      for (final coverImg in doc.findAllElements('coverpage', namespace: '*').expand((c) => c.findAllElements('image', namespace: '*'))) {
+        final href = (coverImg.getAttribute('l:href') ?? coverImg.getAttribute('href', namespace: '*') ?? '').replaceFirst('#', '');
         if (binaries.containsKey(href)) {
           buf.write('<img src="${binaries[href]}" alt="cover" style="max-height:360px;margin:12px auto"/>\n');
         }
       }
-      for (final sec in doc.findAllElements('section')) {
+      for (final sec in doc.findAllElements('section', namespace: '*')) {
         for (final ch in sec.childElements) {
           if (ch.name.local == 'title') {
             buf.write('<h2>${_e(ch.innerText.trim())}</h2>\n');
@@ -423,10 +483,10 @@ class DocumentToHtml {
     try {
       final doc = XmlDocument.parse(xmlStr);
       final buf = StringBuffer();
-      for (final note in doc.findAllElements('note')) {
-        final t = note.findElements('title').firstOrNull?.innerText ?? 'Evernote Note';
-        final created = note.findElements('created').firstOrNull?.innerText ?? '';
-        final content = note.findElements('content').firstOrNull?.innerText ?? '';
+      for (final note in doc.findAllElements('note', namespace: '*')) {
+        final t = note.findElements('title', namespace: '*').firstOrNull?.innerText ?? 'Evernote Note';
+        final created = note.findElements('created', namespace: '*').firstOrNull?.innerText ?? '';
+        final content = note.findElements('content', namespace: '*').firstOrNull?.innerText ?? '';
         buf.write('<h2>${_e(t)}</h2>');
         if (created.isNotEmpty) buf.write('<p style="color:#94A3B8;font-size:12px">$created</p>');
         final inner = RegExp(r'<en-note[^>]*>([\s\S]*?)</en-note>', caseSensitive: false).firstMatch(content)?.group(1) ?? _e(content);
@@ -444,7 +504,7 @@ class DocumentToHtml {
           : utf8.decode(bytes, allowMalformed: true);
       final doc = XmlDocument.parse(raw);
       final buf = StringBuffer();
-      for (final pEl in doc.findAllElements('p')) {
+      for (final pEl in doc.findAllElements('p', namespace: '*')) {
         final t = pEl.innerText.trim();
         if (t.isNotEmpty) buf.write('<p>${_e(t)}</p>\n');
       }

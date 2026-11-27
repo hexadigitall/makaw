@@ -41,6 +41,8 @@ class _TextViewerPageState extends State<TextViewerPage> {
     return lower.endsWith('.fountain') || lower.endsWith('.fdx');
   }
 
+  bool get _isJson => widget.filePath.toLowerCase().endsWith('.json');
+
   @override
   void initState() {
     super.initState();
@@ -107,17 +109,20 @@ class _TextViewerPageState extends State<TextViewerPage> {
         setState(() => _error = 'File not found');
         return;
       }
-      String text;
-      final size = await file.length();
-      if (size > 5 * 1024 * 1024) {
-        final bytes = await file.readAsBytes();
-        text = utf8.decode(bytes.sublist(0, 5 * 1024 * 1024), allowMalformed: true);
+      const maxBytes = 5 * 1024 * 1024;
+      final bytes = await file.readAsBytes();
+      final slice = bytes.length > maxBytes ? bytes.sublist(0, maxBytes) : bytes;
+      String text = _decodeTextBytes(slice);
+      if (bytes.length > maxBytes) {
         text = '$text\n\n--- File truncated (showing first 5MB) ---';
-      } else {
-        text = await file.readAsString();
       }
       if (widget.filePath.toLowerCase().endsWith('.fdx')) {
         text = _extractFdxScript(text);
+      } else if (_isJson) {
+        try {
+          final parsed = jsonDecode(text);
+          text = const JsonEncoder.withIndent('  ').convert(parsed);
+        } catch (_) {}
       }
       final savedState = await DocumentStateService.getState(widget.filePath);
       if (mounted) {
@@ -133,6 +138,24 @@ class _TextViewerPageState extends State<TextViewerPage> {
     } catch (e) {
       if (mounted) setState(() => _error = 'Error reading file: $e');
     }
+  }
+
+  static String _decodeTextBytes(List<int> bytes) {
+    if (bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
+      final units = <int>[];
+      for (var i = 2; i + 1 < bytes.length; i += 2) {
+        units.add(bytes[i] | (bytes[i + 1] << 8));
+      }
+      return String.fromCharCodes(units);
+    }
+    if (bytes.length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) {
+      final units = <int>[];
+      for (var i = 2; i + 1 < bytes.length; i += 2) {
+        units.add((bytes[i] << 8) | bytes[i + 1]);
+      }
+      return String.fromCharCodes(units);
+    }
+    return utf8.decode(bytes, allowMalformed: true);
   }
 
   static String _extractFdxScript(String xmlStr) {
@@ -272,16 +295,30 @@ class _TextViewerPageState extends State<TextViewerPage> {
                         )
                       : (_isScreenplay && _richMarkdown)
                           ? _buildFountainView(_content!)
-                          : SelectableText(
-                              _content!,
-                              contextMenuBuilder: buildLearningSelectionToolbar,
-                              style: TextStyle(
-                                color: _readerFg,
-                                fontSize: _fontSize,
-                                height: 1.55,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
+                          : _wrap
+                              ? SelectableText(
+                                  _content!,
+                                  contextMenuBuilder: buildLearningSelectionToolbar,
+                                  style: TextStyle(
+                                    color: _readerFg,
+                                    fontSize: _fontSize,
+                                    height: 1.55,
+                                    fontFamily: 'monospace',
+                                  ),
+                                )
+                              : SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: SelectableText(
+                                    _content!,
+                                    contextMenuBuilder: buildLearningSelectionToolbar,
+                                    style: TextStyle(
+                                      color: _readerFg,
+                                      fontSize: _fontSize,
+                                      height: 1.55,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                ),
                 ),
     );
   }

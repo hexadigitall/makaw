@@ -18,6 +18,31 @@ class _SearchResult {
   const _SearchResult({required this.page, required this.start, required this.end});
 }
 
+/// Computes continuous `0.0..1.0` reading progress across a PDF file.
+double computePdfProgressFraction({
+  required int currentPageZeroBased,
+  required int totalPages,
+  double? scrollOffset,
+  double? maxScrollExtent,
+}) {
+  if (totalPages <= 0) return 0.0;
+  if (maxScrollExtent != null &&
+      maxScrollExtent.isFinite &&
+      maxScrollExtent > 1.0 &&
+      scrollOffset != null &&
+      scrollOffset.isFinite) {
+    return (scrollOffset / maxScrollExtent).clamp(0.0, 1.0);
+  }
+  if (totalPages == 1) return 1.0;
+  return ((currentPageZeroBased + 1) / totalPages).clamp(0.0, 1.0);
+}
+
+/// Maps a `0.0..1.0` scrubber fraction to a 0-based page index `[0, totalPages - 1]`.
+int resolvePdfPageForFraction(double fraction, int totalPages) {
+  if (totalPages <= 1) return 0;
+  return (fraction.clamp(0.0, 1.0) * (totalPages - 1)).round().clamp(0, totalPages - 1);
+}
+
 class MakawPdfViewerPage extends StatefulWidget {
   final String filePath;
   final String title;
@@ -31,11 +56,15 @@ class MakawPdfViewerPage extends StatefulWidget {
 
 class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTickerProviderStateMixin {
   PdfViewerController? _controller;
+  PdfViewerController? _listenedController;
   PdfDocument? _document;
   bool _isLoading = true;
   int _currentPage = 0;
   int _totalPages = 0;
   double _zoom = 1.0;
+  double _fileProgress = 0.0;
+  bool _isScrubbing = false;
+  double _scrubFraction = 0.0;
 
   bool _showChrome = true;
   late AnimationController _chromeAnim;
@@ -86,6 +115,7 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
 
   @override
   void dispose() {
+    _listenedController?.removeListener(_onControllerTransformChanged);
     _savePosition();
     _ttsPoller?.cancel();
     _searchCtrl.dispose();
@@ -146,14 +176,52 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
     } catch (_) {}
   }
 
+  void _attachControllerListener(PdfViewerController ctrl) {
+    if (_listenedController == ctrl) return;
+    _listenedController?.removeListener(_onControllerTransformChanged);
+    _listenedController = ctrl;
+    ctrl.addListener(_onControllerTransformChanged);
+  }
+
+  void _onControllerTransformChanged() {
+    final ctrl = _controller;
+    if (!mounted || ctrl == null || _totalPages <= 0 || _isScrubbing) return;
+    try {
+      final docH = ctrl.documentSize.height;
+      final viewRect = ctrl.visibleRect;
+      final maxScroll = docH - viewRect.height;
+      final nextProgress = computePdfProgressFraction(
+        currentPageZeroBased: _currentPage,
+        totalPages: _totalPages,
+        scrollOffset: viewRect.top,
+        maxScrollExtent: maxScroll,
+      );
+      final nextZoom = ctrl.currentZoom;
+      if ((nextProgress - _fileProgress).abs() >= 0.002 || (nextZoom - _zoom).abs() >= 0.01) {
+        setState(() {
+          _fileProgress = nextProgress;
+          _zoom = nextZoom;
+        });
+      }
+    } catch (_) {
+      // Controller layout may not be ready during teardown/relayout.
+    }
+  }
+
   Future<void> _savePosition() async {
     try {
+      final progress = _fileProgress > 0
+          ? _fileProgress
+          : computePdfProgressFraction(
+              currentPageZeroBased: _currentPage,
+              totalPages: _totalPages,
+            );
       await DocumentStateService.saveProgress(
         widget.filePath,
         title: widget.title,
         currentPage: _currentPage + 1,
         totalPages: _totalPages > 0 ? _totalPages : 1,
-        scrollProgress: _totalPages > 0 ? ((_currentPage + 1) / _totalPages).clamp(0.0, 1.0) : 0.0,
+        scrollProgress: progress,
         zoomScale: _zoom,
         bookmarks: _bookmarks,
       );
@@ -405,7 +473,32 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                       onDocumentChanged: _onDocumentChanged,
                       onPageChanged: (pageNumber) {
                         if (pageNumber != null) {
-                          setState(() => _currentPage = pageNumber - 1);
+                          setState(() {
+                            _currentPage = (pageNumber - 1).clamp(0, math.max(0, _totalPages - 1));
+                            if (!_isScrubbing) {
+                              try {
+                                final ctrl = _controller;
+                                if (ctrl != null) {
+                                  _fileProgress = computePdfProgressFraction(
+                                    currentPageZeroBased: _currentPage,
+                                    totalPages: _totalPages,
+                                    scrollOffset: ctrl.visibleRect.top,
+                                    maxScrollExtent: ctrl.documentSize.height - ctrl.visibleRect.height,
+                                  );
+                                } else {
+                                  _fileProgress = computePdfProgressFraction(
+                                    currentPageZeroBased: _currentPage,
+                                    totalPages: _totalPages,
+                                  );
+                                }
+                              } catch (_) {
+                                _fileProgress = computePdfProgressFraction(
+                                  currentPageZeroBased: _currentPage,
+                                  totalPages: _totalPages,
+                                );
+                              }
+                            }
+                          });
                           _savePosition();
                         }
                       },
@@ -414,7 +507,16 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                         _controller = ctrl;
                         _totalPages = doc.pages.length;
                         _document = doc;
-                        if (mounted) setState(() => _isLoading = false);
+                        _attachControllerListener(ctrl);
+                        if (mounted) {
+                          setState(() {
+                            _isLoading = false;
+                            _fileProgress = computePdfProgressFraction(
+                              currentPageZeroBased: _currentPage,
+                              totalPages: _totalPages,
+                            );
+                          });
+                        }
                         _restorePosition();
                       },
                     ),
@@ -430,6 +532,22 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
                 _buildTopBar(),
                 _buildBottomBar(),
               ],
+
+              // Minimal always-on edge reading progress hairline while chrome is tucked
+              if (!_showChrome && _totalPages > 0)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: LinearProgressIndicator(
+                      value: _fileProgress.clamp(0.0, 1.0),
+                      minHeight: 2.5,
+                      backgroundColor: Colors.white10,
+                      color: _kAccent,
+                    ),
+                  ),
+                ),
 
               // Loading
               if (_isLoading)
@@ -602,45 +720,183 @@ class _MakawPdfViewerPageState extends State<MakawPdfViewerPage> with SingleTick
 
   // ── Bottom Bar ─────────────────────────────────────────────────────────
 
+  Future<void> _showJumpToPageDialog() async {
+    if (_totalPages <= 1) return;
+    final ctrl = TextEditingController(text: '${_currentPage + 1}');
+    final target = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _kCard,
+        title: const Text('Go to Page', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: '1 - $_totalPages',
+            hintStyle: const TextStyle(color: _kMuted),
+            filled: true,
+            fillColor: _kDark,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v.trim())),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
+            child: const Text('Go'),
+          ),
+        ],
+      ),
+    );
+    if (target != null && target >= 1 && target <= _totalPages) {
+      final idx = target - 1;
+      setState(() {
+        _currentPage = idx;
+        _fileProgress = computePdfProgressFraction(
+          currentPageZeroBased: idx,
+          totalPages: _totalPages,
+        );
+      });
+      await _controller?.goToPage(pageNumber: target, duration: const Duration(milliseconds: 160));
+      _savePosition();
+    }
+  }
+
   Widget _buildBottomBar() {
     final bottomPad = MediaQuery.of(context).padding.bottom;
+    final activeFraction = (_isScrubbing ? _scrubFraction : _fileProgress).clamp(0.0, 1.0);
+    final displayPageZero = _isScrubbing
+        ? resolvePdfPageForFraction(_scrubFraction, _totalPages)
+        : _currentPage;
+    final pct = (activeFraction * 100).round();
+
     return Positioned(
-      bottom: 0, left: 0, right: 0,
+      bottom: 0,
+      left: 0,
+      right: 0,
       child: AnimatedBuilder(
         animation: _chromeFade,
         builder: (_, __) => Opacity(
           opacity: _chromeFade.value,
           child: Container(
-            padding: EdgeInsets.fromLTRB(0, 0, 0, bottomPad),
-            color: _kDark,
+            padding: EdgeInsets.fromLTRB(8, 4, 8, bottomPad + 6),
+            decoration: BoxDecoration(
+              color: _kDark.withOpacity(0.95),
+              border: const Border(top: BorderSide(color: Color(0xFF23263B), width: 0.7)),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Page scrubber
+                if (_isScrubbing && _totalPages > 0)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _kCard,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _kAccent.withOpacity(0.45)),
+                    ),
+                    child: Text(
+                      'Page ${displayPageZero + 1} of $_totalPages  ·  $pct%',
+                      style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
+                    ),
+                  ),
                 SliderTheme(
                   data: SliderThemeData(
-                    trackHeight: 1.5,
+                    trackHeight: 2.5,
                     activeTrackColor: _kAccent,
-                    inactiveTrackColor: _kAccent.withOpacity(0.2),
+                    inactiveTrackColor: _kAccent.withOpacity(0.22),
                     thumbColor: _kAccent,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                    overlayColor: _kAccent.withOpacity(0.15),
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                    overlayColor: _kAccent.withOpacity(0.18),
                   ),
                   child: Slider(
-                    value: _currentPage.toDouble(),
-                    min: 0,
-                    max: _totalPages > 1 ? (_totalPages - 1).toDouble() : 1,
-                    onChanged: (v) => _controller?.goToPage(pageNumber: v.round() + 1),
+                    value: activeFraction,
+                    min: 0.0,
+                    max: 1.0,
+                    onChangeStart: _totalPages <= 1
+                        ? null
+                        : (v) => setState(() {
+                              _isScrubbing = true;
+                              _scrubFraction = v.clamp(0.0, 1.0);
+                            }),
+                    onChanged: _totalPages <= 1
+                        ? null
+                        : (v) {
+                            final targetIdx = resolvePdfPageForFraction(v, _totalPages);
+                            setState(() {
+                              _isScrubbing = true;
+                              _scrubFraction = v.clamp(0.0, 1.0);
+                              _fileProgress = _scrubFraction;
+                              _currentPage = targetIdx;
+                            });
+                            _controller?.goToPage(
+                              pageNumber: targetIdx + 1,
+                              duration: Duration.zero,
+                            );
+                          },
+                    onChangeEnd: _totalPages <= 1
+                        ? null
+                        : (v) {
+                            final targetIdx = resolvePdfPageForFraction(v, _totalPages);
+                            setState(() {
+                              _isScrubbing = false;
+                              _currentPage = targetIdx;
+                              _fileProgress = v.clamp(0.0, 1.0);
+                            });
+                            _controller?.goToPage(
+                              pageNumber: targetIdx + 1,
+                              duration: const Duration(milliseconds: 120),
+                            );
+                            _savePosition();
+                          },
                   ),
                 ),
-                // Page label: centered
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    '${_currentPage + 1} / $_totalPages',
-                    style: const TextStyle(color: _kMuted, fontSize: 12, fontWeight: FontWeight.w500),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 20,
+                      color: Colors.white70,
+                      onPressed: _currentPage > 0
+                          ? () => _controller?.goToPage(pageNumber: _currentPage, duration: const Duration(milliseconds: 140))
+                          : null,
+                      icon: const Icon(Icons.chevron_left_rounded),
+                      tooltip: 'Previous Page',
+                    ),
+                    InkWell(
+                      onTap: _showJumpToPageDialog,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _kCard,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          _totalPages > 0
+                              ? 'Page ${displayPageZero + 1} / $_totalPages  ·  $pct%'
+                              : 'Loading...',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 20,
+                      color: Colors.white70,
+                      onPressed: _currentPage < _totalPages - 1
+                          ? () => _controller?.goToPage(pageNumber: _currentPage + 2, duration: const Duration(milliseconds: 140))
+                          : null,
+                      icon: const Icon(Icons.chevron_right_rounded),
+                      tooltip: 'Next Page',
+                    ),
+                  ],
                 ),
               ],
             ),

@@ -208,4 +208,9 @@
   - [x] Redesign `DirectVideoPlayer` overlay layout, dimensions/aspect ratio geometry, playlist sheet, centered `-10s / Play / +10s` transport, and deterministic 4-second auto-dismissing `"Resumed from MM:SS · Start Over"` pill ([video_player_page.dart](file:///D:/projects/makaw/lib/features/media/presentation/pages/video_player_page.dart)).
   - [x] Implement consistent hold-to-select + tap-to-add multi-select & batch action bars across `VideoPlayerWidget`, `MediaLibraryPage`, `DocumentWidget`, and `ImageViewerWidget`.
   - [x] **10.5 Sprint 9 Sign-Off:** Commit/push `1f9bbaa` & `d6f6c2c` (`_openEcosystem('documents')` routing fix), Android CI Run `45947892328` (`8m34s`), and install `app-arm64-v8a-release.apk` on TECNO CG8h (`H854CG8012345678`, `PID 7124`) & Redmi 14C (`JF9HQ8XOT4LVYPKV`, `PID 15944`).
-  - [ ] Phase E future enhancements: OLE2 binary CFBF parser (`DOC/XLS/PPT/MSG`) & SQLite FTS5 document full-text search.
+  - [x] **10.6 Sprint 10 Viewer Hardening, EPUB Overhaul, PDF Progress & AI Markdown Polish:**
+    - [x] Pure-Dart crash-proof EPUB engine (`parseEpubBytes`, EPUB 2/3 TOC) & distraction-free Reader UI (`Serif/Sans/Mono`, 4 themes, search, bookmarks, scroll tracking).
+    - [x] Pure-Dart OLE2 BIFF8 `.xls` parser, `workbook.xml.rels` `.xlsx` resolver, `namespace: '*'` XML matching (`XLSX/ODS/PPTX/ODP/FB2/ODT`), CSV auto-delimiter/BOM, and OLE2 `.doc` text extraction.
+    - [x] EPS/PS PostScript vector/bitmap interpreter, XPS/OXPS `FixedPage` SVG converter, and PDF continuous bottom progress scrubber.
+    - [x] Portrait Documents header overflow fix (`360px`), `AiMarkdownView` table/heading/export markdown sanitization, and **150/150** local tests passing.
+  - [ ] Phase E future enhancements: Native binary PPT/MSG OLE2 streams & SQLite FTS5 document full-text search.

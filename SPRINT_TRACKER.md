@@ -2,7 +2,7 @@
 **Project:** Makaw Multiplatform  
 **Repository:** `D:\projects\makaw`  
 **Tracking Standard:** Build-Ready PRD v1.0  
-**Last Updated:** November 26, 2026  
+**Last Updated:** November 27, 2026  
 
 ---
 
@@ -32,6 +32,7 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 7** | Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign | 2026-11-24 | 2026-11-26 | **COMPLETED** | **TECNO CG8h Installed** | Android Run 45526057854 Passed |
 | **Sprint 8** | Video Scrub/Browser Jitter Fix, File Explorer Search & Archives, Download Banners, Lyrics Creator & Sync Studio, Music/Video Settings & EQ, Home Card & AI Upgrades | 2026-11-26 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45930971191 Passed |
 | **Sprint 9** | Documents Workspace Overhaul (145+ Formats, Thumbnails, Comics, Slides, Sheets, PIM/Vector), Video Player Redesign, Auto-Hide Start Over & Global Multi-Select | 2026-11-27 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45947892328 Passed |
+| **Sprint 10** | Crash-Proof Flagship EPUB Reader, Continuous PDF Progress Scrubber, Spreadsheet BIFF8 XLS / Namespaced XLSX / CSV Engine, EPS/PS & XPS Vector Rendering, OLE2 DOC Recovery, Portrait Header Fix & AI Markdown Table/Heading Overhaul | 2026-11-27 | 2026-11-27 | **IN PROGRESS** | **Deploying APK** | Triggering Build |
 
 ---
 
@@ -248,3 +249,16 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
   - ~145-format `DocumentFormatRegistry`, SQLite `document_state` / `document_collections` (`MakawManagerDb` v2), `DocumentThumbnailService`, and redesigned Mobile + Desktop 3-pane `DocumentWidget` library ([document_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/document_page.dart)).
   - Specialized viewers: `ComicViewerPage`, `SlideViewerPage`, `PimViewerPage`, `VectorCadViewerPage`, multi-sheet `SpreadsheetViewerPage`, MHTML/FB2/ENEX/ABW `DocumentToHtml`, and `.fountain`/`.fdx` + Reader Themes in `TextViewerPage`.
   - Redesigned `DirectVideoPlayer` controls/aspect geometry, 4-second auto-dismissing `"Resumed from ... · Start Over"` pill, and hold-to-multi-select + batch action bars across `VideoPlayerWidget`, `MediaLibraryPage`, `DocumentWidget`, and `ImageViewerWidget`.
+
+---
+
+### Sprint 10: Essential Format Viewers, Flagship EPUB Reader, PDF Progress, Header Layout & AI Markdown Consistency
+- **Status:** **DEPLOYING** (Local analysis: 0 errors/warnings; Full suite: **150/150 tests passed**)
+- **Task Checklist:**
+  - [x] Fix Portrait Documents header (`360px`+) badge/search collision & control strip overflow ([document_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/document_page.dart))
+  - [x] Replace crashing WebView `flutter_epub_viewer` with pure-Dart isolate OPF/NCX/Nav EPUB parser (`parseEpubBytes`), distraction-free chrome toggle, Typography/Paper Studio (`Paper`/`Sepia`/`Slate`/`OLED`, `Serif`/`Sans`/`Mono`, font size, line spacing), per-chapter bookmarks, cross-book search, and live chapter progress ([epub_viewer_page.dart](file:///D:/projects/makaw/lib/features/viewer/presentation/pages/epub_viewer_page.dart))
+  - [x] Rebuild `SpreadsheetViewerPage` with namespaced OOXML (`namespace: '*'`), `workbook.xml.rels` resolution, pure-Dart OLE2 BIFF8 `.xls` parser, auto-delimiter + BOM CSV/TSV parser, and virtualized grid ([spreadsheet_viewer_page.dart](file:///D:/projects/makaw/lib/features/viewer/presentation/pages/spreadsheet_viewer_page.dart))
+  - [x] Fix PDF continuous scroll progression + glitch-free scrub slider + always-on edge progress hairline + jump-to-page dialog ([pdf_viewer_page.dart](file:///D:/projects/makaw/lib/features/pdf/presentation/pages/pdf_viewer_page.dart))
+  - [x] Upgrade `VectorCadViewerPage` with DOS EPSF/PostScript vector & EPSI bitmap interpreter + XPS/OXPS `FixedPage` SVG converter, upgrade `SlideViewerPage` (`namespace: '*'`) & `DocumentToHtml` OLE2 UTF-16LE `.doc` recovery, and add UTF-16 BOM + JSON pretty + horizontal unwrap support in `TextViewerPage`
+  - [x] Fix AI Assistant raw `**` inside tables, `#{1,6}` headings, `#NoSpace`, `1. ### Step` list items, empty table cells, and table HTML/DOC/TXT export in [ai_markdown_view.dart](file:///D:/projects/makaw/lib/features/ai/presentation/widgets/ai_markdown_view.dart)
+  - [x] Add automated unit & widget regression tests ([document_viewers_and_markdown_test.dart](file:///D:/projects/makaw/test/features/documents/document_viewers_and_markdown_test.dart)) — **150/150 tests passed**

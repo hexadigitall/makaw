@@ -58,11 +58,11 @@ class AiMarkdownView extends StatelessWidget {
         continue;
       }
 
-      // 3. Headings: #, ##, ###, ####
-      final headingMatch = RegExp(r'^(#{1,4})\s+(.+)$').firstMatch(line.trim());
+      // 3. Headings: #, ##, ###, ####, #####, ###### (with optional spacing or indent)
+      final headingMatch = RegExp(r'^\s*(#{1,6})(?:\s+|(?=[A-Za-z0-9\*\`]))(.+)$').firstMatch(line);
       if (headingMatch != null) {
         final level = headingMatch.group(1)!.length;
-        final title = headingMatch.group(2)!;
+        final title = _normalizeCellLineBreaks(headingMatch.group(2)!.trim());
         widgets.add(_buildHeading(context, title, level));
         i++;
         continue;
@@ -72,31 +72,42 @@ class AiMarkdownView extends StatelessWidget {
       if (line.trim().startsWith('>')) {
         final quoteLines = <String>[];
         while (i < lines.length && lines[i].trim().startsWith('>')) {
-          quoteLines.add(lines[i].trim().replaceFirst(RegExp(r'^>\s?'), ''));
+          quoteLines.add(
+            _normalizeCellLineBreaks(
+              lines[i].trim().replaceFirst(RegExp(r'^>\s?'), '').replaceFirst(RegExp(r'^#{1,6}\s+'), ''),
+            ),
+          );
           i++;
         }
         widgets.add(_buildBlockquote(context, quoteLines.join('\n')));
         continue;
       }
 
-      // 5. Table: | Col | Col |
-      if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      // 5. Table: | Col | Col | (supports with or without outer pipes when divider row follows)
+      final trimmedLine = line.trim();
+      final nextLineTrimmed = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+      final isPipedRow = trimmedLine.startsWith('|') && trimmedLine.contains('|', 1);
+      final isHeaderPlusDivider = trimmedLine.contains('|') &&
+          RegExp(r'^\|?[\s\-:]+\|[\|\s\-:]*$').hasMatch(nextLineTrimmed);
+      if (isPipedRow || isHeaderPlusDivider) {
         final tableLines = <String>[];
-        while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+        while (i < lines.length && lines[i].trim().contains('|') && lines[i].trim().isNotEmpty) {
           tableLines.add(lines[i].trim());
           i++;
         }
-        if (tableLines.isNotEmpty) {
+        if (tableLines.length >= 2) {
           widgets.add(_buildTable(context, tableLines));
           continue;
         }
+        // Not actually a multi-row table: rewind single line to paragraph parser
+        i -= tableLines.length;
       }
 
       // 6. Bullet List: * item, - item, + item
       final bulletMatch = RegExp(r'^(\s*)([\*\-\+])\s+(.+)$').firstMatch(line);
       if (bulletMatch != null) {
         final indent = bulletMatch.group(1)?.length ?? 0;
-        final itemText = bulletMatch.group(3)!;
+        final itemText = bulletMatch.group(3)!.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
         widgets.add(_buildListItem(context, itemText, indent: indent, isBullet: true));
         i++;
         continue;
@@ -107,7 +118,7 @@ class AiMarkdownView extends StatelessWidget {
       if (numberMatch != null) {
         final indent = numberMatch.group(1)?.length ?? 0;
         final numStr = numberMatch.group(2)!;
-        final itemText = numberMatch.group(3)!;
+        final itemText = numberMatch.group(3)!.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
         widgets.add(_buildListItem(context, itemText, indent: indent, isBullet: false, numberStr: numStr));
         i++;
         continue;
@@ -277,28 +288,49 @@ class AiMarkdownView extends StatelessWidget {
     );
   }
 
+  static String _normalizeCellLineBreaks(String s) =>
+      s.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
+
+  static List<String> _splitMarkdownTableRow(String rawLine) {
+    var s = rawLine.trim();
+    if (s.startsWith('|')) s = s.substring(1);
+    if (s.endsWith('|') && !s.endsWith(r'\|')) s = s.substring(0, s.length - 1);
+    // Protect escaped pipes `\|`
+    const sentinel = '\uE000';
+    s = s.replaceAll(r'\|', sentinel);
+    return s
+        .split('|')
+        .map((c) => _normalizeCellLineBreaks(c.replaceAll(sentinel, '|').trim()))
+        .toList();
+  }
+
   Widget _buildTable(BuildContext context, List<String> tableLines) {
     if (tableLines.length < 2) return const SizedBox.shrink();
 
-    final rows = <List<String>>[];
+    final rawRows = <List<String>>[];
     for (final line in tableLines) {
-      // Skip markdown divider line: |---|---|
-      if (RegExp(r'^[\|\s\-:]+$').hasMatch(line)) continue;
-      final cells = line
-          .split('|')
-          .map((c) => c.trim())
-          .where((c) => c.isNotEmpty)
-          .toList();
-      if (cells.isNotEmpty) rows.add(cells);
+      // Skip markdown divider line: |---|---| or :---:|:---
+      if (RegExp(r'^\|?[\s\-:]+(\|[\s\-:]*)+$').hasMatch(line)) continue;
+      final cells = _splitMarkdownTableRow(line);
+      if (cells.isNotEmpty) rawRows.add(cells);
     }
 
-    if (rows.isEmpty) return const SizedBox.shrink();
+    if (rawRows.isEmpty) return const SizedBox.shrink();
+    final colCount = rawRows.first.length;
+    if (colCount == 0) return const SizedBox.shrink();
+
+    // Normalize every row to exact header column count so DataTable never asserts.
+    final rows = rawRows.map((r) {
+      if (r.length == colCount) return r;
+      if (r.length > colCount) return r.sublist(0, colCount);
+      return [...r, for (var k = r.length; k < colCount; k++) ''];
+    }).toList();
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: const Color(0xFF334155)),
       ),
       clipBehavior: Clip.antiAlias,
@@ -306,21 +338,43 @@ class AiMarkdownView extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: DataTable(
           headingRowColor: WidgetStateProperty.all(const Color(0xFF1E293B)),
+          dataRowMinHeight: 40,
+          dataRowMaxHeight: double.infinity,
           horizontalMargin: 12,
-          columnSpacing: 18,
+          columnSpacing: 16,
           columns: rows.first.map((col) {
             return DataColumn(
-              label: Text(
-                col,
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
+              label: Text.rich(
+                TextSpan(
+                  children: _parseInlineSpans(
+                    col,
+                    baseStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
+                  ),
+                ),
               ),
             );
           }).toList(),
-          rows: rows.skip(1).map((row) {
+          rows: rows.skip(1).toList().asMap().entries.map((entry) {
+            final idx = entry.key;
+            final row = entry.value;
             return DataRow(
+              color: idx.isOdd ? WidgetStateProperty.all(const Color(0xFF131D31)) : null,
               cells: row.map((cell) {
                 return DataCell(
-                  Text(cell, style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 13)),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 220),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Text.rich(
+                        TextSpan(
+                          children: _parseInlineSpans(
+                            cell,
+                            baseStyle: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 13, height: 1.35),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 );
               }).toList(),
             );
@@ -414,45 +468,31 @@ class AiMarkdownView extends StatelessWidget {
     );
   }
 
-  /// Parses inline markdown: **bold**, *italic*, ***bold-italic***, `code`, [link](url)
-  List<InlineSpan> _parseInlineSpans(String text, {required TextStyle baseStyle}) {
+  /// Parses inline markdown recursively: ***bold-italic***, **bold**, *italic*,
+  /// ~~strike~~, `code`, [link](url), and cleans stray unclosed `**` / `###` markers.
+  List<InlineSpan> _parseInlineSpans(String text, {required TextStyle baseStyle, int depth = 0}) {
+    if (text.isEmpty) return const [];
+    // Guard against runaway recursion on pathological input
+    if (depth > 3) return [TextSpan(text: _sanitizeOrphanMarkers(text), style: baseStyle)];
+
     final spans = <InlineSpan>[];
-    // Regex matching bold-italic, bold, italic, inline code, or link
     final regex = RegExp(
-      r'(\*\*\*(.+?)\*\*\*)|(\*\*(.+?)\*\*)|(__(.+?)__)|(\*(.+?)\*)|(_([^_]+?)_)|(`([^`]+?)`)|(\[([^\]]+)\]\(([^)]+)\))',
+      r'(`([^`]+?)`)|(\[([^\]]+)\]\(([^)]+)\))|(\*\*\*(.+?)\*\*\*)|(\*\*(.+?)\*\*)|(__(.+?)__)|(~~(.+?)~~)|(\*([^\*\n]+?)\*)|(_([^_\n]+?)_)',
       dotAll: true,
     );
 
     int lastMatchEnd = 0;
     for (final match in regex.allMatches(text)) {
       if (match.start > lastMatchEnd) {
-        spans.add(TextSpan(text: text.substring(lastMatchEnd, match.start), style: baseStyle));
+        spans.add(TextSpan(
+          text: _sanitizeOrphanMarkers(text.substring(lastMatchEnd, match.start)),
+          style: baseStyle,
+        ));
       }
 
       if (match.group(1) != null) {
-        // ***bold-italic***
+        // `inline code` (never strip markers inside code)
         final content = match.group(2)!;
-        spans.add(TextSpan(
-          text: content,
-          style: baseStyle.copyWith(fontWeight: FontWeight.bold, fontStyle: FontStyle.italic),
-        ));
-      } else if (match.group(3) != null || match.group(5) != null) {
-        // **bold** or __bold__
-        final content = match.group(4) ?? match.group(6)!;
-        spans.add(TextSpan(
-          text: content,
-          style: baseStyle.copyWith(fontWeight: FontWeight.bold),
-        ));
-      } else if (match.group(7) != null || match.group(9) != null) {
-        // *italic* or _italic_
-        final content = match.group(8) ?? match.group(10)!;
-        spans.add(TextSpan(
-          text: content,
-          style: baseStyle.copyWith(fontStyle: FontStyle.italic),
-        ));
-      } else if (match.group(11) != null) {
-        // `inline code`
-        final content = match.group(12)!;
         spans.add(WidgetSpan(
           alignment: PlaceholderAlignment.middle,
           child: Container(
@@ -473,10 +513,10 @@ class AiMarkdownView extends StatelessWidget {
             ),
           ),
         ));
-      } else if (match.group(13) != null) {
+      } else if (match.group(3) != null) {
         // [text](url)
-        final linkText = match.group(14)!;
-        final linkUrl = match.group(15)!;
+        final linkText = _sanitizeOrphanMarkers(match.group(4)!);
+        final linkUrl = match.group(5)!;
         spans.add(WidgetSpan(
           alignment: PlaceholderAlignment.baseline,
           baseline: TextBaseline.alphabetic,
@@ -492,16 +532,60 @@ class AiMarkdownView extends StatelessWidget {
             ),
           ),
         ));
+      } else if (match.group(6) != null) {
+        // ***bold-italic***
+        spans.addAll(_parseInlineSpans(
+          match.group(7)!,
+          baseStyle: baseStyle.copyWith(fontWeight: FontWeight.bold, fontStyle: FontStyle.italic),
+          depth: depth + 1,
+        ));
+      } else if (match.group(8) != null || match.group(10) != null) {
+        // **bold** or __bold__
+        final content = match.group(9) ?? match.group(11)!;
+        spans.addAll(_parseInlineSpans(
+          content,
+          baseStyle: baseStyle.copyWith(fontWeight: FontWeight.bold),
+          depth: depth + 1,
+        ));
+      } else if (match.group(12) != null) {
+        // ~~strikethrough~~
+        spans.addAll(_parseInlineSpans(
+          match.group(13)!,
+          baseStyle: baseStyle.copyWith(decoration: TextDecoration.lineThrough),
+          depth: depth + 1,
+        ));
+      } else if (match.group(14) != null || match.group(16) != null) {
+        // *italic* or _italic_
+        final content = match.group(15) ?? match.group(17)!;
+        spans.addAll(_parseInlineSpans(
+          content,
+          baseStyle: baseStyle.copyWith(fontStyle: FontStyle.italic),
+          depth: depth + 1,
+        ));
       }
 
       lastMatchEnd = match.end;
     }
 
     if (lastMatchEnd < text.length) {
-      spans.add(TextSpan(text: text.substring(lastMatchEnd), style: baseStyle));
+      spans.add(TextSpan(
+        text: _sanitizeOrphanMarkers(text.substring(lastMatchEnd)),
+        style: baseStyle,
+      ));
     }
 
     return spans;
+  }
+
+  /// Strips unclosed or escaped `**` / `###` markdown artifacts from normal prose.
+  static String _sanitizeOrphanMarkers(String raw) {
+    return raw
+        .replaceAll(r'\*', '*')
+        .replaceAll(r'\#', '#')
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'(^|\n)\s*#{1,6}\s+'), r'$1')
+        .replaceAll('***', '')
+        .replaceAll('**', '');
   }
 
   // ── Document Export Transformers ──────────────────────────────────────────
@@ -512,14 +596,22 @@ class AiMarkdownView extends StatelessWidget {
     // Remove fenced code blocks delimiter
     out = out.replaceAll(RegExp(r'```[a-zA-Z0-9_\-\+]*\n'), '');
     out = out.replaceAll(RegExp(r'```'), '');
-    // Remove headings #
-    out = out.replaceAll(RegExp(r'^(#{1,6})\s+', multiLine: true), '');
+    // Remove headings # (1..6, even after list markers/blockquotes or missing space)
+    out = out.replaceAll(RegExp(r'^\s*(#{1,6})(?:\s+|(?=[A-Za-z0-9\*\`]))', multiLine: true), '');
+    out = out.replaceAll(RegExp(r'^(\s*(?:[\*\-\+]|\d+[\.\)]|>)\s+)#{1,6}\s*', multiLine: true), r'$1');
+    out = out.replaceAll(RegExp(r'(^|\s)#{1,6}\s+'), r'$1');
+    // Remove markdown table dividers and flatten pipes
+    out = out.replaceAll(RegExp(r'^\s*\|?[\s\-:]+(\|[\s\-:]*)+\s*$', multiLine: true), '');
+    out = out.replaceAll(RegExp(r'^\s*\|\s*|\s*\|\s*$', multiLine: true), '');
+    out = out.replaceAll(RegExp(r'\s*\|\s*'), '  |  ');
     // Remove bold and italic markers
     out = out.replaceAllMapped(RegExp(r'\*\*\*(.+?)\*\*\*'), (m) => m.group(1)!);
     out = out.replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m.group(1)!);
     out = out.replaceAllMapped(RegExp(r'__(.+?)__'), (m) => m.group(1)!);
+    out = out.replaceAllMapped(RegExp(r'~~(.+?)~~'), (m) => m.group(1)!);
     out = out.replaceAllMapped(RegExp(r'\*(.+?)\*'), (m) => m.group(1)!);
     out = out.replaceAllMapped(RegExp(r'_([^_]+?)_'), (m) => m.group(1)!);
+    out = out.replaceAll('***', '').replaceAll('**', '');
     // Remove inline code backticks
     out = out.replaceAllMapped(RegExp(r'`([^`]+?)`'), (m) => m.group(1)!);
     // Remove blockquote >
@@ -529,6 +621,31 @@ class AiMarkdownView extends StatelessWidget {
     // Convert links [text](url) to text (url)
     out = out.replaceAllMapped(RegExp(r'\[([^\]]+)\]\(([^)]+)\)'), (m) => '${m.group(1)} (${m.group(2)})');
     return out.trim();
+  }
+
+  static void _writeHtmlTable(StringBuffer buffer, List<String> tableLines) {
+    final rows = <List<String>>[];
+    for (final line in tableLines) {
+      if (RegExp(r'^\|?[\s\-:]+(\|[\s\-:]*)+$').hasMatch(line)) continue;
+      final cells = _splitMarkdownTableRow(line);
+      if (cells.isNotEmpty) rows.add(cells);
+    }
+    if (rows.isEmpty) return;
+    final colCount = rows.first.length;
+    buffer.writeln('<table><thead><tr>');
+    for (final h in rows.first) {
+      buffer.writeln('<th>${_inlineToHtml(h)}</th>');
+    }
+    buffer.writeln('</tr></thead><tbody>');
+    for (final row in rows.skip(1)) {
+      buffer.writeln('<tr>');
+      for (var c = 0; c < colCount; c++) {
+        final cell = c < row.length ? row[c] : '';
+        buffer.writeln('<td>${_inlineToHtml(cell)}</td>');
+      }
+      buffer.writeln('</tr>');
+    }
+    buffer.writeln('</tbody></table>');
   }
 
   /// Converts markdown into a styled, responsive HTML document (.html).
@@ -578,13 +695,24 @@ class AiMarkdownView extends StatelessWidget {
         continue;
       }
 
-      // Headings
-      final hMatch = RegExp(r'^(#{1,4})\s+(.+)$').firstMatch(line.trim());
+      // Headings (1..6)
+      final hMatch = RegExp(r'^\s*(#{1,6})(?:\s+|(?=[A-Za-z0-9\*\`]))(.+)$').firstMatch(line);
       if (hMatch != null) {
         final lvl = hMatch.group(1)!.length;
         final hText = _inlineToHtml(hMatch.group(2)!);
         buffer.writeln('<h$lvl>$hText</h$lvl>');
         i++;
+        continue;
+      }
+
+      // Markdown tables
+      if (line.trim().contains('|') && i + 1 < lines.length && RegExp(r'^\|?[\s\-:]+\|[\|\s\-:]*$').hasMatch(lines[i + 1].trim())) {
+        final tLines = <String>[];
+        while (i < lines.length && lines[i].trim().contains('|') && lines[i].trim().isNotEmpty) {
+          tLines.add(lines[i].trim());
+          i++;
+        }
+        _writeHtmlTable(buffer, tLines);
         continue;
       }
 
@@ -675,12 +803,22 @@ class AiMarkdownView extends StatelessWidget {
         continue;
       }
 
-      final hMatch = RegExp(r'^(#{1,4})\s+(.+)$').firstMatch(line.trim());
+      final hMatch = RegExp(r'^\s*(#{1,6})(?:\s+|(?=[A-Za-z0-9\*\`]))(.+)$').firstMatch(line);
       if (hMatch != null) {
         final lvl = hMatch.group(1)!.length;
         final hText = _inlineToHtml(hMatch.group(2)!);
         buffer.writeln('<h$lvl>$hText</h$lvl>');
         i++;
+        continue;
+      }
+
+      if (line.trim().contains('|') && i + 1 < lines.length && RegExp(r'^\|?[\s\-:]+\|[\|\s\-:]*$').hasMatch(lines[i + 1].trim())) {
+        final tLines = <String>[];
+        while (i < lines.length && lines[i].trim().contains('|') && lines[i].trim().isNotEmpty) {
+          tLines.add(lines[i].trim());
+          i++;
+        }
+        _writeHtmlTable(buffer, tLines);
         continue;
       }
 
@@ -738,6 +876,8 @@ class AiMarkdownView extends StatelessWidget {
     out = out.replaceAllMapped(RegExp(r'_([^_]+?)_'), (m) => '<em>${m[1]}</em>');
     // `code`
     out = out.replaceAllMapped(RegExp(r'`([^`]+?)`'), (m) => '<code>${m[1]}</code>');
+    out = out.replaceAll('&lt;br&gt;', '<br>').replaceAll('&lt;br/&gt;', '<br>');
+    out = out.replaceAll('***', '').replaceAll('**', '');
     return out;
   }
 }
