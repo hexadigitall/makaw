@@ -212,5 +212,5 @@
     - [x] Pure-Dart crash-proof EPUB engine (`parseEpubBytes`, EPUB 2/3 TOC) & distraction-free Reader UI (`Serif/Sans/Mono`, 4 themes, search, bookmarks, scroll tracking).
     - [x] Pure-Dart OLE2 BIFF8 `.xls` parser, `workbook.xml.rels` `.xlsx` resolver, `namespace: '*'` XML matching (`XLSX/ODS/PPTX/ODP/FB2/ODT`), CSV auto-delimiter/BOM, and OLE2 `.doc` text extraction.
     - [x] EPS/PS PostScript vector/bitmap interpreter, XPS/OXPS `FixedPage` SVG converter, and PDF continuous bottom progress scrubber.
-    - [x] Portrait Documents header overflow fix (`360px`), `AiMarkdownView` table/heading/export markdown sanitization, and **150/150** local tests passing.
+    - [x] Portrait Documents header overflow fix (`360px`), `AiMarkdownView` table/heading/export markdown sanitization, and **150/150** local tests passing (`b4b5d40`, CI Run `45965341822`, installed on TECNO `PID 25851` & Redmi `PID 16005`).
   - [ ] Phase E future enhancements: Native binary PPT/MSG OLE2 streams & SQLite FTS5 document full-text search.

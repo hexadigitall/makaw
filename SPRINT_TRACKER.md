@@ -32,7 +32,7 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 | **Sprint 7** | Media Sorting/Dedup, Wake Lock, AI Rich Markdown, Recent Dedup & Music UI Redesign | 2026-11-24 | 2026-11-26 | **COMPLETED** | **TECNO CG8h Installed** | Android Run 45526057854 Passed |
 | **Sprint 8** | Video Scrub/Browser Jitter Fix, File Explorer Search & Archives, Download Banners, Lyrics Creator & Sync Studio, Music/Video Settings & EQ, Home Card & AI Upgrades | 2026-11-26 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45930971191 Passed |
 | **Sprint 9** | Documents Workspace Overhaul (145+ Formats, Thumbnails, Comics, Slides, Sheets, PIM/Vector), Video Player Redesign, Auto-Hide Start Over & Global Multi-Select | 2026-11-27 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h & Redmi 14C Installed) | Android Run 45947892328 Passed |
-| **Sprint 10** | Crash-Proof Flagship EPUB Reader, Continuous PDF Progress Scrubber, Spreadsheet BIFF8 XLS / Namespaced XLSX / CSV Engine, EPS/PS & XPS Vector Rendering, OLE2 DOC Recovery, Portrait Header Fix & AI Markdown Table/Heading Overhaul | 2026-11-27 | 2026-11-27 | **IN PROGRESS** | **Deploying APK** | Triggering Build |
+| **Sprint 10** | Crash-Proof Flagship EPUB Reader, Continuous PDF Progress Scrubber, Spreadsheet BIFF8 XLS / Namespaced XLSX / CSV Engine, EPS/PS & XPS Vector Rendering, OLE2 DOC Recovery, Portrait Header Fix & AI Markdown Table/Heading Overhaul | 2026-11-27 | 2026-11-27 | **COMPLETED** | **PASSED** (TECNO CG8h PID `25851` & Redmi 14C PID `16005`) | Android Run 45965341822 Passed |
 
 ---
 
@@ -253,7 +253,11 @@ A sprint or task is **ONLY** marked as `PASSED / FULLY DONE` when:
 ---
 
 ### Sprint 10: Essential Format Viewers, Flagship EPUB Reader, PDF Progress, Header Layout & AI Markdown Consistency
-- **Status:** **DEPLOYING** (Local analysis: 0 errors/warnings; Full suite: **150/150 tests passed**)
+- **Status:** **COMPLETED** (Verified locally 150/150 tests + 0 analyze errors/warnings; CI Run `45965341822` succeeded in `11m3s`; installed & launched on both TECNO CG8h `PID 25851` and Redmi 14C `PID 16005`)
+- **Commit:** `b4b5d40`
+- **Android CI Verification:** `build-android.yml` Run `45965341822` (`11m3s`, `makaw-apks`)
+- **Physical Device 1 (TECNO CG8h, `H854CG8012345678`):** `app-arm64-v8a-release.apk` Streamed Install `Success`; launched (`PID 25851`)
+- **Physical Device 2 (Redmi 14C, `JF9HQ8XOT4LVYPKV`):** `app-arm64-v8a-release.apk` Streamed Install `Success`; launched (`PID 16005`)
 - **Task Checklist:**
   - [x] Fix Portrait Documents header (`360px`+) badge/search collision & control strip overflow ([document_page.dart](file:///D:/projects/makaw/lib/features/documents/presentation/pages/document_page.dart))
   - [x] Replace crashing WebView `flutter_epub_viewer` with pure-Dart isolate OPF/NCX/Nav EPUB parser (`parseEpubBytes`), distraction-free chrome toggle, Typography/Paper Studio (`Paper`/`Sepia`/`Slate`/`OLED`, `Serif`/`Sans`/`Mono`, font size, line spacing), per-chapter bookmarks, cross-book search, and live chapter progress ([epub_viewer_page.dart](file:///D:/projects/makaw/lib/features/viewer/presentation/pages/epub_viewer_page.dart))
