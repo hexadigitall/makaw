@@ -152,6 +152,41 @@ void main() {
       expect(code, isNonZero);
       expect(out.toString(), isNot(contains('unreachable')));
     });
+
+    test('wrapped line backspace & cursor movement never duplicate lines at 38 cols',
+        () async {
+      final term = Terminal(maxLines: 200);
+      term.resize(38, 24);
+      final narrowShell = MakawHybridShell(initialCwd: tmpDir.path);
+      narrowShell.resize(38, 24);
+      narrowShell.output.listen(term.write);
+      narrowShell.start();
+      await Future<void>.delayed(Duration.zero);
+
+      // Type enough chars to wrap cleanly onto a second visual row on a phone.
+      const typed = 'echo this command clearly wraps across two rows';
+      narrowShell.feedInput(typed);
+      // Erase 12 chars with Backspace across the wrap boundary + insert text.
+      for (var i = 0; i < 12; i++) {
+        narrowShell.feedInput('\x7f');
+      }
+      // Move left 5, insert '!', then Backspace once mid-line.
+      for (var i = 0; i < 5; i++) {
+        narrowShell.feedInput('\x1b[D');
+      }
+      narrowShell.feedInput('!\x7f');
+      await Future<void>.delayed(Duration.zero);
+
+      final rendered = term.buffer.getText();
+      // Only a single prompt checkmark should exist in the edited command area
+      // (zero duplicated copies from wrapped-line redraws).
+      final checkMarks = '✓'.allMatches(rendered).length;
+      expect(checkMarks, equals(1));
+      expect(rendered, contains('echo this command clearly wraps'));
+      expect(rendered, isNot(contains('across two rows')));
+
+      narrowShell.close();
+    });
   });
 
   group('TerminalRuntimeManager Scrollback Search & Presets', () {

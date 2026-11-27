@@ -40,7 +40,15 @@ class TerminalSoftKeyboard extends StatefulWidget {
 class _TerminalSoftKeyboardState extends State<TerminalSoftKeyboard> {
   bool _ctrlArmed = false;
   bool _altArmed = false;
+  bool _showCommandBar = false;
+  final TextEditingController _cmdCtrl = TextEditingController();
   double _trackpadAccumDx = 0;
+
+  @override
+  void dispose() {
+    _cmdCtrl.dispose();
+    super.dispose();
+  }
 
   void _sendSpecialKey(TerminalKey key) {
     HapticFeedback.selectionClick();
@@ -93,6 +101,64 @@ class _TerminalSoftKeyboardState extends State<TerminalSoftKeyboard> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (_showCommandBar)
+            Container(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF090D16),
+                border: Border(bottom: BorderSide(color: border)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _cmdCtrl,
+                      autofocus: true,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontFamily: 'monospace',
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Type or paste command cleanly…',
+                        hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                        filled: true,
+                        fillColor: const Color(0xFF1E293B),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        isDense: true,
+                      ),
+                      onSubmitted: (v) {
+                        final cmd = v;
+                        _cmdCtrl.clear();
+                        widget.terminal.onOutput?.call('\x03$cmd\r');
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  FilledButton(
+                    onPressed: () {
+                      final cmd = _cmdCtrl.text;
+                      _cmdCtrl.clear();
+                      widget.terminal.onOutput?.call('$cmd\r');
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF38BDF8),
+                      foregroundColor: const Color(0xFF090D16),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      minimumSize: Size.zero,
+                    ),
+                    child: const Text('Run',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ),
           // Row 1: Essential terminal control + navigation keys
           SizedBox(
             height: 40,
@@ -100,6 +166,9 @@ class _TerminalSoftKeyboardState extends State<TerminalSoftKeyboard> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
               children: [
+                _iconCap(Icons.backspace_outlined,
+                    tooltip: 'Backspace',
+                    onTap: () => _sendSpecialKey(TerminalKey.backspace)),
                 _keyCap('ESC', onTap: () => _sendSpecialKey(TerminalKey.escape)),
                 _keyCap('TAB', onTap: () => _sendSpecialKey(TerminalKey.tab)),
                 _modCap(
@@ -130,12 +199,12 @@ class _TerminalSoftKeyboardState extends State<TerminalSoftKeyboard> {
                 _iconCap(Icons.keyboard_arrow_right,
                     tooltip: 'Right',
                     onTap: () => _sendSpecialKey(TerminalKey.arrowRight)),
-                _iconCap(Icons.home_outlined,
-                    tooltip: 'Home',
-                    onTap: () => _sendSpecialKey(TerminalKey.home)),
-                _iconCap(Icons.keyboard_tab,
-                    tooltip: 'End',
-                    onTap: () => _sendSpecialKey(TerminalKey.end)),
+                _iconCap(
+                  Icons.edit_note_rounded,
+                  tooltip: 'Command box',
+                  highlight: _showCommandBar,
+                  onTap: () => setState(() => _showCommandBar = !_showCommandBar),
+                ),
                 _iconCap(
                   widget.showRow2
                       ? Icons.keyboard_arrow_down

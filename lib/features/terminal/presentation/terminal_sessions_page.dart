@@ -224,6 +224,8 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
   void _openAppearanceSheet() {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: const Color(0xFF0F172A),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -231,9 +233,12 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (_, setModalState) {
           final prefs = _mgr.appearance;
-          return SafeArea(
+          return ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.72,
+            ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -493,39 +498,64 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
           ),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.search_rounded, color: Colors.white70, size: 20),
-            tooltip: 'Find in scrollback',
-            onPressed: () {
-              setState(() => _searchVisible = !_searchVisible);
-              if (!_searchVisible) _clearSearchHighlights();
-            },
-          ),
+          if (isWide) ...[
+            IconButton(
+              icon: const Icon(Icons.search_rounded, color: Colors.white70, size: 20),
+              tooltip: 'Find in scrollback',
+              onPressed: () {
+                setState(() => _searchVisible = !_searchVisible);
+                if (!_searchVisible) _clearSearchHighlights();
+              },
+            ),
+            if (_mgr.order.length >= 2)
+              IconButton(
+                icon: Icon(
+                  Icons.vertical_split_rounded,
+                  color: _mgr.splitEnabled ? const Color(0xFF38BDF8) : Colors.white70,
+                  size: 20,
+                ),
+                tooltip: 'Toggle split pane',
+                onPressed: _mgr.toggleSplitPane,
+              ),
+            IconButton(
+              icon: const Icon(Icons.palette_outlined, color: Colors.white70, size: 20),
+              tooltip: 'Themes & typography',
+              onPressed: _openAppearanceSheet,
+            ),
+          ],
           IconButton(
             icon: const Icon(Icons.dns_outlined, color: Color(0xFF38BDF8), size: 20),
             tooltip: 'SSH Hosts & Keys',
             onPressed: _openHostsSheet,
-          ),
-          if (isWide && _mgr.order.length >= 2)
-            IconButton(
-              icon: Icon(
-                Icons.vertical_split_rounded,
-                color: _mgr.splitEnabled ? const Color(0xFF38BDF8) : Colors.white70,
-                size: 20,
-              ),
-              tooltip: 'Toggle split pane',
-              onPressed: _mgr.toggleSplitPane,
-            ),
-          IconButton(
-            icon: const Icon(Icons.palette_outlined, color: Colors.white70, size: 20),
-            tooltip: 'Themes & typography',
-            onPressed: _openAppearanceSheet,
           ),
           IconButton(
             icon: const Icon(Icons.add_box_outlined, color: Color(0xFF38BDF8), size: 21),
             tooltip: 'New shell / remote',
             onPressed: _openNewShellPicker,
           ),
+          if (!isWide)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: Colors.white70, size: 20),
+              color: const Color(0xFF0F172A),
+              onSelected: (v) {
+                if (v == 'find') {
+                  setState(() => _searchVisible = !_searchVisible);
+                  if (!_searchVisible) _clearSearchHighlights();
+                } else if (v == 'appearance') {
+                  _openAppearanceSheet();
+                } else if (v == 'clear' && active != null) {
+                  active.clearDisplay();
+                } else if (v == 'rename' && active != null) {
+                  _renameSession(active);
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'find', child: Text('Find in scrollback', style: TextStyle(color: Colors.white))),
+                PopupMenuItem(value: 'appearance', child: Text('Themes & Font', style: TextStyle(color: Colors.white))),
+                PopupMenuItem(value: 'clear', child: Text('Clear screen', style: TextStyle(color: Colors.white))),
+                PopupMenuItem(value: 'rename', child: Text('Rename tab', style: TextStyle(color: Colors.white))),
+              ],
+            ),
         ],
       ),
       body: !_mgr.initialized
@@ -750,7 +780,12 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
           theme: preset.theme,
           textStyle: TerminalStyle(fontSize: appearance.fontSize),
           cursorType: _mgr.cursorType,
-          deleteDetection: Platform.isAndroid || Platform.isIOS,
+          // visiblePassword disables Android IME predictive-text/composing
+          // duplication while preserving full QWERTY & deleteDetection backspace.
+          keyboardType: !kIsWeb && Platform.isAndroid
+              ? TextInputType.visiblePassword
+              : TextInputType.emailAddress,
+          deleteDetection: !kIsWeb && (Platform.isAndroid || Platform.isIOS),
           autofocus: isPrimary,
         ),
         if (rt.state == TerminalSessionState.exited ||

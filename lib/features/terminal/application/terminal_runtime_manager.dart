@@ -85,6 +85,7 @@ class TerminalSessionRuntime {
     try {
       _pty?.resize(rows, cols);
     } catch (_) {}
+    _hybrid?.resize(cols, rows);
     _ssh?.resize(rows, cols);
   }
 
@@ -94,6 +95,7 @@ class TerminalSessionRuntime {
   void clearDisplay() {
     terminal.eraseDisplay();
     terminal.eraseScrollbackOnly();
+    _hybrid?.reprintPrompt();
   }
 
   void stopProcess() {
@@ -413,6 +415,9 @@ class TerminalRuntimeManager extends ChangeNotifier {
     rt._hybrid = hybrid;
     rt.state = TerminalSessionState.running;
     rt.shellLabel = 'Makaw Hybrid Shell';
+    if (rt.terminal.viewWidth > 0) {
+      hybrid.resize(rt.terminal.viewWidth, rt.terminal.viewHeight);
+    }
 
     rt._hybridSub = hybrid.output.listen((chunk) {
       if (gen != rt._generation) return;
@@ -422,6 +427,10 @@ class TerminalRuntimeManager extends ChangeNotifier {
     rt.terminal.onOutput = (data) {
       if (gen != rt._generation) return;
       hybrid.feedInput(data);
+    };
+    rt.terminal.onResize = (w, h, pw, ph) {
+      if (gen != rt._generation) return;
+      rt.resize(w, h);
     };
 
     hybrid.exitCode.then((code) {

@@ -32,6 +32,10 @@ class MakawHybridShell {
   int _cursor = 0;
   String _escBuf = '';
   bool _inEsc = false;
+  int _cols = Platform.isAndroid ? 42 : 80;
+  int _promptVisibleLen = 10;
+  int _renderedCursorRow = 0;
+  DateTime? _lastBackspaceAt;
 
   // Currently running passthrough process (can be Ctrl+C interrupted)
   Process? _activeChild;
@@ -69,12 +73,27 @@ class MakawHybridShell {
   Future<int> get exitCode => _exitCompleter.future;
   String get cwd => _cwd;
   int get lastExitCode => _lastExitCode;
+  int get columns => _cols;
+
+  /// Keeps wrap/redraw calculations matched to the attached xterm viewport.
+  void resize(int cols, int rows) {
+    if (cols >= 20) _cols = cols;
+  }
+
+  /// Re-prints the active prompt + input buffer after clearing the display.
+  void reprintPrompt() {
+    _renderedCursorRow = 0;
+    _printPrompt();
+    if (_line.isNotEmpty) {
+      _redrawLine(forceFromOrigin: true);
+    }
+  }
 
   void start() {
     if (_closed) return;
     _emit(
-      '\x1b[38;5;45mMakaw Hybrid Shell (makaw-sh)\x1b[0m · $_cwd\r\n'
-      '\x1b[90mBuilt-in: ls, cd, cat, grep, find, mkdir, cp, mv, rm, zip, unzip, curl, git, ssh, hosts, open\x1b[0m\r\n'
+      '\x1b[38;5;45mMakaw Hybrid Shell (makaw-sh)\x1b[0m · ${_shortCwd()}\r\n'
+      '\x1b[90mTools: ls, cd, cat, grep, find, mkdir, cp, mv, rm, zip, unzip, curl, git, ssh, hosts\x1b[0m\r\n'
       '\x1b[90mType \x1b[37mhelp\x1b[90m for commands or \x1b[37mssh user@host\x1b[90m for remote servers.\x1b[0m\r\n',
     );
     _printPrompt();
@@ -86,26 +105,107 @@ class MakawHybridShell {
 
   String _shortCwd() {
     final home = env['HOME'] ?? '';
-    if (home.isNotEmpty && _cwd == home) return '~';
-    if (home.isNotEmpty && _cwd.startsWith('$home${Platform.pathSeparator}')) {
-      return '~/${_cwd.substring(home.length + 1).replaceAll(r'\', '/')}';
+    String display;
+    if (home.isNotEmpty && _cwd == home) {
+      display = '~';
+    } else if (home.isNotEmpty &&
+        _cwd.startsWith('$home${Platform.pathSeparator}')) {
+      display = '~/${_cwd.substring(home.length + 1).replaceAll(r'\', '/')}';
+    } else {
+      display = _cwd.replaceAll(r'\', '/');
     }
-    return _cwd;
+    // Keep prompt compact on narrow phone screens so typing starts well before wrap.
+    final maxLen = _cols < 56 ? 14 : 28;
+    if (display.length > maxLen) {
+      final tail = display.split('/').last;
+      if (tail.isNotEmpty && tail.length + 2 <= maxLen) {
+        return '…/$tail';
+      }
+      return '…${display.substring(display.length - (maxLen - 1))}';
+    }
+    return display;
+  }
+
+  int _visualRow(int linearPos) =>
+      linearPos <= 0 ? 0 : (linearPos - 1) ~/ _cols;
+
+  ({String ansi, int visibleLen}) _buildPrompt() {
+    final short = _shortCwd();
+    if (_lastExitCode == 0) {
+      final visible = '✓ $short \$ ';
+      return (
+        ansi: '\x1b[32m✓\x1b[0m \x1b[33m$short\x1b[0m \$ ',
+        visibleLen: visible.length,
+      );
+    } else {
+      final visible = '✗ $_lastExitCode $short \$ ';
+      return (
+        ansi: '\x1b[31m✗ $_lastExitCode\x1b[0m \x1b[33m$short\x1b[0m \$ ',
+        visibleLen: visible.length,
+      );
+    }
   }
 
   void _printPrompt() {
-    final statusBadge =
-        _lastExitCode == 0 ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗ $_lastExitCode\x1b[0m';
-    _emit('$statusBadge \x1b[36mmakaw\x1b[0m \x1b[33m${_shortCwd()}\x1b[0m \$ ');
+    final p = _buildPrompt();
+    _promptVisibleLen = p.visibleLen;
+    _renderedCursorRow = _visualRow(_promptVisibleLen);
+    _emit(p.ansi);
   }
 
-  void _redrawLine() {
+  /// Erases the prompt + all wrapped continuation rows cleanly and rewrites the
+  /// buffer, placing the cursor accurately even across row-wrap boundaries.
+  void _redrawLine({bool forceFromOrigin = false}) {
     final text = _line.toString();
-    _emit('\r\x1b[2K');
-    _printPrompt();
+    if (!forceFromOrigin) {
+      _emit('\r');
+      if (_renderedCursorRow > 0) {
+        _emit('\x1b[${_renderedCursorRow}A');
+      }
+      _emit('\x1b[J');
+    } else {
+      _emit('\r\x1b[J');
+    }
+
+    final p = _buildPrompt();
+    _promptVisibleLen = p.visibleLen;
+    _emit(p.ansi);
     _emit(text);
-    final back = text.length - _cursor;
-    if (back > 0) _emit('\x1b[${back}D');
+
+    final endLinear = _promptVisibleLen + text.length;
+    final endRow = _visualRow(endLinear);
+
+    if (_cursor == text.length) {
+      _renderedCursorRow = endRow;
+      return;
+    }
+
+    final targetLinear = _promptVisibleLen + _cursor;
+    final targetRow = targetLinear ~/ _cols;
+    final targetCol = targetLinear % _cols;
+    final up = endRow - targetRow;
+    if (up > 0) _emit('\x1b[${up}A');
+    _emit('\r');
+    if (targetCol > 0) _emit('\x1b[${targetCol}C');
+    _renderedCursorRow = targetRow;
+  }
+
+  void _moveCursor(int nextCursor) {
+    final clamped = nextCursor.clamp(0, _line.length);
+    if (clamped == _cursor) return;
+    final targetLinear = _promptVisibleLen + clamped;
+    final targetRow = targetLinear ~/ _cols;
+    final targetCol = targetLinear % _cols;
+    final deltaRow = targetRow - _renderedCursorRow;
+    if (deltaRow > 0) {
+      _emit('\x1b[${deltaRow}B');
+    } else if (deltaRow < 0) {
+      _emit('\x1b[${-deltaRow}A');
+    }
+    _emit('\r');
+    if (targetCol > 0) _emit('\x1b[${targetCol}C');
+    _cursor = clamped;
+    _renderedCursorRow = targetRow;
   }
 
   /// Processes raw terminal input sequences from `Terminal.onOutput`.
@@ -127,10 +227,15 @@ class MakawHybridShell {
       final ch = data[i];
       if (_inEsc) {
         _escBuf += ch;
-        // Wait for full CSI / SS3 sequence cleanly.
-        if (_escBuf == '[' || _escBuf == 'O') continue;
+        // Wait for complete CSI / SS3 sequences without swallowing Meta/normal text.
+        if ((_escBuf == '[' || _escBuf == 'O') && i + 1 < data.length) {
+          continue;
+        }
+        if ((_escBuf == '[' || _escBuf == 'O') && i + 1 >= data.length) {
+          continue;
+        }
         if (_escBuf.startsWith('[') &&
-            _escBuf.length < 6 &&
+            _escBuf.length < 8 &&
             !RegExp(r'[A-Za-z~]$').hasMatch(_escBuf)) {
           continue;
         }
@@ -145,24 +250,27 @@ class MakawHybridShell {
         _inEsc = true;
         _escBuf = '';
       } else if (ch == '\r' || ch == '\n') {
+        _moveCursor(_line.length);
         _emit('\r\n');
         final cmd = _line.toString();
         _line.clear();
         _cursor = 0;
+        _renderedCursorRow = 0;
         _historyIdx = -1;
         unawaited(_submitLine(cmd));
       } else if (ch == '\x03') {
         // Ctrl+C
+        _moveCursor(_line.length);
         _line.clear();
         _cursor = 0;
+        _renderedCursorRow = 0;
         _historyIdx = -1;
         _emit('^C\r\n');
         _printPrompt();
       } else if (ch == '\x0c') {
         // Ctrl+L
         _emit('\x1b[2J\x1b[H');
-        _printPrompt();
-        _emit(_line.toString());
+        reprintPrompt();
       } else if (ch == '\x04') {
         // Ctrl+D
         if (_line.isEmpty) {
@@ -173,6 +281,14 @@ class MakawHybridShell {
       } else if (ch == '\t') {
         _handleTabComplete();
       } else if (code == 127 || ch == '\b') {
+        // Guard against Android OEM keyboards firing dual KeyEvent + IME delete in <6ms.
+        final now = DateTime.now();
+        if (Platform.isAndroid &&
+            _lastBackspaceAt != null &&
+            now.difference(_lastBackspaceAt!).inMilliseconds < 6) {
+          continue;
+        }
+        _lastBackspaceAt = now;
         if (_cursor > 0) {
           final current = _line.toString();
           final updated =
@@ -189,6 +305,7 @@ class MakawHybridShell {
           _line.write(ch);
           _cursor++;
           _emit(ch);
+          _renderedCursorRow = _visualRow(_promptVisibleLen + _cursor);
         } else {
           final updated = current.substring(0, _cursor) +
               ch +
@@ -224,21 +341,13 @@ class MakawHybridShell {
         _replaceLine('');
       }
     } else if (seq == '[D') {
-      if (_cursor > 0) {
-        _cursor--;
-        _emit('\x1b[D');
-      }
+      _moveCursor(_cursor - 1);
     } else if (seq == '[C') {
-      if (_cursor < _line.length) {
-        _cursor++;
-        _emit('\x1b[C');
-      }
+      _moveCursor(_cursor + 1);
     } else if (seq == '[H' || seq == '[1~') {
-      _cursor = 0;
-      _redrawLine();
+      _moveCursor(0);
     } else if (seq == '[F' || seq == '[4~') {
-      _cursor = _line.length;
-      _redrawLine();
+      _moveCursor(_line.length);
     } else if (seq == '[3~') {
       // Forward delete
       final current = _line.toString();
@@ -266,20 +375,25 @@ class MakawHybridShell {
     final parts = before.split(RegExp(r'\s+'));
     final prefix = parts.last;
 
-    if (parts.length == 1 && !prefix.contains('/')) {
+    if (parts.length == 1 && !prefix.contains('/') && !prefix.contains(r'\')) {
       final matches = _builtInNames
           .where((n) => n.startsWith(prefix))
           .toList()
         ..sort();
       if (matches.length == 1) {
         final completion = '${matches.first} ';
-        _replaceLine(completion + _line.toString().substring(_cursor));
+        final rest = _line.toString().substring(_cursor);
+        _line
+          ..clear()
+          ..write('$completion$rest');
         _cursor = completion.length;
+        _redrawLine();
         return;
       }
       if (matches.length > 1) {
-        _emit('\r\n${matches.join('  ')}\r\n');
-        _redrawLine();
+        _moveCursor(_line.length);
+        _emit('\r\n${_formatCandidates(matches)}\r\n');
+        _redrawLine(forceFromOrigin: true);
         return;
       }
     }
@@ -311,9 +425,31 @@ class MakawHybridShell {
       _redrawLine();
     } else if (candidates.length > 1) {
       candidates.sort();
-      _emit('\r\n${candidates.join('  ')}\r\n');
-      _redrawLine();
+      _moveCursor(_line.length);
+      _emit('\r\n${_formatCandidates(candidates)}\r\n');
+      _redrawLine(forceFromOrigin: true);
     }
+  }
+
+  /// Wraps tab-completion items along item boundaries (never splitting filenames
+  /// mid-word across narrow mobile terminal rows).
+  String _formatCandidates(List<String> items) {
+    final buf = StringBuffer();
+    var col = 0;
+    final shown = items.take(40).toList();
+    for (final item in shown) {
+      final piece = '$item  ';
+      if (col > 0 && col + piece.length > _cols) {
+        buf.write('\r\n');
+        col = 0;
+      }
+      buf.write(piece);
+      col += piece.length;
+    }
+    if (items.length > shown.length) {
+      buf.write('\r\n… (+${items.length - shown.length} more)');
+    }
+    return buf.toString().trimRight();
   }
 
   void _interruptActiveChild() {
