@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:makaw/core/services/terminal_sessions_store.dart';
 import 'package:makaw/features/terminal/application/terminal_runtime_manager.dart';
 import 'package:makaw/features/terminal/data/makaw_hybrid_shell.dart';
+import 'package:makaw/features/terminal/data/sftp_bridge_service.dart';
 import 'package:makaw/features/terminal/data/shell_discovery.dart';
 import 'package:makaw/features/terminal/data/ssh_vault_service.dart';
 import 'package:makaw/features/terminal/domain/terminal_models.dart';
@@ -253,6 +254,42 @@ void main() {
       await tester.pump();
       expect(emitted, contains('\x03'));
       ctrl.dispose();
+    });
+  });
+
+  group('SftpBridgeService (Phase 2)', () {
+    test('normalizes POSIX remote paths regardless of client OS', () {
+      expect(SftpBridgeService.joinPosix('/', 'etc'), equals('/etc'));
+      expect(SftpBridgeService.joinPosix('/home/dev/', 'app.dart'),
+          equals('/home/dev/app.dart'));
+      expect(SftpBridgeService.joinPosix('/home/dev', '/tmp/a'),
+          equals('/tmp/a'));
+      expect(SftpBridgeService.parentPosix('/home/dev/app'), equals('/home/dev'));
+      expect(SftpBridgeService.parentPosix('/home'), equals('/'));
+      expect(SftpBridgeService.parentPosix('/'), equals('/'));
+    });
+
+    test('computes deterministic local mirror path & supports sftp command hook',
+        () async {
+      final host = SshHostProfile(
+        id: 'h1',
+        name: 'Dev VPS',
+        host: '10.0.0.8',
+        username: 'ubuntu',
+        createdAt: DateTime.now(),
+      );
+      final mirror =
+          SftpBridgeService.localMirrorPath('D:/tmp', host, '/var/www/index.js');
+      expect(mirror.replaceAll(r'\', '/'),
+          equals('D:/tmp/.makaw_sftp/10.0.0.8/var/www/index.js'));
+
+      String? capturedTarget;
+      final shell = MakawHybridShell(
+        onOpenSftp: (t) async => capturedTarget = t,
+      );
+      expect(await shell.executeLine('sftp ubuntu@10.0.0.8'), 0);
+      expect(capturedTarget, equals('ubuntu@10.0.0.8'));
+      shell.close();
     });
   });
 }

@@ -43,6 +43,7 @@ class MakawHybridShell {
 
   // Integration callbacks injected by TerminalRuntimeManager
   final Future<void> Function(String target)? onConnectSsh;
+  final Future<void> Function(String target)? onOpenSftp;
   final Future<void> Function(String shellQuery)? onSwitchShell;
   final Future<void> Function(String filePath)? onOpenFile;
   final Future<List<SshHostProfile>> Function()? onListSshHosts;
@@ -52,6 +53,7 @@ class MakawHybridShell {
   MakawHybridShell({
     String? initialCwd,
     this.onConnectSsh,
+    this.onOpenSftp,
     this.onSwitchShell,
     this.onOpenFile,
     this.onListSshHosts,
@@ -641,6 +643,9 @@ class MakawHybridShell {
 
       case 'ssh':
         return _cmdSsh(args, writeOut);
+
+      case 'sftp':
+        return _cmdSftp(args, writeOut);
 
       case 'open':
       case 'edit':
@@ -1338,6 +1343,20 @@ class MakawHybridShell {
     return _runNativePassthrough('ssh', args, writeOut);
   }
 
+  Future<int> _cmdSftp(List<String> args, void Function(String) writeOut) async {
+    if (args.isEmpty) {
+      await _cmdHosts(writeOut);
+      writeOut('Usage: sftp <saved-name | user@host[:port]>\n');
+      return 1;
+    }
+    if (onOpenSftp != null) {
+      await onOpenSftp!(args.join(' '));
+      return 0;
+    }
+    writeOut('Open the Hosts/SFTP menu in Terminal to browse remote files.\n');
+    return 1;
+  }
+
   Future<int> _cmdWhich(List<String> args, void Function(String) writeOut) async {
     if (args.isEmpty) return 1;
     final target = args.first;
@@ -1542,7 +1561,7 @@ class MakawHybridShell {
     'help', 'mk', 'clear', 'cls', 'exit', 'quit', 'pwd', 'cd', 'ls', 'dir',
     'tree', 'cat', 'head', 'tail', 'wc', 'touch', 'mkdir', 'cp', 'mv', 'rm',
     'stat', 'grep', 'find', 'zip', 'unzip', 'tar', 'curl', 'wget', 'git',
-    'hosts', 'ssh', 'open', 'edit', 'echo', 'env', 'export', 'unset', 'which',
+    'hosts', 'ssh', 'sftp', 'open', 'edit', 'echo', 'env', 'export', 'unset', 'which',
     'history', 'whoami', 'date', 'uname', 'bash', 'zsh', 'pwsh', 'powershell',
     'cmd', 'ubuntu', 'wsl',
   };
@@ -1553,7 +1572,7 @@ class MakawHybridShell {
                touch, mkdir [-p], cp [-r], mv, rm [-rf], stat, grep [-inr], find [-name]
   \x1b[33mArchives:\x1b[0m     zip <out.zip> <paths...>, unzip <file.zip> [-d dir], tar -xf
   \x1b[33mNetwork:\x1b[0m      curl [-I|-X|-H|-d|-o] <url>, wget [-O] <url>
-  \x1b[33mRemote/Git:\x1b[0m   hosts, ssh <name|user@host[:port]>, git <status|branch|remote>, open <file>
+  \x1b[33mRemote/Git:\x1b[0m   hosts, ssh <host>, sftp <host>, git <status|branch|remote>, open <file>
   \x1b[33mShell/Misc:\x1b[0m   pwsh, bash, zsh, ubuntu, wsl, env, export K=V, which, history, clear, exit
 ''';
 }

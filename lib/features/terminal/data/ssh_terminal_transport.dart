@@ -3,15 +3,81 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
-import 'package:xterm/xterm.dart';
 
 import '../domain/terminal_models.dart';
 import 'ssh_vault_service.dart';
 
+typedef VoidCallback = void Function();
+
+/// Shared SSH2 client connector used identically by both interactive terminal
+/// shells ([SshTerminalTransport]) and SFTP explorers ([SftpBridgeService]).
+class SshClientFactory {
+  SshClientFactory._();
+
+  static Future<SSHClient> connect({
+    required SshHostProfile host,
+    required SshVaultService vault,
+    Future<String?> Function(String prompt)? onPromptPassword,
+    void Function(String status)? onStatus,
+  }) async {
+    final secrets = await vault.readSecrets(host.id);
+    List<SSHKeyPair>? identities;
+    if (host.authMethod == 'key' &&
+        secrets.privateKeyPem != null &&
+        secrets.privateKeyPem!.isNotEmpty) {
+      try {
+        final encrypted = SSHKeyPair.isEncryptedPem(secrets.privateKeyPem!);
+        String? passphrase = secrets.passphrase;
+        if (encrypted && (passphrase == null || passphrase.isEmpty)) {
+          passphrase = await onPromptPassword
+              ?.call('Enter passphrase for ${host.name} key');
+        }
+        identities = SSHKeyPair.fromPem(secrets.privateKeyPem!, passphrase);
+      } catch (e) {
+        onStatus?.call('Failed to load key: $e');
+      }
+    }
+
+    final socket = await SSHSocket.connect(
+      host.host,
+      host.port,
+      timeout: const Duration(seconds: 12),
+    );
+
+    return SSHClient(
+      socket,
+      username: host.username,
+      identities: identities,
+      keepAliveInterval: const Duration(seconds: 15),
+      onPasswordRequest: () async {
+        if (secrets.password != null && secrets.password!.isNotEmpty) {
+          return secrets.password;
+        }
+        return onPromptPassword?.call('SSH password for ${host.displayTarget}');
+      },
+      onUserInfoRequest: (req) async {
+        if (req.prompts.isEmpty) return const [];
+        final answers = <String>[];
+        for (final p in req.prompts) {
+          if (secrets.password != null &&
+              secrets.password!.isNotEmpty &&
+              req.prompts.length == 1 &&
+              p.promptText.toLowerCase().contains('password')) {
+            answers.add(secrets.password!);
+          } else {
+            final v = await onPromptPassword?.call(p.promptText) ?? '';
+            answers.add(v);
+          }
+        }
+        return answers;
+      },
+    );
+  }
+}
+
 /// Cross-platform interactive SSH session powered by pure-Dart `dartssh2`.
 /// Works identically on Android, Windows, macOS, and Linux without requiring an
-/// external `ssh` OS binary. Supports password auth, encrypted/plain PEM keys,
-/// optional `tmux` auto-resume, initial remote directory `cd`, and terminal resize.
+/// external `ssh` OS binary.
 class SshTerminalTransport {
   final SshHostProfile host;
   final SshVaultService vault;
@@ -21,7 +87,8 @@ class SshTerminalTransport {
   SSHSession? _shell;
   bool _closed = false;
 
-  bool get isConnected => _client != null && !(_client!.isClosed) && _shell != null;
+  bool get isConnected =>
+      _client != null && !(_client!.isClosed) && _shell != null;
 
   SshTerminalTransport({
     required this.host,
@@ -29,75 +96,29 @@ class SshTerminalTransport {
     this.onPromptPassword,
   });
 
-  /// Connects and attaches an interactive PTY shell to [terminal], returning a
-  /// status message if connection setup failed.
+  /// Connects and attaches an interactive PTY shell to [terminal].
   Future<bool> attach(
-    Terminal terminal, {
+    dynamic terminal, {
     VoidCallback? onConnected,
     void Function(String reason)? onDisconnected,
   }) async {
     try {
       terminal.write(
           '\x1b[38;5;45m[SSH] Connecting to ${host.displayTarget}...\x1b[0m\r\n');
-      final secrets = await vault.readSecrets(host.id);
-      List<SSHKeyPair>? identities;
-      if (host.authMethod == 'key' &&
-          secrets.privateKeyPem != null &&
-          secrets.privateKeyPem!.isNotEmpty) {
-        try {
-          final encrypted = SSHKeyPair.isEncryptedPem(secrets.privateKeyPem!);
-          String? passphrase = secrets.passphrase;
-          if (encrypted && (passphrase == null || passphrase.isEmpty)) {
-            passphrase = await onPromptPassword
-                ?.call('Enter passphrase for ${host.name} key');
-          }
-          identities = SSHKeyPair.fromPem(secrets.privateKeyPem!, passphrase);
-        } catch (e) {
-          terminal.write('\x1b[31m[SSH] Failed to load key: $e\x1b[0m\r\n');
-        }
-      }
-
-      final socket = await SSHSocket.connect(
-        host.host,
-        host.port,
-        timeout: const Duration(seconds: 12),
-      );
-
-      final client = SSHClient(
-        socket,
-        username: host.username,
-        identities: identities,
-        keepAliveInterval: const Duration(seconds: 15),
-        onPasswordRequest: () async {
-          if (secrets.password != null && secrets.password!.isNotEmpty) {
-            return secrets.password;
-          }
-          return onPromptPassword?.call('SSH password for ${host.displayTarget}');
-        },
-        onUserInfoRequest: (req) async {
-          if (req.prompts.isEmpty) return const [];
-          final answers = <String>[];
-          for (final p in req.prompts) {
-            if (secrets.password != null &&
-                secrets.password!.isNotEmpty &&
-                req.prompts.length == 1 &&
-                p.promptText.toLowerCase().contains('password')) {
-              answers.add(secrets.password!);
-            } else {
-              final v = await onPromptPassword?.call(p.promptText) ?? '';
-              answers.add(v);
-            }
-          }
-          return answers;
-        },
+      final client = await SshClientFactory.connect(
+        host: host,
+        vault: vault,
+        onPromptPassword: onPromptPassword,
+        onStatus: (msg) =>
+            terminal.write('\x1b[31m[SSH] $msg\x1b[0m\r\n'),
       );
       _client = client;
 
       final shell = await client.shell(
         pty: SSHPtyConfig(
           type: 'xterm-256color',
-          width: terminal.viewWidth.clamp(40, 240),
-          height: terminal.viewHeight.clamp(12, 120),
+          width: (terminal.viewWidth as int).clamp(40, 240),
+          height: (terminal.viewHeight as int).clamp(12, 120),
         ),
       );
       _shell = shell;
@@ -119,19 +140,19 @@ class SshTerminalTransport {
         if (!_closed) terminal.write(chunk);
       });
 
-      terminal.onOutput = (data) {
+      terminal.onOutput = (String data) {
         if (!_closed) {
           shell.write(Uint8List.fromList(utf8.encode(data)));
         }
       };
 
-      // Optional remote directory jump & tmux auto-attach for seamless continuity.
       if (host.defaultRemoteDir.isNotEmpty) {
         final safeDir = host.defaultRemoteDir.replaceAll("'", r"'\''");
         shell.write(Uint8List.fromList(utf8.encode("cd '$safeDir'\n")));
       }
       if (host.autoTmux) {
-        final tmuxName = host.tmuxSession.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+        final tmuxName =
+            host.tmuxSession.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
         shell.write(Uint8List.fromList(utf8.encode(
             'command -v tmux >/dev/null 2>&1 && tmux new -As $tmuxName\n')));
       }
@@ -173,5 +194,3 @@ class SshTerminalTransport {
     _client = null;
   }
 }
-
-typedef VoidCallback = void Function();

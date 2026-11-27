@@ -10,11 +10,13 @@ import '../../domain/terminal_models.dart';
 class SshHostsSheet extends StatefulWidget {
   final SshVaultService vault;
   final void Function(SshHostProfile host) onConnect;
+  final void Function(SshHostProfile host)? onBrowseSftp;
 
   const SshHostsSheet({
     super.key,
     required this.vault,
     required this.onConnect,
+    this.onBrowseSftp,
   });
 
   @override
@@ -203,6 +205,16 @@ class _SshHostsSheetState extends State<SshHostsSheet> {
                               tooltip: 'Edit',
                               onPressed: () => _openEditor(h),
                             ),
+                            if (widget.onBrowseSftp != null)
+                              IconButton(
+                                icon: const Icon(Icons.folder_shared_outlined,
+                                    color: Color(0xFF38BDF8), size: 18),
+                                tooltip: 'Browse SFTP Files',
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                  widget.onBrowseSftp!(h);
+                                },
+                              ),
                             IconButton(
                               icon: const Icon(Icons.delete_outline,
                                   color: Color(0xFFF87171), size: 18),

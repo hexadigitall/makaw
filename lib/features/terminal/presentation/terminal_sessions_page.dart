@@ -13,6 +13,7 @@ import '../../../core/ui/makaw_toast.dart';
 import '../../../core/widgets/widgets.dart';
 import '../application/terminal_runtime_manager.dart';
 import '../domain/terminal_models.dart';
+import 'widgets/sftp_browser_sheet.dart';
 import 'widgets/ssh_hosts_sheet.dart';
 import 'widgets/terminal_soft_keyboard.dart';
 
@@ -43,6 +44,7 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
   void initState() {
     super.initState();
     _mgr.onPromptPassword = _promptSecret;
+    _mgr.onOpenSftp = _openSftpForHost;
     _mgr.addListener(_onManagerChanged);
     unawaited(_mgr.ensureInitialized(requestedSessionId: widget.initialSessionId));
   }
@@ -51,6 +53,7 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
   void dispose() {
     _clearSearchHighlights();
     _mgr.onPromptPassword = null;
+    _mgr.onOpenSftp = null;
     _mgr.removeListener(_onManagerChanged);
     _nameCtrl.dispose();
     _searchCtrl.dispose();
@@ -217,8 +220,38 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
       builder: (_) => SshHostsSheet(
         vault: _mgr.sshVault,
         onConnect: (host) => unawaited(_mgr.createSshSession(host)),
+        onBrowseSftp: (host) => unawaited(_openSftpForHost(host)),
       ),
     );
+  }
+
+  Future<void> _openSftpForHost(SshHostProfile host) async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF090D16),
+      builder: (_) => SftpBrowserSheet(
+        host: host,
+        vault: _mgr.sshVault,
+        onOpenInTerminal: (remoteDir) => unawaited(
+          _mgr.createSshSession(host.copyWith(defaultRemoteDir: remoteDir)),
+        ),
+      ),
+    );
+  }
+
+  void _openSftpForActiveOrVault() {
+    final active = _mgr.activeSession;
+    if (active?.targetType == 'ssh' && active?.hostId != null) {
+      final host = _mgr.sshVault.findByIdOrName(active!.hostId!);
+      if (host != null) {
+        unawaited(_openSftpForHost(host));
+        return;
+      }
+    }
+    _openHostsSheet();
   }
 
   void _openAppearanceSheet() {
@@ -523,6 +556,13 @@ class _TerminalSessionsPageState extends ConsumerState<TerminalSessionsPage> {
               onPressed: _openAppearanceSheet,
             ),
           ],
+          if (active?.targetType == 'ssh')
+            IconButton(
+              icon: const Icon(Icons.folder_shared_outlined,
+                  color: Color(0xFF34D399), size: 20),
+              tooltip: 'Browse Remote SFTP Files',
+              onPressed: _openSftpForActiveOrVault,
+            ),
           IconButton(
             icon: const Icon(Icons.dns_outlined, color: Color(0xFF38BDF8), size: 20),
             tooltip: 'SSH Hosts & Keys',

@@ -148,6 +148,9 @@ class TerminalRuntimeManager extends ChangeNotifier {
   /// Optional file opener callback (`open <file>` from `makaw-sh`).
   Future<void> Function(String filePath)? onOpenFile;
 
+  /// Optional SFTP explorer trigger (`sftp <host>` from `makaw-sh`).
+  Future<void> Function(SshHostProfile host)? onOpenSftp;
+
   TerminalRuntimeManager({
     TerminalSessionsStore? store,
     SshVaultService? sshVault,
@@ -399,6 +402,29 @@ class TerminalRuntimeManager extends ChangeNotifier {
         }
       },
       onOpenFile: (path) async => onOpenFile?.call(path),
+      onOpenSftp: (target) async {
+        final saved = sshVault.findByIdOrName(target);
+        if (saved != null) {
+          await onOpenSftp?.call(saved);
+          return;
+        }
+        final parsed = SshHostProfile.parseTarget(target);
+        if (parsed == null) {
+          rt.terminal.write(
+              '\x1b[31mInvalid SFTP target "$target". Try sftp <saved-name | user@host[:port]>.\x1b[0m\r\n');
+          return;
+        }
+        final adhoc = await sshVault.saveHost(SshHostProfile(
+          id: '',
+          name: parsed.host,
+          host: parsed.host,
+          port: parsed.port,
+          username: parsed.username,
+          authMethod: 'password',
+          createdAt: DateTime.now(),
+        ));
+        await onOpenSftp?.call(adhoc);
+      },
       onCwdChanged: (newCwd) {
         rt.cwd = newCwd;
         unawaited(store.updateMeta(rt.id, cwd: newCwd));

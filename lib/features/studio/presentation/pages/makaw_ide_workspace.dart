@@ -22,7 +22,9 @@ import '../../data/integration_helpers.dart';
 import '../../data/studio_project.dart';
 import '../../data/terminal_engine.dart';
 import '../../data/git_service.dart';
+import '../../../terminal/data/ssh_vault_service.dart';
 import '../../../terminal/domain/terminal_models.dart';
+import '../../../terminal/presentation/widgets/sftp_browser_sheet.dart';
 import '../widgets/git_diff_viewer.dart';
 import '../widgets/project_tree_view.dart';
 import '../widgets/source_control_panel.dart';
@@ -968,6 +970,56 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
         ctrl.dispose();
         return pw;
       },
+    );
+  }
+
+  /// Opens the pure-Dart SFTP Explorer & Remote Editor for a configured host.
+  Future<void> _openSftpBrowserDialog() async {
+    if (_settings.remoteHosts.isEmpty) {
+      _showIdeToast('No remote hosts configured — add one in Integrations');
+      _showIntegrationsDialog();
+      return;
+    }
+    final host = await showDialog<RemoteHost>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Browse SFTP Remote Files',
+            style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF16263F),
+        children: [
+          for (final h in _settings.remoteHosts)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, h),
+              child: Text('${h.user}@${h.host}:${h.port}',
+                  style: const TextStyle(color: Colors.white)),
+            ),
+        ],
+      ),
+    );
+    if (host == null || !mounted) return;
+    final profile = SshHostProfile(
+      id: 'ide_${host.host}_${host.port}',
+      name: host.name.isEmpty ? host.target : host.name,
+      host: host.host,
+      port: int.tryParse(host.port) ?? 22,
+      username: host.user.isEmpty ? 'root' : host.user,
+      createdAt: DateTime.now(),
+    );
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF090D16),
+      builder: (_) => SftpBrowserSheet(
+        host: profile,
+        vault: SshVaultService(),
+        onOpenInTerminal: (remoteDir) {
+          _terminalEngine.startSshSession(
+            profile.copyWith(defaultRemoteDir: remoteDir),
+          );
+          if (!_showDesktopTerminal) setState(() => _showDesktopTerminal = true);
+        },
+      ),
     );
   }
 
@@ -2167,6 +2219,7 @@ class _MakawIdeWorkspaceState extends State<MakawIdeWorkspace> {
                           ('Restart Shell', Icons.restart_alt, _restartTerminal),
                           ('WSL Shell…', Icons.terminal, _openWslShellDialog),
                           ('SSH Remote…', Icons.router, _openSshShellDialog),
+                          ('Remote SFTP Files…', Icons.folder_shared_outlined, _openSftpBrowserDialog),
                           ('Docker Attach…', Icons.apps, _openDockerAttachDialog),
                           ('Clear', Icons.delete_outline, _terminalEngine.clearDisplay),
                           ('Interrupt', Icons.stop, _terminalEngine.interrupt),
